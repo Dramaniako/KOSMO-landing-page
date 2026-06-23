@@ -1,0 +1,32 @@
+[
+  {
+    "id": "rev-01",
+    "propertyId": "prop-01",
+    "propertyName": "KOSMO Hub Denpasar",
+    "userId": "user-tenant",
+    "userName": "Bayu",
+    "rating": 5,
+    "comment": "Sangat nyaman dan lokasinya sangat strategis di Denpasar! Internetnya cepat banget cocok buat WFH.",
+    "date": "15 Jun 2026"
+  },
+  {
+    "id": "rev-02",
+    "propertyId": "prop-01",
+    "propertyName": "KOSMO Hub Denpasar",
+    "userId": "user-other",
+    "userName": "Budi",
+    "rating": 4,
+    "comment": "Fasilitas lengkap dan bersih, parkirannya luas. Hanya saja jalan di depan agak macet kalau sore.",
+    "date": "10 Jun 2026"
+  },
+  {
+    "id": "rev-03",
+    "propertyId": "prop-02",
+    "propertyName": "KOSMO Hub Seminyak",
+    "userId": "user-tenant",
+    "userName": "Bayu",
+    "rating": 5,
+    "comment": "Keren banget kolam renangnya! Kamar bersih dan smart lock-nya aman sekali.",
+    "date": "18 Jun 2026"
+  }
+]

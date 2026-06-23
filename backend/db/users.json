@@ -1,0 +1,37 @@
+[
+  {
+    "id": "user-admin",
+    "email": "admin@kosmo.com",
+    "password": "admin",
+    "name": "Admin Landlord",
+    "role": "admin",
+    "balance": 650000,
+    "totalRevenue": 1650000,
+    "totalWithdrawn": 1000000,
+    "bankName": "BCA",
+    "bankAccountNumber": "1234567890",
+    "bankAccountHolder": "Admin Landlord",
+    "withdrawals": [
+      {
+        "id": "w-01",
+        "bankName": "BCA",
+        "accountNumber": "1234567890",
+        "amount": 1000000,
+        "date": "3 Jun 2026",
+        "status": "Selesai"
+      }
+    ]
+  },
+  {
+    "id": "user-tenant",
+    "email": "tenant@kosmo.com",
+    "password": "tenant",
+    "name": "Bayu",
+    "role": "tenant",
+    "phone": "+62 812-3456-7890",
+    "paymentMethod": "Kartu Kredit, Virtual Account",
+    "avatar": "/images/profiles/bayu.png",
+    "notifications": true,
+    "language": "Indonesia"
+  }
+]

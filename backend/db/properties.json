@@ -1,0 +1,68 @@
+[
+  {
+    "id": "prop-01",
+    "name": "KOSMO Hub Denpasar",
+    "district": "Denpasar",
+    "address": "Jl. Teuku Umar No. 14, Denpasar, Bali",
+    "price": 3500000,
+    "rating": 4.7,
+    "image": "https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=800&q=80",
+    "description": "Modern co-living space di Denpasar dengan konsep smart home. Dilengkapi dengan communal area luas, rooftop area, cafe, gym kecil, dan coworking space untuk penghuni. Fasilitas smart lock, AC, smart TV.",
+    "facilities": [
+      "Wifi",
+      "AC",
+      "Parkir",
+      "Kebersihan"
+    ],
+    "latitude": "-8.6725",
+    "longitude": "115.2166",
+    "totalRooms": 10,
+    "occupiedRooms": 8,
+    "ownerId": "user-admin",
+    "document": "sertifikat_denpasar.pdf"
+  },
+  {
+    "id": "prop-02",
+    "name": "KOSMO Hub Seminyak",
+    "district": "Badung",
+    "address": "Jl. Sunset Road No. 88, Badung, Bali",
+    "price": 4500000,
+    "rating": 4.8,
+    "image": "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=800&q=80",
+    "description": "Premium co-living space di Seminyak dekat pantai. Sangat cocok untuk digital nomad dengan internet super cepat, area kerja nyaman, kolam renang, dan parkir luas.",
+    "facilities": [
+      "Wifi",
+      "AC",
+      "Parkir",
+      "Kebersihan",
+      "Kolam renang"
+    ],
+    "latitude": "-8.6913",
+    "longitude": "115.1682",
+    "totalRooms": 8,
+    "occupiedRooms": 5,
+    "ownerId": "user-admin",
+    "document": "sertifikat_seminyak.pdf"
+  },
+  {
+    "id": "prop-03",
+    "name": "KOSMO Hub Ubud",
+    "district": "Gianyar",
+    "address": "Jl. Raya Ubud No. 12, Gianyar, Bali",
+    "price": 2500000,
+    "rating": 4.5,
+    "image": "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=800&q=80",
+    "description": "Co-living asri di Ubud yang dikelilingi sawah. Dilengkapi dengan kitchen bersama, yoga shala, dan suasana tenang untuk fokus bekerja atau bersantai.",
+    "facilities": [
+      "Wifi",
+      "AC",
+      "Kebersihan"
+    ],
+    "latitude": "-8.5069",
+    "longitude": "115.2625",
+    "totalRooms": 12,
+    "occupiedRooms": 6,
+    "ownerId": "user-admin",
+    "document": "sertifikat_ubud.pdf"
+  }
+]
