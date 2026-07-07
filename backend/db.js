@@ -1,35 +1,62 @@
 import mysql from 'mysql2/promise';
+import fs from 'fs';
+import path from 'path';
 
-
-let baseConnection;
+// Load .env locally if it exists
 try {
-  baseConnection = await mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: ''
-  });
-  await baseConnection.query('CREATE DATABASE IF NOT EXISTS Kosmo;');
-} catch (err) {
-  console.error("Failed to connect to base MySQL server. Make sure MySQL service is running.", err);
-} finally {
-  if (baseConnection) await baseConnection.end();
+  const envPath = path.resolve('.env');
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    envContent.split(/\r?\n/).forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const [key, ...valParts] = trimmed.split('=');
+      if (key && valParts.length > 0) {
+        process.env[key.trim()] = valParts.join('=').trim();
+      }
+    });
+  }
+} catch (e) {
+  console.warn("Failed to load .env file:", e);
 }
 
-
-export const pool = mysql.createPool({
-  host: 'localhost',
-  user: 'root',
-  password: '',
-  database: 'Kosmo',
+const dbConfig = {
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT || '15616'),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME || 'defaultdb',
+  ssl: {
+    rejectUnauthorized: false
+  },
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
-});
+};
+
+// Only attempt database creation if host is localhost/127.0.0.1
+if (dbConfig.host === 'localhost' || dbConfig.host === '127.0.0.1') {
+  let baseConnection;
+  try {
+    baseConnection = await mysql.createConnection({
+      host: dbConfig.host,
+      user: dbConfig.user,
+      password: dbConfig.password
+    });
+    await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\`;`);
+  } catch (err) {
+    console.error("Failed to connect to base MySQL server. Make sure MySQL service is running.", err);
+  } finally {
+    if (baseConnection) await baseConnection.end();
+  }
+}
+
+export const pool = mysql.createPool(dbConfig);
 
 
 export async function initDb() {
   try {
-    
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(50) PRIMARY KEY,
@@ -109,6 +136,16 @@ export async function initDb() {
         date VARCHAR(50) NOT NULL,
         status VARCHAR(20) NOT NULL,
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // 6. Visitor tracking table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS visitor_tracking (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ip_address VARCHAR(50),
+        user_agent VARCHAR(255),
+        visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 

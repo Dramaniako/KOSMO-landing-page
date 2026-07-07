@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Search, MapPin, Star, Wifi, Tv, Wind, Shield, 
   Droplet, Check, X, ArrowRight, ShieldCheck, Heart,
-  Zap, Sparkles, Car
+  Zap, Sparkles, Car, Download
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -34,6 +34,8 @@ export default function LandingPage() {
   useEffect(() => {
     fetchProperties();
     fetchReviews();
+    // Track visitor
+    fetch(`${API_BASE}/tracking/visit`, { method: 'POST' }).catch(() => {});
   }, []);
 
   const fetchProperties = async (queryParams = '') => {
@@ -146,18 +148,41 @@ export default function LandingPage() {
             <li><a href="#" className="nav-link active" onClick={(e) => { e.preventDefault(); resetFilters(); }}>Cari Properti</a></li>
             {currentUser ? (
               <>
-                <li>
-                  <a 
-                    href="#" 
-                    className="nav-link" 
-                    onClick={(e) => { 
-                      e.preventDefault(); 
-                      navigate(currentUser.role === 'admin' ? '/admin' : '/tenant'); 
-                    }}
-                  >
-                    Dashboard ({currentUser.name})
-                  </a>
-                </li>
+                {currentUser.role === 'landlord' ? (
+                  <>
+                    <li>
+                      <a 
+                        href="#" 
+                        className="nav-link" 
+                        onClick={(e) => { e.preventDefault(); navigate('/tenant'); }}
+                      >
+                        Sesi Penyewa
+                      </a>
+                    </li>
+                    <li>
+                      <a 
+                        href="#" 
+                        className="nav-link" 
+                        onClick={(e) => { e.preventDefault(); navigate('/landlord'); }}
+                      >
+                        Sesi Landlord
+                      </a>
+                    </li>
+                  </>
+                ) : (
+                  <li>
+                    <a 
+                      href="#" 
+                      className="nav-link" 
+                      onClick={(e) => { 
+                        e.preventDefault(); 
+                        navigate(currentUser.role === 'admin' ? '/admin' : '/tenant'); 
+                      }}
+                    >
+                      Dashboard ({currentUser.name})
+                    </a>
+                  </li>
+                )}
                 <li>
                   <button 
                     className="btn btn-outline" 
@@ -188,6 +213,22 @@ export default function LandingPage() {
           <p className="hero-desc">
             fasilitas all-inclusive dan gak bikin ribet di kantong.
           </p>
+          <a 
+            href="https://drive.google.com/drive/folders/YOUR_FOLDER_ID" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="btn btn-primary"
+            style={{ 
+              display: 'inline-flex', alignItems: 'center', gap: '8px',
+              marginTop: '16px', padding: '12px 28px', fontSize: '1rem',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              border: 'none', borderRadius: '12px', color: '#fff',
+              boxShadow: '0 4px 20px rgba(99,102,241,0.4)',
+              textDecoration: 'none', cursor: 'pointer'
+            }}
+          >
+            <Download size={20} /> Unduh Aplikasi Mobile
+          </a>
         </div>
       </header>
 

@@ -2,18 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Users, Building, Star, Trash2, Edit, Plus, LogOut, 
-  UserPlus, Mail, ShieldAlert, Key, Phone, LayoutDashboard, Globe, MessageSquare
+  UserPlus, Mail, ShieldAlert, Key, Phone, LayoutDashboard, Globe, MessageSquare,
+  BarChart3, Eye, Download
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('users'); // users, properties, reviews
+  const [activeTab, setActiveTab] = useState('users'); // users, properties, reviews, tracking
   const [users, setUsers] = useState([]);
   const [properties, setProperties] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState(null);
 
   // Modals
   const [showUserModal, setShowUserModal] = useState(false);
@@ -70,7 +72,18 @@ export default function AdminDashboard() {
       return;
     }
     fetchData();
+    fetchStats();
   }, [navigate]);
+
+  const fetchStats = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/stats`);
+      const data = await res.json();
+      setStats(data);
+    } catch (err) {
+      console.error('Error loading stats:', err);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -384,6 +397,15 @@ export default function AdminDashboard() {
                 Manajemen Review
               </button>
             </li>
+            <li>
+              <button 
+                className={`sidebar-link ${activeTab === 'tracking' ? 'active' : ''}`}
+                onClick={() => setActiveTab('tracking')}
+              >
+                <BarChart3 size={18} />
+                Tracking Pengunjung
+              </button>
+            </li>
           </ul>
         </div>
 
@@ -591,6 +613,54 @@ export default function AdminDashboard() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* TRACKING TAB */}
+            {activeTab === 'tracking' && (
+              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+                <div className="flex-between" style={{ marginBottom: '24px' }}>
+                  <h3 style={{ fontSize: '20px' }}>Tracking Pengunjung Website</h3>
+                  <a 
+                    href={`${API_BASE}/reports/tracking/excel`}
+                    className="btn btn-primary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
+                  >
+                    <Download size={16} /> Unduh Laporan Excel
+                  </a>
+                </div>
+
+                {stats ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+                    <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', color: 'white', borderRadius: '16px' }}>
+                      <Eye size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                      <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalVisitors}</p>
+                      <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Pengunjung Website</p>
+                    </div>
+                    <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)', color: 'white', borderRadius: '16px' }}>
+                      <Users size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                      <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalUsers}</p>
+                      <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Pengguna Terdaftar</p>
+                    </div>
+                    <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)', color: 'white', borderRadius: '16px' }}>
+                      <Key size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                      <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalLandlords}</p>
+                      <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Landlord</p>
+                    </div>
+                    <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)', color: 'white', borderRadius: '16px' }}>
+                      <Building size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                      <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalProperties}</p>
+                      <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Properti</p>
+                    </div>
+                    <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)', color: 'white', borderRadius: '16px' }}>
+                      <LayoutDashboard size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                      <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalRooms}</p>
+                      <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Kamar</p>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-muted)' }}>Memuat statistik...</p>
+                )}
               </div>
             )}
           </>

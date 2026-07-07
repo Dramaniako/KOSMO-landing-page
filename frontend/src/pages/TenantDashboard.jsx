@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   User, CreditCard, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
-  Plus, LogOut, CheckCircle, Shield, Phone, Globe, MessageSquare 
+  Plus, LogOut, CheckCircle, Shield, Phone, Globe, MessageSquare, Building
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
 
 export default function TenantDashboard() {
   const navigate = useNavigate();
@@ -37,7 +37,7 @@ export default function TenantDashboard() {
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem('user'));
-    if (!user || user.role !== 'tenant') {
+    if (!user || (user.role !== 'tenant' && user.role !== 'landlord')) {
       navigate('/login');
       return;
     }
@@ -230,6 +230,18 @@ export default function TenantDashboard() {
                 Ulasan Saya
               </button>
             </li>
+            {currentUser.role === 'landlord' && (
+              <li>
+                <button 
+                  className="sidebar-link"
+                  style={{ color: 'var(--primary)' }}
+                  onClick={() => navigate('/landlord')}
+                >
+                  <Building size={18} />
+                  Sesi Landlord
+                </button>
+              </li>
+            )}
           </ul>
         </div>
 

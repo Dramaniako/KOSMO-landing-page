@@ -1,7 +1,35 @@
 import express from 'express';
 import { pool } from './db.js';
+import XLSX from 'xlsx';
+import multer from 'multer';
+import path from 'path';
 
 const router = express.Router();
+
+// Multer File Upload configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
+// Generic Upload endpoint
+router.post('/upload', upload.single('image'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'Tidak ada file yang diunggah.' });
+  }
+  const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+  res.json({ url: fileUrl });
+});
 
 // ID Generator
 const generateId = (prefix) => `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
@@ -620,6 +648,153 @@ router.post('/withdraw', async (req, res) => {
     res.status(500).json({ message: "Gagal memproses penarikan dana." });
   } finally {
     connection.release();
+  }
+});
+
+// ==========================================
+// Tracking & Admin Stats API
+// ==========================================
+router.post('/tracking/visit', async (req, res) => {
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+  const userAgent = req.headers['user-agent'] || '';
+  try {
+    await pool.query(
+      'INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)',
+      [ip, userAgent]
+    );
+    res.status(201).json({ message: "Kunjungan berhasil dilacak." });
+  } catch (err) {
+    console.error("Tracking error:", err);
+    res.status(500).json({ message: "Gagal melacak kunjungan." });
+  }
+});
+
+router.get('/admin/stats', async (req, res) => {
+  try {
+    const [[visitorRow]] = await pool.query('SELECT COUNT(*) as count FROM visitor_tracking');
+    const totalVisitors = visitorRow.count;
+
+    const [[userRow]] = await pool.query('SELECT COUNT(*) as count FROM users');
+    const totalUsers = userRow.count;
+
+    const [[landlordRow]] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
+    const totalLandlords = landlordRow.count;
+
+    const [[propertyRow]] = await pool.query('SELECT COUNT(*) as count FROM properties');
+    const totalProperties = propertyRow.count;
+
+    const [[roomsRow]] = await pool.query('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
+    const totalRooms = roomsRow.sum || 0;
+
+    res.json({
+      totalVisitors,
+      totalUsers,
+      totalLandlords,
+      totalProperties,
+      totalRooms
+    });
+  } catch (err) {
+    console.error("Admin stats error:", err);
+    res.status(500).json({ message: "Gagal mengambil statistik admin." });
+  }
+});
+
+// ==========================================
+// Excel Report Endpoints
+// ==========================================
+router.get('/reports/tracking/excel', async (req, res) => {
+  try {
+    const [[visitorRow]] = await pool.query('SELECT COUNT(*) as count FROM visitor_tracking');
+    const [[userRow]] = await pool.query('SELECT COUNT(*) as count FROM users');
+    const [[landlordRow]] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
+    const [[propertyRow]] = await pool.query('SELECT COUNT(*) as count FROM properties');
+    const [[roomsRow]] = await pool.query('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
+
+    const [visitors] = await pool.query('SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000');
+    const [users] = await pool.query('SELECT id, email, name, role, phone FROM users ORDER BY id DESC');
+
+    const wb = XLSX.utils.book_new();
+
+    // Summary sheet
+    const summaryData = [
+      ['Metrik', 'Jumlah'],
+      ['Total Pengunjung Website', visitorRow.count],
+      ['Total Pengguna Terdaftar', userRow.count],
+      ['Total Landlord', landlordRow.count],
+      ['Total Properti', propertyRow.count],
+      ['Total Kamar', roomsRow.sum || 0]
+    ];
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan');
+
+    // Visitor details sheet
+    const visitorData = [['IP Address', 'User Agent', 'Waktu Kunjungan']];
+    visitors.forEach(v => visitorData.push([v.ip_address, v.user_agent, v.visited_at ? new Date(v.visited_at).toLocaleString('id-ID') : '']));
+    const visitorSheet = XLSX.utils.aoa_to_sheet(visitorData);
+    XLSX.utils.book_append_sheet(wb, visitorSheet, 'Pengunjung');
+
+    // Users sheet
+    const userData = [['ID', 'Email', 'Nama', 'Role', 'Telepon']];
+    users.forEach(u => userData.push([u.id, u.email, u.name, u.role, u.phone]));
+    const userSheet = XLSX.utils.aoa_to_sheet(userData);
+    XLSX.utils.book_append_sheet(wb, userSheet, 'Pengguna');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', 'attachment; filename=laporan_tracking_kosmo.xlsx');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    console.error('Excel tracking report error:', err);
+    res.status(500).json({ message: 'Gagal menghasilkan laporan Excel.' });
+  }
+});
+
+router.get('/reports/landlord/excel', async (req, res) => {
+  const { landlordId } = req.query;
+  if (!landlordId) return res.status(400).json({ message: 'landlordId diperlukan.' });
+  try {
+    const parsedId = parseInt(landlordId) || 0;
+    const [[landlord]] = await pool.query('SELECT * FROM users WHERE id = ? OR id_int = ?', [landlordId, parsedId]);
+    if (!landlord) return res.status(404).json({ message: 'Landlord tidak ditemukan.' });
+
+    const [properties] = await pool.query('SELECT * FROM properties WHERE ownerId = ?', [landlord.id]);
+    const [transactions] = await pool.query(
+      `SELECT t.*, p.name as propertyName FROM transactions t 
+       JOIN properties p ON t.property_id = p.id_int 
+       WHERE p.ownerId = ? ORDER BY t.date_str DESC`, [landlord.id]
+    );
+
+    const wb = XLSX.utils.book_new();
+
+    // Financial Summary sheet
+    const summaryData = [
+      ['Laporan Keuangan Landlord'],
+      ['Nama', landlord.name],
+      ['Email', landlord.email],
+      ['Total Pendapatan', landlord.totalRevenue || 0],
+      ['Total Penarikan', landlord.totalWithdrawn || 0],
+      ['Saldo', landlord.balance || 0],
+      [''],
+      ['Ringkasan Properti'],
+      ['Nama Properti', 'Lokasi', 'Harga', 'Total Kamar', 'Kamar Tersedia']
+    ];
+    properties.forEach(p => summaryData.push([p.name, p.location, p.price, p.totalRooms, p.availableRooms]));
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan Keuangan');
+
+    // Transactions sheet
+    const txData = [['ID Transaksi', 'Properti', 'Tanggal', 'Jumlah', 'Status']];
+    transactions.forEach(t => txData.push([t.invoice_number, t.propertyName, t.date_str, t.amount, t.status]));
+    const txSheet = XLSX.utils.aoa_to_sheet(txData);
+    XLSX.utils.book_append_sheet(wb, txSheet, 'Transaksi');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename=laporan_keuangan_${landlord.name.replace(/\s+/g, '_')}.xlsx`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    console.error('Excel landlord report error:', err);
+    res.status(500).json({ message: 'Gagal menghasilkan laporan Excel.' });
   }
 });
 

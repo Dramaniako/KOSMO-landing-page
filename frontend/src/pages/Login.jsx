@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Mail, Lock, User, Phone, ArrowLeft } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -182,40 +182,7 @@ export default function Login() {
           </button>
         </form>
 
-        {/* Quick Demo Autofills */}
-        {isLogin && (
-          <div style={{ marginTop: '24px', borderTop: '1px dashed var(--border-color)', paddingTop: '20px' }}>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '10px', textAlign: 'center', fontWeight: 600 }}>
-              Uji Coba Demo:
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-              <button 
-                type="button" 
-                className="btn btn-outline" 
-                style={{ padding: '8px 2px', fontSize: '11px' }}
-                onClick={() => handleAutofill('tenant')}
-              >
-                Tenant (Bayu)
-              </button>
-              <button 
-                type="button" 
-                className="btn btn-outline" 
-                style={{ padding: '8px 2px', fontSize: '11px' }}
-                onClick={() => handleAutofill('landlord')}
-              >
-                Landlord
-              </button>
-              <button 
-                type="button" 
-                className="btn btn-outline" 
-                style={{ padding: '8px 2px', fontSize: '11px' }}
-                onClick={() => handleAutofill('admin')}
-              >
-                Super Admin
-              </button>
-            </div>
-          </div>
-        )}
+
 
         <div style={{ marginTop: '24px', textAlign: 'center', fontSize: '13px' }}>
           <span style={{ color: 'var(--text-muted)' }}>

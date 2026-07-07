@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Building, DollarSign, Star, Percent, Trash2, Edit, Plus, LogOut, 
-  ArrowUpRight, Landmark, CreditCard, LayoutDashboard, MessageSquare, ShieldAlert
+  ArrowUpRight, Landmark, CreditCard, LayoutDashboard, MessageSquare, ShieldAlert,
+  Download, Users
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
 
 export default function LandlordDashboard() {
   const navigate = useNavigate();
@@ -85,6 +86,56 @@ export default function LandlordDashboard() {
     fetchDashboardData(user.id);
   }, [navigate]);
 
+  useEffect(() => {
+    if (!showPropModal) return;
+
+    const timer = setTimeout(() => {
+      const initialLat = parseFloat(propertyForm.latitude) || -8.6500;
+      const initialLng = parseFloat(propertyForm.longitude) || 115.2166;
+
+      if (typeof window.L === 'undefined') return;
+
+      const mapContainer = document.getElementById('map-picker');
+      if (!mapContainer) return;
+
+      if (mapContainer._leaflet_id) {
+        return; 
+      }
+
+      const map = window.L.map('map-picker').setView([initialLat, initialLng], 12);
+      
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      let marker = window.L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
+
+      const updateCoords = (lat, lng) => {
+        setPropertyForm(prev => ({
+          ...prev,
+          latitude: lat.toFixed(6),
+          longitude: lng.toFixed(6)
+        }));
+      };
+
+      marker.on('dragend', function () {
+        const position = marker.getLatLng();
+        updateCoords(position.lat, position.lng);
+      });
+
+      map.on('click', function (e) {
+        const lat = e.latlng.lat;
+        const lng = e.latlng.lng;
+        marker.setLatLng([lat, lng]);
+        updateCoords(lat, lng);
+      });
+
+      setTimeout(() => map.invalidateSize(), 300);
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [showPropModal]);
+
   const fetchDashboardData = async (landlordId) => {
     setLoading(true);
     try {
@@ -156,6 +207,32 @@ export default function LandlordDashboard() {
       fetchDashboardData(landlordUser.id);
     } catch (err) {
       alert(err.message);
+    }
+  };
+
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('image', file);
+
+    setUploadingImage(true);
+    try {
+      const res = await fetch(`${API_BASE}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+
+      setPropertyForm(prev => ({ ...prev, image: data.url }));
+    } catch (err) {
+      alert("Gagal mengunggah gambar: " + err.message);
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -363,6 +440,16 @@ export default function LandlordDashboard() {
                 Kelola Review
               </button>
             </li>
+            <li>
+              <button 
+                className="sidebar-link"
+                style={{ color: 'var(--primary)' }}
+                onClick={() => navigate('/tenant')}
+              >
+                <Users size={18} />
+                Sesi Penyewa
+              </button>
+            </li>
           </ul>
         </div>
 
@@ -383,9 +470,18 @@ export default function LandlordDashboard() {
               Pantau laporan transaksi dan properti aktif Anda di sini.
             </p>
           </div>
-          <button className="btn btn-outline" onClick={() => navigate('/')}>
-            Lihat Landing Page
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <a 
+              href={`${API_BASE}/reports/landlord/excel?landlordId=${landlordUser?.id}`}
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
+            >
+              <Download size={16} /> Unduh Laporan Excel
+            </a>
+            <button className="btn btn-outline" onClick={() => navigate('/')}>
+              Lihat Landing Page
+            </button>
+          </div>
         </header>
 
         {loading ? (
@@ -766,24 +862,12 @@ export default function LandlordDashboard() {
                   ></textarea>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Koordinat Latitude</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={propertyForm.latitude}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, latitude: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Koordinat Longitude</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={propertyForm.longitude}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, longitude: e.target.value })}
-                  />
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label className="form-label">Pilih Lokasi Properti di Peta</label>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                    Koordinat terpilih: <strong>{propertyForm.latitude || '-8.6500'}</strong>, <strong>{propertyForm.longitude || '115.2166'}</strong> (Geser penanda / klik peta untuk memindahkan)
+                  </div>
+                  <div id="map-picker" style={{ height: '240px', width: '100%', borderRadius: '12px', border: '1px solid var(--border-color)', position: 'relative', zIndex: 10 }}></div>
                 </div>
 
                 <div className="form-group">
@@ -797,15 +881,40 @@ export default function LandlordDashboard() {
                   />
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Cover Image URL (Opsional)</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="Https://images.unsplash.com/..."
-                    value={propertyForm.image}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, image: e.target.value })}
-                  />
+                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label className="form-label">Cover Image Properti</label>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      className="form-input"
+                      onChange={handleImageUpload}
+                      style={{ padding: '8px' }}
+                    />
+                    {uploadingImage && <span style={{ fontSize: '12px', color: 'var(--primary)' }}>Mengunggah...</span>}
+                  </div>
+                  {propertyForm.image && (
+                    <div style={{ marginTop: '12px', position: 'relative', display: 'inline-block' }}>
+                      <img 
+                        src={propertyForm.image} 
+                        alt="Preview" 
+                        style={{ width: '120px', height: '80px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border-color)' }} 
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPropertyForm(prev => ({ ...prev, image: '' }))}
+                        style={{
+                          position: 'absolute', top: '-6px', right: '-6px', 
+                          background: 'red', color: 'white', border: 'none', 
+                          borderRadius: '50%', width: '20px', height: '20px', 
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: 'pointer', fontSize: '10px', fontWeight: 'bold'
+                        }}
+                      >
+                        X
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>

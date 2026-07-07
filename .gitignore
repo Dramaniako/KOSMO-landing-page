@@ -25,3 +25,10 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Excel exports & reports
+backend/*.xlsx
+*.xlsx
+
+# Backend uploads
+backend/uploads/
