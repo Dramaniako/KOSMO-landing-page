@@ -699,6 +699,108 @@ router.get('/admin/stats', async (req, res) => {
   }
 });
 
+router.get('/admin/tracking-history', async (req, res) => {
+  try {
+    // 1. Last 24 Hours (grouped by hour)
+    const [rows24h] = await pool.query(`
+      SELECT 
+        DATE_FORMAT(visited_at, '%Y-%m-%d %H:00:00') as label_time,
+        COUNT(*) as count
+      FROM visitor_tracking
+      WHERE visited_at >= NOW() - INTERVAL 24 HOUR
+      GROUP BY label_time
+      ORDER BY label_time ASC
+    `);
+
+    // 2. Last 7 Days (grouped by day)
+    const [rows7d] = await pool.query(`
+      SELECT 
+        DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
+        COUNT(*) as count
+      FROM visitor_tracking
+      WHERE visited_at >= DATE(NOW() - INTERVAL 6 DAY)
+      GROUP BY label_date
+      ORDER BY label_date ASC
+    `);
+
+    // 3. Last 30 Days (grouped by day)
+    const [rows30d] = await pool.query(`
+      SELECT 
+        DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
+        COUNT(*) as count
+      FROM visitor_tracking
+      WHERE visited_at >= DATE(NOW() - INTERVAL 29 DAY)
+      GROUP BY label_date
+      ORDER BY label_date ASC
+    `);
+
+    // Post-process to fill gaps
+    const now = new Date();
+    
+    // 24h helper
+    const data24h = [];
+    for (let i = 23; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 60 * 60 * 1000);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const date = String(d.getDate()).padStart(2, '0');
+      const hour = String(d.getHours()).padStart(2, '0');
+      const labelKey = `${year}-${month}-${date} ${hour}:00:00`;
+      const hourLabel = `${hour}:00`;
+      
+      const match = rows24h.find(r => r.label_time === labelKey);
+      data24h.push({
+        label: hourLabel,
+        count: match ? match.count : 0
+      });
+    }
+
+    // 7d helper
+    const data7d = [];
+    const daysName = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const date = String(d.getDate()).padStart(2, '0');
+      const labelKey = `${year}-${month}-${date}`;
+      const dayLabel = daysName[d.getDay()] + ` (${date}/${month})`;
+
+      const match = rows7d.find(r => r.label_date === labelKey);
+      data7d.push({
+        label: dayLabel,
+        count: match ? match.count : 0
+      });
+    }
+
+    // 30d helper
+    const data30d = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const date = String(d.getDate()).padStart(2, '0');
+      const labelKey = `${year}-${month}-${date}`;
+      const dayLabel = `${date}/${month}`;
+
+      const match = rows30d.find(r => r.label_date === labelKey);
+      data30d.push({
+        label: dayLabel,
+        count: match ? match.count : 0
+      });
+    }
+
+    res.json({
+      history24h: data24h,
+      history7d: data7d,
+      history30d: data30d
+    });
+  } catch (err) {
+    console.error("Error fetching tracking history:", err);
+    res.status(500).json({ message: "Gagal mengambil riwayat tracking." });
+  }
+});
+
 // ==========================================
 // Excel Report Endpoints
 // ==========================================
