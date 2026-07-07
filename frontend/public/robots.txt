@@ -1,0 +1,12 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+Allow: /login
+
+# Disallow private dashboards from being indexed
+Disallow: /admin
+Disallow: /landlord
+Disallow: /tenant
+
+# Link to the sitemap (Ganti URL di bawah dengan domain kustom Anda jika sudah ada)
+Sitemap: https://kosmo-landing-page-red.vercel.app/sitemap.xml
