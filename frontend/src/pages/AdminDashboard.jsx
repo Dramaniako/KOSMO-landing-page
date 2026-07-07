@@ -6,7 +6,7 @@ import {
   BarChart3, Eye, Download
 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
