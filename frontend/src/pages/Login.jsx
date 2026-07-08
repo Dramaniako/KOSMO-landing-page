@@ -20,8 +20,8 @@ export default function Login() {
     setLoading(true);
 
     const endpoint = isLogin ? '/auth/login' : '/auth/register';
-    const payload = isLogin 
-      ? { email, password } 
+    const payload = isLogin
+      ? { email, password }
       : { email, password, name, phone };
 
     try {
@@ -75,10 +75,10 @@ export default function Login() {
   return (
     <div className="flex-center" style={{ minHeight: '100vh', padding: '24px', background: 'radial-gradient(circle at bottom left, rgba(37, 99, 235, 0.05), transparent 70%)' }}>
       <div className="card glass-panel" style={{ maxWidth: '440px', width: '100%', padding: '40px' }}>
-        
+
         {/* Back Link */}
-        <button 
-          onClick={() => navigate('/')} 
+        <button
+          onClick={() => navigate('/')}
           style={{ display: 'flex', alignItems: 'center', gap: '6px', border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: '13px', cursor: 'pointer', marginBottom: '24px', transition: 'var(--transition)' }}
           onMouseEnter={(e) => e.target.style.color = 'var(--primary)'}
           onMouseLeave={(e) => e.target.style.color = 'var(--text-muted)'}
@@ -111,9 +111,9 @@ export default function Login() {
                 <label className="form-label">Nama Lengkap</label>
                 <div style={{ position: 'relative' }}>
                   <User size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
-                  <input 
-                    type="text" 
-                    className="form-input" 
+                  <input
+                    type="text"
+                    className="form-input"
                     placeholder="Contoh: Bayu Nugroho"
                     style={{ paddingLeft: '42px' }}
                     value={name}
@@ -127,9 +127,9 @@ export default function Login() {
                 <label className="form-label">Nomor Telepon</label>
                 <div style={{ position: 'relative' }}>
                   <Phone size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
-                  <input 
-                    type="tel" 
-                    className="form-input" 
+                  <input
+                    type="tel"
+                    className="form-input"
                     placeholder="Contoh: +62 812..."
                     style={{ paddingLeft: '42px' }}
                     value={phone}
@@ -144,9 +144,9 @@ export default function Login() {
             <label className="form-label">Alamat Email</label>
             <div style={{ position: 'relative' }}>
               <Mail size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
-              <input 
-                type="email" 
-                className="form-input" 
+              <input
+                type="email"
+                className="form-input"
                 placeholder="nama@email.com"
                 style={{ paddingLeft: '42px' }}
                 value={email}
@@ -160,9 +160,9 @@ export default function Login() {
             <label className="form-label">Password</label>
             <div style={{ position: 'relative' }}>
               <Lock size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
-              <input 
-                type="password" 
-                className="form-input" 
+              <input
+                type="password"
+                className="form-input"
                 placeholder="Masukkan password"
                 style={{ paddingLeft: '42px' }}
                 value={password}
@@ -172,9 +172,9 @@ export default function Login() {
             </div>
           </div>
 
-          <button 
-            type="submit" 
-            className="btn btn-primary" 
+          <button
+            type="submit"
+            className="btn btn-primary"
             style={{ width: '100%', padding: '12px', fontSize: '15px' }}
             disabled={loading}
           >
@@ -188,7 +188,7 @@ export default function Login() {
           <span style={{ color: 'var(--text-muted)' }}>
             {isLogin ? 'Belum punya akun?' : 'Sudah punya akun?'}
           </span>{' '}
-          <button 
+          <button
             onClick={() => { setIsLogin(!isLogin); setError(''); }}
             style={{ border: 'none', background: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
           >
