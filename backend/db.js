@@ -32,6 +32,8 @@ const dbConfig = {
   },
   waitForConnections: true,
   connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '1'),
+  maxIdle: 1,
+  idleTimeout: 1000,
   queueLimit: 0
 };
 
