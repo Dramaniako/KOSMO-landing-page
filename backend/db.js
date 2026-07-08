@@ -54,7 +54,33 @@ if (dbConfig.host === 'localhost' || dbConfig.host === '127.0.0.1') {
   }
 }
 
-export const pool = mysql.createPool(dbConfig);
+export const pool = {
+  query: async (sql, values) => {
+    const conn = await mysql.createConnection(dbConfig);
+    try {
+      const [rows, fields] = await conn.query(sql, values);
+      return [rows, fields];
+    } finally {
+      await conn.end();
+    }
+  },
+  execute: async (sql, values) => {
+    const conn = await mysql.createConnection(dbConfig);
+    try {
+      const [rows, fields] = await conn.execute(sql, values);
+      return [rows, fields];
+    } finally {
+      await conn.end();
+    }
+  },
+  getConnection: async () => {
+    const conn = await mysql.createConnection(dbConfig);
+    conn.release = async () => {
+      await conn.end();
+    };
+    return conn;
+  }
+};
 
 let initPromise = null;
 let isInitialized = false;
