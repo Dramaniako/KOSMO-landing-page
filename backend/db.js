@@ -189,9 +189,12 @@ export async function initDb() {
       // Migrate existing plaintext users if any
       const [existing] = await pool.query('SELECT id, password FROM users');
       for (let u of existing) {
-        if (u.password && !u.password.startsWith('$2a$')) {
-          const hashed = bcrypt.hashSync(u.password, 10);
-          await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashed, u.id]);
+        if (u.password) {
+          const isHashed = u.password.startsWith('$2a$') || u.password.startsWith('$2b$') || u.password.startsWith('$2y$');
+          if (!isHashed) {
+            const hashed = bcrypt.hashSync(u.password, 10);
+            await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashed, u.id]);
+          }
         }
       }
     }
@@ -232,6 +235,9 @@ export async function initDb() {
     console.log("MySQL Database Kosmo initialized, tables created, and seeded successfully!");
   } catch (err) {
     console.error("Failed to initialize database tables or seed default values:", err);
+    try {
+      fs.writeFileSync('db_error.log', `[${new Date().toISOString()}] initDb error: ${err.stack || err}\n`);
+    } catch (e) {}
   }
 }
 

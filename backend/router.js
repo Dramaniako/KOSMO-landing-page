@@ -4,6 +4,7 @@ import XLSX from 'xlsx';
 import multer from 'multer';
 import path from 'path';
 import bcrypt from 'bcryptjs';
+import fs from 'fs';
 
 const router = express.Router();
 
@@ -277,6 +278,9 @@ router.get('/properties', async (req, res) => {
     res.json(filteredProperties);
   } catch (err) {
     console.error("Get properties error:", err);
+    try {
+      fs.appendFileSync('db_error.log', `[${new Date().toISOString()}] GET /properties error: ${err.stack || err}\n`);
+    } catch (e) {}
     res.status(500).json({ message: "Gagal mengambil properti." });
   }
 });
