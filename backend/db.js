@@ -31,7 +31,7 @@ const dbConfig = {
     rejectUnauthorized: false
   },
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 3,
   queueLimit: 0
 };
 

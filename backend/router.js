@@ -281,7 +281,7 @@ router.get('/properties', async (req, res) => {
     try {
       fs.appendFileSync('db_error.log', `[${new Date().toISOString()}] GET /properties error: ${err.stack || err}\n`);
     } catch (e) {}
-    res.status(500).json({ message: "Gagal mengambil properti." });
+    res.status(500).json({ message: "Gagal mengambil properti: " + err.message });
   }
 });
 
@@ -461,7 +461,7 @@ router.get('/reviews', async (req, res) => {
     const [rows] = await pool.query(sql, params);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ message: "Gagal mengambil data review." });
+    res.status(500).json({ message: "Gagal mengambil data review: " + err.message });
   }
 });
 
@@ -707,7 +707,7 @@ router.post('/tracking/visit', async (req, res) => {
     res.status(201).json({ message: "Kunjungan berhasil dilacak." });
   } catch (err) {
     console.error("Tracking error:", err);
-    res.status(500).json({ message: "Gagal melacak kunjungan." });
+    res.status(500).json({ message: "Gagal melacak kunjungan: " + err.message });
   }
 });
 
