@@ -65,13 +65,29 @@ export async function initDb() {
 
   initPromise = (async () => {
     try {
-      // Optimasi serverless: Cek apakah tabel 'users' sudah ada
-      const [tables] = await pool.query("SHOW TABLES LIKE 'users'");
-      if (tables.length > 0) {
+      // Optimasi serverless: Cek apakah semua tabel wajib sudah ada
+      const [tableRows] = await pool.query("SHOW TABLES");
+      const existingTables = tableRows.map(row => Object.values(row)[0].toLowerCase());
+      
+      const requiredTables = [
+        'users',
+        'properties',
+        'property_facilities',
+        'reviews',
+        'withdrawals',
+        'visitor_tracking',
+        'rentals'
+      ];
+      
+      const missingTables = requiredTables.filter(t => !existingTables.includes(t));
+      
+      if (missingTables.length === 0) {
         isInitialized = true;
         console.log("MySQL Database Kosmo tables already initialized. Skipping schema creation and seeding.");
         return;
       }
+      
+      console.log(`Database tables missing: ${missingTables.join(', ')}. Initializing...`);
 
       await pool.query(`
         CREATE TABLE IF NOT EXISTS users (
