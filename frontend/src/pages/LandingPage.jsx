@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search, MapPin, Star, Wifi, Tv, Wind, Shield,
   Droplet, Check, X, ArrowRight, ShieldCheck, Heart,
-  Zap, Sparkles, Car, Download
+  Zap, Sparkles, Car, Download, CreditCard
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
@@ -16,6 +16,9 @@ export default function LandingPage() {
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [showContract, setShowContract] = useState(false);
   const [contractSigned, setContractSigned] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [showMap, setShowMap] = useState(false);
 
   // Filter States
   const [district, setDistrict] = useState('Semua');
@@ -37,6 +40,33 @@ export default function LandingPage() {
     // Track visitor
     fetch(`${API_BASE}/tracking/visit`, { method: 'POST' }).catch(() => { });
   }, []);
+
+  useEffect(() => {
+    if (!showMap || !selectedProperty) return;
+
+    const timer = setTimeout(() => {
+      if (typeof window.L === 'undefined') return;
+      const mapContainer = document.getElementById('property-detail-map');
+      if (!mapContainer) return;
+      if (mapContainer._leaflet_id) return; // already initialized
+
+      const lat = parseFloat(selectedProperty.latitude) || -8.6500;
+      const lng = parseFloat(selectedProperty.longitude) || 115.2166;
+
+      const map = window.L.map('property-detail-map').setView([lat, lng], 14);
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      window.L.marker([lat, lng]).addTo(map)
+        .bindPopup(`<b>${selectedProperty.name}</b><br/>${selectedProperty.address}`)
+        .openPopup();
+
+      setTimeout(() => map.invalidateSize(), 300);
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [showMap, selectedProperty]);
 
   const fetchProperties = async (queryParams = '') => {
     setLoading(true);
@@ -103,16 +133,17 @@ export default function LandingPage() {
     setSelectedProperty(prop);
     setContractSigned(false);
     setShowContract(false);
+    setShowPayment(false);
+    setShowMap(false);
   };
 
   const handleSignContract = () => {
     setContractSigned(true);
     setTimeout(() => {
       setShowContract(false);
-      setSelectedProperty(null);
-      alert("Kontrak berhasil ditandatangani! Silakan cek dashboard Anda.");
-      navigate('/tenant');
-    }, 2000);
+      setShowPayment(true);
+      setContractSigned(false);
+    }, 1500);
   };
 
   // Map icon strings to Lucide elements
@@ -431,7 +462,78 @@ export default function LandingPage() {
               <X size={20} />
             </button>
 
-            {showContract ? (
+            {showPayment ? (
+              /* Simulated Payment Mockup View (Issue #2) */
+              <div style={{ padding: '40px' }}>
+                <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+                  <CreditCard size={48} style={{ color: 'var(--primary)', marginBottom: '12px' }} />
+                  <h2>Simulasi Pembayaran Mockup</h2>
+                  <p style={{ color: 'var(--text-muted)' }}>Proses pembayaran aman untuk menyewa kos All-Inclusive.</p>
+                </div>
+
+                <div className="card" style={{ padding: '20px', background: '#f8fafc', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
+                  <div className="flex-between" style={{ marginBottom: '8px' }}>
+                    <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Properti Kos:</span>
+                    <strong style={{ fontSize: '14px' }}>{selectedProperty.name}</strong>
+                  </div>
+                  <div className="flex-between" style={{ marginBottom: '8px' }}>
+                    <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Kamar Pilihan:</span>
+                    <strong style={{ fontSize: '14px' }}>Kamar Standard</strong>
+                  </div>
+                  <div className="flex-between" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 600 }}>Total Pembayaran:</span>
+                    <strong style={{ fontSize: '18px', color: 'var(--primary)' }}>{formatPrice(selectedProperty.price)}</strong>
+                  </div>
+                </div>
+
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  setPaymentProcessing(true);
+                  try {
+                    const res = await fetch(`${API_BASE}/rentals`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        tenantId: currentUser.id,
+                        propertyId: selectedProperty.id,
+                        propertyName: selectedProperty.name,
+                        price: selectedProperty.price
+                      })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.message);
+
+                    alert("Simulasi pembayaran berhasil! Okupansi properti dan pendapatan landlord telah diperbarui.");
+                    setShowPayment(false);
+                    setSelectedProperty(null);
+                    navigate('/tenant');
+                  } catch (err) {
+                    alert(err.message);
+                  } finally {
+                    setPaymentProcessing(false);
+                  }
+                }}>
+                  <div className="form-group" style={{ marginBottom: '16px' }}>
+                    <label className="form-label" style={{ display: 'block', marginBottom: '8px', fontWeight: 600 }}>Pilih Metode Pembayaran</label>
+                    <select className="form-select" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }} required>
+                      <option value="BCA VA">BCA Virtual Account</option>
+                      <option value="Mandiri VA">Mandiri Virtual Account</option>
+                      <option value="CC">Kartu Kredit / Debit</option>
+                      <option value="Gopay">GoPay</option>
+                    </select>
+                  </div>
+
+                  <div className="flex-between" style={{ marginTop: '24px' }}>
+                    <button type="button" className="btn btn-outline" onClick={() => { setShowPayment(false); setShowContract(true); }}>
+                      Kembali
+                    </button>
+                    <button type="submit" className="btn btn-primary" disabled={paymentProcessing}>
+                      {paymentProcessing ? 'Memproses Transaksi...' : 'Bayar Sekarang'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : showContract ? (
               /* Simulated Contract signing view (matching 'Tinjauan Kontrak' screenshot) */
               <div style={{ padding: '40px' }}>
                 <div style={{ textAlign: 'center', marginBottom: '32px' }}>
@@ -556,9 +658,23 @@ export default function LandingPage() {
                     <h3 style={{ fontSize: '20px', marginBottom: '12px' }}>Lokasi</h3>
                     <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '16px', background: '#f8fafc', display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
                       <MapPin size={24} style={{ color: 'var(--primary)' }} />
-                      <div>
-                        <p style={{ fontWeight: 600, fontSize: '14px' }}>Koordinat Lokasi</p>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Latitude: {selectedProperty.latitude}, Longitude: {selectedProperty.longitude}</p>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontWeight: 600, fontSize: '14px', marginBottom: '6px' }}>Lokasi Properti KOSMO</p>
+                        <button 
+                          type="button" 
+                          className="btn btn-secondary btn-sm" 
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px' }}
+                          onClick={() => setShowMap(!showMap)}
+                        >
+                          <MapPin size={14} />
+                          {showMap ? 'Sembunyikan Peta' : 'Lihat Lokasi di Peta'}
+                        </button>
+                        {showMap && (
+                          <div 
+                            id="property-detail-map" 
+                            style={{ height: '240px', width: '100%', borderRadius: '12px', border: '1px solid var(--border-color)', marginTop: '12px', zIndex: 10 }}
+                          ></div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -573,9 +689,29 @@ export default function LandingPage() {
                         </span>
                         <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>/bulan</span>
                       </div>
-                      <p style={{ fontSize: '11px', color: 'var(--success)', fontWeight: 600, marginTop: '4px' }}>
-                        * Bebas biaya tambahan listrik, air, dan kebersihan.
-                      </p>
+                      <div style={{ marginTop: '8px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--success)', fontWeight: 700, display: 'block', marginBottom: '6px' }}>
+                          Fitur All-Inclusive Termasuk:
+                        </span>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          {selectedProperty.facilities && selectedProperty.facilities.map((fac, idx) => (
+                            <span 
+                              key={idx} 
+                              style={{ 
+                                fontSize: '10px', 
+                                background: '#e8f5e9', 
+                                color: '#2e7d32', 
+                                border: '1px solid #c8e6c9', 
+                                padding: '2px 8px', 
+                                borderRadius: '4px',
+                                fontWeight: 500
+                              }}
+                            >
+                              {fac}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
 
                     <div style={{ marginBottom: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
@@ -593,7 +729,7 @@ export default function LandingPage() {
                     </div>
 
                     {currentUser ? (
-                      currentUser.role === 'tenant' ? (
+                      (currentUser.role === 'tenant' || (currentUser.role === 'landlord' && currentUser.id !== selectedProperty.ownerId)) ? (
                         <button
                           className="btn btn-primary"
                           style={{ width: '100%', padding: '12px' }}
@@ -602,6 +738,10 @@ export default function LandingPage() {
                         >
                           {selectedProperty.totalRooms <= selectedProperty.occupiedRooms ? 'Kamar Penuh' : 'Sewa Kamar Sekarang'}
                         </button>
+                      ) : currentUser.role === 'landlord' ? (
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', fontStyle: 'italic', fontWeight: 600 }}>
+                          Anda adalah pemilik kos ini.
+                        </div>
                       ) : (
                         <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', fontStyle: 'italic' }}>
                           Gunakan akun Tenant untuk menyewa properti ini.

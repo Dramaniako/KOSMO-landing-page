@@ -34,6 +34,12 @@ export default function LandlordDashboard() {
   const [showPropModal, setShowPropModal] = useState(false);
   const [showRevModal, setShowRevModal] = useState(false);
 
+  // Delete Property Password Modal States (Issue #4)
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingPropertyId, setDeletingPropertyId] = useState(null);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteProcessing, setDeleteProcessing] = useState(false);
+
   // Withdrawal form
   const [withdrawForm, setWithdrawForm] = useState({
     amount: '',
@@ -212,28 +218,21 @@ export default function LandlordDashboard() {
 
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  const handleImageUpload = async (e) => {
+  const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append('image', file);
-
     setUploadingImage(true);
-    try {
-      const res = await fetch(`${API_BASE}/upload`, {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-
-      setPropertyForm(prev => ({ ...prev, image: data.url }));
-    } catch (err) {
-      alert("Gagal mengunggah gambar: " + err.message);
-    } finally {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPropertyForm(prev => ({ ...prev, image: reader.result }));
       setUploadingImage(false);
-    }
+    };
+    reader.onerror = () => {
+      alert("Gagal membaca berkas gambar.");
+      setUploadingImage(false);
+    };
+    reader.readAsDataURL(file);
   };
 
   // Property Form Submit (Add / Edit)
@@ -315,19 +314,9 @@ export default function LandlordDashboard() {
     setShowPropModal(true);
   };
 
-  const handleDeleteProperty = async (id) => {
-    if (!window.confirm("Apakah Anda yakin ingin menghapus properti ini? Semua review terkait juga akan dihapus.")) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/properties/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-
-      alert(data.message);
-      fetchDashboardData(landlordUser.id);
-    } catch (err) {
-      alert(err.message);
-    }
+  const handleDeleteProperty = (id) => {
+    setDeletingPropertyId(id);
+    setShowDeleteModal(true);
   };
 
   const resetPropertyForm = () => {
@@ -704,14 +693,6 @@ export default function LandlordDashboard() {
                         </p>
                       </div>
 
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditReview(r)}>
-                          Edit
-                        </button>
-                        <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteReview(r.id)}>
-                          Hapus
-                        </button>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -954,49 +935,61 @@ export default function LandlordDashboard() {
         </div>
       )}
 
-      {/* Review Edit Modal */}
-      {showRevModal && (
+      {/* Delete Property Password Modal (Issue #4) */}
+      {showDeleteModal && (
         <div className="modal-overlay">
-          <div className="modal-container" style={{ maxWidth: '450px' }}>
-            <button className="modal-close" onClick={() => { setShowRevModal(false); setEditingReview(null); }}>
+          <div className="modal-container" style={{ maxWidth: '400px' }}>
+            <button className="modal-close" onClick={() => { setShowDeleteModal(false); setDeletePassword(''); }}>
               <X size={18} />
             </button>
             <div style={{ padding: '32px' }}>
-              <h3 style={{ fontSize: '20px', marginBottom: '20px' }}>Edit Review Pengguna</h3>
+              <h3 style={{ fontSize: '18px', marginBottom: '12px' }}>Hapus Properti Kos</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+                Apakah Anda yakin ingin menghapus properti ini? Semua review terkait juga akan dihapus. Harap masukkan password akun Anda untuk konfirmasi keamanan.
+              </p>
+              
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                setDeleteProcessing(true);
+                try {
+                  const res = await fetch(`${API_BASE}/properties/${deletingPropertyId}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: deletePassword, landlordId: landlordUser.id })
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.message);
 
-              <form onSubmit={handleReviewSubmit}>
-                <div className="form-group">
-                  <label className="form-label">Rating Bintang</label>
-                  <select 
-                    className="form-select"
-                    value={reviewForm.rating}
-                    onChange={(e) => setReviewForm({ ...reviewForm, rating: parseInt(e.target.value) })}
-                  >
-                    <option value={5}>5 Bintang (Sangat Puas)</option>
-                    <option value={4}>4 Bintang (Puas)</option>
-                    <option value={3}>3 Bintang (Cukup)</option>
-                    <option value={2}>2 Bintang (Buruk)</option>
-                    <option value={1}>1 Bintang (Sangat Buruk)</option>
-                  </select>
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '24px' }}>
-                  <label className="form-label">Komentar Ulasan</label>
-                  <textarea 
-                    className="form-textarea" 
-                    rows="4"
-                    value={reviewForm.comment}
-                    onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
-                    required
-                  ></textarea>
+                  alert(data.message);
+                  setShowDeleteModal(false);
+                  setDeletePassword('');
+                  setDeletingPropertyId(null);
+                  fetchDashboardData(landlordUser.id);
+                } catch (err) {
+                  alert(err.message);
+                } finally {
+                  setDeleteProcessing(false);
+                }
+              }}>
+                <div className="form-group" style={{ marginBottom: '20px' }}>
+                  <label className="form-label" style={{ display: 'block', marginBottom: '8px' }}>Password Anda</label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
+                    placeholder="Masukkan password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    required 
+                  />
                 </div>
 
                 <div className="flex-between">
-                  <button type="button" className="btn btn-outline" onClick={() => { setShowRevModal(false); setEditingReview(null); }}>
+                  <button type="button" className="btn btn-outline" onClick={() => { setShowDeleteModal(false); setDeletePassword(''); }}>
                     Batal
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    Simpan Ulasan
+                  <button type="submit" className="btn btn-danger" disabled={deleteProcessing}>
+                    {deleteProcessing ? 'Memproses...' : 'Hapus Sekarang'}
                   </button>
                 </div>
               </form>

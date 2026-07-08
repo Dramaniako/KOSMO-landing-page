@@ -9,10 +9,17 @@ const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 export default function TenantDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('profile'); // profile, bills, reviews
+  const [activeTab, setActiveTab] = useState('profile'); // profile, rentals, bills, reviews
   const [currentUser, setCurrentUser] = useState(null);
   const [properties, setProperties] = useState([]);
   const [myReviews, setMyReviews] = useState([]);
+  const [myRentals, setMyRentals] = useState([]);
+
+  // Terminate Rental States
+  const [showTerminateModal, setShowTerminateModal] = useState(false);
+  const [terminateRental, setTerminateRental] = useState(null);
+  const [terminatePassword, setTerminatePassword] = useState('');
+  const [terminateProcessing, setTerminateProcessing] = useState(false);
   
   const [showRevModal, setShowRevModal] = useState(false);
   const [editingReview, setEditingReview] = useState(null);
@@ -70,6 +77,11 @@ export default function TenantDashboard() {
       const revRes = await fetch(`${API_BASE}/reviews?userId=${userId}`);
       const revData = await revRes.json();
       setMyReviews(revData);
+
+      // Fetch rentals by user
+      const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${userId}`);
+      const rentData = await rentRes.json();
+      setMyRentals(rentData);
     } catch (err) {
       console.error("Error loading tenant dashboard data:", err);
     }
@@ -210,6 +222,15 @@ export default function TenantDashboard() {
               >
                 <User size={18} />
                 Profil Saya
+              </button>
+            </li>
+            <li>
+              <button 
+                className={`sidebar-link ${activeTab === 'rentals' ? 'active' : ''}`}
+                onClick={() => setActiveTab('rentals')}
+              >
+                <Building size={18} />
+                Kos Saya (Sewa)
               </button>
             </li>
             <li>
@@ -428,6 +449,48 @@ export default function TenantDashboard() {
           </div>
         )}
 
+        {/* RENTALS TAB (Issue #3) */}
+        {activeTab === 'rentals' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Properti Kos yang Sedang Disewa</h3>
+
+            {myRentals.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                <p style={{ fontStyle: 'italic', fontSize: '14px' }}>Anda belum menyewa kos apapun saat ini.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {myRentals.map(rent => (
+                  <div key={rent.id} className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: rent.status === 'active' ? '#ffffff' : '#f8fafc' }}>
+                    <div>
+                      <span className={`badge ${rent.status === 'active' ? 'badge-success' : 'badge-danger'}`} style={{ marginBottom: '6px', fontSize: '10px' }}>
+                        {rent.status === 'active' ? 'Sewa Aktif' : 'Penyewaan Selesai'}
+                      </span>
+                      <h4 style={{ fontSize: '16px', fontWeight: 700 }}>{rent.propertyName}</h4>
+                      <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Mulai Sewa: {rent.startDate}</p>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <strong style={{ fontSize: '18px', color: 'var(--primary)', display: 'block' }}>Rp {rent.price ? rent.price.toLocaleString('id-ID') : '0'}/bln</strong>
+                      {rent.status === 'active' && (
+                        <button 
+                          className="btn btn-outline btn-danger" 
+                          style={{ marginTop: '8px', padding: '4px 12px', fontSize: '12px' }}
+                          onClick={() => {
+                            setTerminateRental(rent);
+                            setShowTerminateModal(true);
+                          }}
+                        >
+                          Berhenti Menyewa
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* BILLING HISTORY TAB */}
         {activeTab === 'bills' && (
           <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
@@ -591,6 +654,68 @@ export default function TenantDashboard() {
                   </button>
                   <button type="submit" className="btn btn-primary">
                     Kirim Ulasan
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Terminate Rental Password Modal (Issue #4) */}
+      {showTerminateModal && (
+        <div className="modal-overlay">
+          <div className="modal-container" style={{ maxWidth: '400px' }}>
+            <button className="modal-close" onClick={() => { setShowTerminateModal(false); setTerminatePassword(''); }}>
+              <X size={18} />
+            </button>
+            <div style={{ padding: '32px' }}>
+              <h3 style={{ fontSize: '18px', marginBottom: '12px' }}>Konfirmasi Penghentian Sewa</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+                Untuk berhenti menyewa <strong>{terminateRental?.propertyName}</strong>, harap masukkan password akun Anda untuk konfirmasi keamanan.
+              </p>
+              
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                setTerminateProcessing(true);
+                try {
+                  const res = await fetch(`${API_BASE}/rentals/${terminateRental.id}/terminate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: terminatePassword })
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.message);
+
+                  alert("Sewa kos berhasil diberhentikan.");
+                  setShowTerminateModal(false);
+                  setTerminatePassword('');
+                  fetchData(currentUser.id);
+                } catch (err) {
+                  alert(err.message);
+                } finally {
+                  setTerminateProcessing(false);
+                }
+              }}>
+                <div className="form-group" style={{ marginBottom: '20px' }}>
+                  <label className="form-label" style={{ display: 'block', marginBottom: '8px' }}>Password Anda</label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
+                    placeholder="Masukkan password"
+                    value={terminatePassword}
+                    onChange={(e) => setTerminatePassword(e.target.value)}
+                    required 
+                  />
+                </div>
+
+                <div className="flex-between">
+                  <button type="button" className="btn btn-outline" onClick={() => { setShowTerminateModal(false); setTerminatePassword(''); }}>
+                    Batal
+                  </button>
+                  <button type="submit" className="btn btn-danger" disabled={terminateProcessing}>
+                    {terminateProcessing ? 'Memproses...' : 'Konfirmasi Berhenti'}
                   </button>
                 </div>
               </form>

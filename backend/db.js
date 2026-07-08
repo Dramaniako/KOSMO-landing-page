@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
+import bcrypt from 'bcryptjs';
 
 // Load .env locally if it exists
 try {
@@ -149,22 +150,50 @@ export async function initDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
+    // 7. Rentals table (Sewa Kos)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rentals (
+        id VARCHAR(50) PRIMARY KEY,
+        tenantId VARCHAR(50) NOT NULL,
+        propertyId VARCHAR(50) NOT NULL,
+        propertyName VARCHAR(100),
+        price INT,
+        startDate VARCHAR(50),
+        status ENUM('active','terminated') DEFAULT 'active',
+        FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
     // Seed Users if empty
     const [userRows] = await pool.query('SELECT COUNT(*) as count FROM users');
     if (userRows[0].count === 0) {
+      const adminHash = bcrypt.hashSync('admin', 10);
+      const landlordHash = bcrypt.hashSync('landlord', 10);
+      const tenantHash = bcrypt.hashSync('tenant', 10);
+
       await pool.query(`
         INSERT INTO users (id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder)
         VALUES 
-          ('user-admin', 'admin@kosmo.com', 'admin', 'Admin Super', 'admin', '+62 888-8888-8888', 'Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', ''),
-          ('user-landlord', 'landlord@kosmo.com', 'landlord', 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord'),
-          ('user-tenant', 'tenant@kosmo.com', 'tenant', 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '');
-      `);
+          ('user-admin', 'admin@kosmo.com', ?, 'Admin Super', 'admin', '+62 888-8888-8888', 'Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', ''),
+          ('user-landlord', 'landlord@kosmo.com', ?, 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord'),
+          ('user-tenant', 'tenant@kosmo.com', ?, 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '');
+      `, [adminHash, landlordHash, tenantHash]);
 
       // Seed withdrawals
       await pool.query(`
         INSERT INTO withdrawals (id, userId, bankName, accountNumber, amount, date, status)
         VALUES ('w-01', 'user-landlord', 'BCA', '1234567890', 1000000.0, '3 Jun 2026', 'Selesai');
       `);
+    } else {
+      // Migrate existing plaintext users if any
+      const [existing] = await pool.query('SELECT id, password FROM users');
+      for (let u of existing) {
+        if (u.password && !u.password.startsWith('$2a$')) {
+          const hashed = bcrypt.hashSync(u.password, 10);
+          await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashed, u.id]);
+        }
+      }
     }
 
     // Seed Properties if empty

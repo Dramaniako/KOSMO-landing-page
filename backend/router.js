@@ -3,6 +3,7 @@ import { pool } from './db.js';
 import XLSX from 'xlsx';
 import multer from 'multer';
 import path from 'path';
+import bcrypt from 'bcryptjs';
 
 const router = express.Router();
 
@@ -18,8 +19,8 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
 
 // Generic Upload endpoint
@@ -27,8 +28,8 @@ router.post('/upload', upload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: 'Tidak ada file yang diunggah.' });
   }
-  const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-  res.json({ url: fileUrl });
+  const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+  res.json({ url: base64Image });
 });
 
 // ID Generator
@@ -47,7 +48,7 @@ router.post('/auth/login', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
     const user = rows[0];
 
-    if (!user || user.password !== password) {
+    if (!user || !bcrypt.compareSync(password, user.password)) {
       return res.status(401).json({ message: "Email atau password salah." });
     }
 
@@ -79,10 +80,11 @@ router.post('/auth/register', async (req, res) => {
     }
 
     const userId = generateId("user");
+    const hashedPassword = bcrypt.hashSync(password, 10);
     await pool.query(
       `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
        VALUES (?, ?, ?, ?, 'tenant', ?, 'Virtual Account')`,
-      [userId, email, password, name, phone || '']
+      [userId, email, hashedPassword, name, phone || '']
     );
 
     const [[newUser]] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
@@ -173,10 +175,11 @@ router.post('/users', async (req, res) => {
     }
 
     const userId = generateId("user");
+    const hashedPassword = bcrypt.hashSync(password, 10);
     await pool.query(
       `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [userId, email, password, name, role, phone || '', paymentMethod || 'Virtual Account']
+      [userId, email, hashedPassword, name, role, phone || '', paymentMethod || 'Virtual Account']
     );
 
     res.status(201).json({ message: "User berhasil dibuat!" });
@@ -197,9 +200,10 @@ router.put('/users/:id', async (req, res) => {
     }
 
     if (password) {
+      const hashedPassword = bcrypt.hashSync(password, 10);
       await pool.query(
         `UPDATE users SET name = ?, email = ?, role = ?, phone = ?, paymentMethod = ?, password = ? WHERE id = ?`,
-        [name, email, role, phone || '', paymentMethod || '', password, id]
+        [name, email, role, phone || '', paymentMethod || '', hashedPassword, id]
       );
     } else {
       await pool.query(
@@ -327,6 +331,21 @@ router.post('/properties', async (req, res) => {
       }
     }
 
+    // Auto-create rooms for mobile app support (Issue #1)
+    const [[insertedProp]] = await connection.query('SELECT id_int FROM properties WHERE id = ?', [propId]);
+    const propIntId = insertedProp ? insertedProp.id_int : null;
+    if (propIntId) {
+      const roomCount = parseInt(totalRooms) || 5;
+      for (let i = 1; i <= roomCount; i++) {
+        const roomNumber = `Kamar ${100 + i}`;
+        await connection.query(
+          `INSERT INTO rooms (property_id, room_number, tenant_id, price, is_all_inclusive, all_inclusive_bills) 
+           VALUES (?, ?, NULL, ?, 1, 'Listrik, Air, Wifi')`,
+          [propIntId, roomNumber, parseInt(price)]
+        );
+      }
+    }
+
     await connection.commit();
     res.status(201).json({ message: "Properti berhasil ditambahkan!" });
   } catch (err) {
@@ -383,15 +402,34 @@ router.put('/properties/:id', async (req, res) => {
 
 router.delete('/properties/:id', async (req, res) => {
   const { id } = req.params;
+  const { password, landlordId } = req.body;
+
+  if (!password || !landlordId) {
+    return res.status(400).json({ message: "Password dan landlordId diperlukan." });
+  }
+
   try {
-    const [rows] = await pool.query('SELECT * FROM properties WHERE id = ?', [id]);
-    if (rows.length === 0) {
+    const [propRows] = await pool.query('SELECT * FROM properties WHERE id = ?', [id]);
+    const property = propRows[0];
+    if (!property) {
       return res.status(404).json({ message: "Properti tidak ditemukan." });
+    }
+
+    if (property.ownerId !== landlordId) {
+      return res.status(403).json({ message: "Anda bukan pemilik properti ini." });
+    }
+
+    // Verify landlord password
+    const [userRows] = await pool.query('SELECT password FROM users WHERE id = ?', [landlordId]);
+    const user = userRows[0];
+    if (!user || !bcrypt.compareSync(password, user.password)) {
+      return res.status(401).json({ message: "Password salah." });
     }
 
     await pool.query('DELETE FROM properties WHERE id = ?', [id]);
     res.json({ message: "Properti berhasil dihapus!" });
   } catch (err) {
+    console.error("Delete property error:", err);
     res.status(500).json({ message: "Gagal menghapus properti." });
   }
 });
@@ -855,15 +893,14 @@ router.get('/reports/landlord/excel', async (req, res) => {
   const { landlordId } = req.query;
   if (!landlordId) return res.status(400).json({ message: 'landlordId diperlukan.' });
   try {
-    const parsedId = parseInt(landlordId) || 0;
-    const [[landlord]] = await pool.query('SELECT * FROM users WHERE id = ? OR id_int = ?', [landlordId, parsedId]);
+    const [[landlord]] = await pool.query('SELECT * FROM users WHERE id = ?', [landlordId]);
     if (!landlord) return res.status(404).json({ message: 'Landlord tidak ditemukan.' });
 
     const [properties] = await pool.query('SELECT * FROM properties WHERE ownerId = ?', [landlord.id]);
     const [transactions] = await pool.query(
-      `SELECT t.*, p.name as propertyName FROM transactions t 
-       JOIN properties p ON t.property_id = p.id_int 
-       WHERE p.ownerId = ? ORDER BY t.date_str DESC`, [landlord.id]
+      `SELECT r.*, p.name as propertyName FROM rentals r 
+       JOIN properties p ON r.propertyId = p.id 
+       WHERE p.ownerId = ? ORDER BY r.id DESC`, [landlord.id]
     );
 
     const wb = XLSX.utils.book_new();
@@ -880,13 +917,13 @@ router.get('/reports/landlord/excel', async (req, res) => {
       ['Ringkasan Properti'],
       ['Nama Properti', 'Lokasi', 'Harga', 'Total Kamar', 'Kamar Tersedia']
     ];
-    properties.forEach(p => summaryData.push([p.name, p.location, p.price, p.totalRooms, p.availableRooms]));
+    properties.forEach(p => summaryData.push([p.name, p.district, p.price, p.totalRooms, p.totalRooms - p.occupiedRooms]));
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan Keuangan');
 
     // Transactions sheet
     const txData = [['ID Transaksi', 'Properti', 'Tanggal', 'Jumlah', 'Status']];
-    transactions.forEach(t => txData.push([t.invoice_number, t.propertyName, t.date_str, t.amount, t.status]));
+    transactions.forEach(t => txData.push([t.id, t.propertyName, t.startDate, t.price, t.status === 'active' ? 'Aktif' : 'Selesai']));
     const txSheet = XLSX.utils.aoa_to_sheet(txData);
     XLSX.utils.book_append_sheet(wb, txSheet, 'Transaksi');
 
@@ -897,6 +934,150 @@ router.get('/reports/landlord/excel', async (req, res) => {
   } catch (err) {
     console.error('Excel landlord report error:', err);
     res.status(500).json({ message: 'Gagal menghasilkan laporan Excel.' });
+  }
+});
+
+// ==========================================
+// Password Verification Endpoint
+// ==========================================
+router.post('/auth/verify-password', async (req, res) => {
+  const { userId, password } = req.body;
+  if (!userId || !password) {
+    return res.status(400).json({ message: "userId dan password wajib diisi." });
+  }
+  try {
+    const [rows] = await pool.query('SELECT password FROM users WHERE id = ?', [userId]);
+    const user = rows[0];
+    if (!user) {
+      return res.status(404).json({ message: "User tidak ditemukan." });
+    }
+    const valid = bcrypt.compareSync(password, user.password);
+    res.json({ valid });
+  } catch (err) {
+    console.error("Password verification error:", err);
+    res.status(500).json({ message: "Gagal memverifikasi password." });
+  }
+});
+
+// ==========================================
+// Rentals / Booking Endpoints
+// ==========================================
+router.get('/rentals', async (req, res) => {
+  const { tenantId } = req.query;
+  try {
+    let sql = 'SELECT * FROM rentals WHERE 1=1';
+    const params = [];
+    if (tenantId) {
+      sql += ' AND tenantId = ?';
+      params.push(tenantId);
+    }
+    const [rows] = await pool.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error("Get rentals error:", err);
+    res.status(500).json({ message: "Gagal mengambil data sewa." });
+  }
+});
+
+router.post('/rentals', async (req, res) => {
+  const { tenantId, propertyId, propertyName, price } = req.body;
+  if (!tenantId || !propertyId) {
+    return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[property]] = await connection.query('SELECT totalRooms, occupiedRooms, price, name, ownerId FROM properties WHERE id = ?', [propertyId]);
+    if (!property) {
+      connection.release();
+      return res.status(404).json({ message: "Properti tidak ditemukan." });
+    }
+    if (property.occupiedRooms >= property.totalRooms) {
+      connection.release();
+      return res.status(400).json({ message: "Kamar kos sudah penuh." });
+    }
+
+    const rentalId = generateId("rent");
+    const startDate = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+    const rentalPrice = price || property.price;
+    const rentalName = propertyName || property.name;
+
+    await connection.query(
+      `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status) 
+       VALUES (?, ?, ?, ?, ?, ?, 'active')`,
+      [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate]
+    );
+
+    await connection.query(
+      'UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?',
+      [propertyId]
+    );
+
+    if (property.ownerId) {
+      await connection.query(
+        'UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?',
+        [rentalPrice, rentalPrice, property.ownerId]
+      );
+    }
+
+    await connection.commit();
+    res.status(201).json({ message: "Penyewaan kos berhasil diproses!", rentalId });
+  } catch (err) {
+    await connection.rollback();
+    console.error("Create rental error:", err);
+    res.status(500).json({ message: "Gagal memproses penyewaan kos." });
+  } finally {
+    connection.release();
+  }
+});
+
+router.post('/rentals/:id/terminate', async (req, res) => {
+  const { id } = req.params;
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ message: "Password wajib dimasukkan." });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[rental]] = await connection.query('SELECT * FROM rentals WHERE id = ?', [id]);
+    if (!rental) {
+      connection.release();
+      return res.status(404).json({ message: "Data sewa tidak ditemukan." });
+    }
+    if (rental.status === 'terminated') {
+      connection.release();
+      return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
+    }
+
+    const [[user]] = await connection.query('SELECT password FROM users WHERE id = ?', [rental.tenantId]);
+    if (!user || !bcrypt.compareSync(password, user.password)) {
+      connection.release();
+      return res.status(401).json({ message: "Password salah." });
+    }
+
+    await connection.query(
+      "UPDATE rentals SET status = 'terminated' WHERE id = ?",
+      [id]
+    );
+
+    await connection.query(
+      'UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?',
+      [rental.propertyId]
+    );
+
+    await connection.commit();
+    res.json({ message: "Sewa kos berhasil diberhentikan." });
+  } catch (err) {
+    await connection.rollback();
+    console.error("Terminate rental error:", err);
+    res.status(500).json({ message: "Gagal memberhentikan sewa kos." });
+  } finally {
+    connection.release();
   }
 });
 
