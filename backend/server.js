@@ -18,9 +18,6 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Initialize Database
-initDb();
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -30,6 +27,17 @@ app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ limit: '5mb', extended: true }));
 app.use(morgan('dev'));
 app.use('/uploads', express.static(uploadsDir));
+
+// Ensure DB is fully initialized before routing any API requests
+app.use(async (req, res, next) => {
+  try {
+    await initDb();
+    next();
+  } catch (err) {
+    console.error("Database initialization failed in middleware:", err);
+    res.status(500).json({ message: "Database initialization failed: " + err.message });
+  }
+});
 
 // Mount API router
 app.use('/api', router);
