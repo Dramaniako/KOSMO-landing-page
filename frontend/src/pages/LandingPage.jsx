@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Search, MapPin, Star, Wifi, Tv, Wind, Shield, 
+import {
+  Search, MapPin, Star, Wifi, Tv, Wind, Shield,
   Droplet, Check, X, ArrowRight, ShieldCheck, Heart,
   Zap, Sparkles, Car, Download
 } from 'lucide-react';
@@ -16,7 +16,7 @@ export default function LandingPage() {
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [showContract, setShowContract] = useState(false);
   const [contractSigned, setContractSigned] = useState(false);
-  
+
   // Filter States
   const [district, setDistrict] = useState('Semua');
   const [priceMax, setPriceMax] = useState(10000000);
@@ -35,7 +35,7 @@ export default function LandingPage() {
     fetchProperties();
     fetchReviews();
     // Track visitor
-    fetch(`${API_BASE}/tracking/visit`, { method: 'POST' }).catch(() => {});
+    fetch(`${API_BASE}/tracking/visit`, { method: 'POST' }).catch(() => { });
   }, []);
 
   const fetchProperties = async (queryParams = '') => {
@@ -67,7 +67,7 @@ export default function LandingPage() {
     if (district !== 'Semua') {
       query += `&district=${district}`;
     }
-    
+
     // Add selected facilities
     Object.keys(facilities).forEach(fac => {
       if (facilities[fac]) {
@@ -151,18 +151,18 @@ export default function LandingPage() {
                 {currentUser.role === 'landlord' ? (
                   <>
                     <li>
-                      <a 
-                        href="#" 
-                        className="nav-link" 
+                      <a
+                        href="#"
+                        className="nav-link"
                         onClick={(e) => { e.preventDefault(); navigate('/tenant'); }}
                       >
                         Sesi Penyewa
                       </a>
                     </li>
                     <li>
-                      <a 
-                        href="#" 
-                        className="nav-link" 
+                      <a
+                        href="#"
+                        className="nav-link"
                         onClick={(e) => { e.preventDefault(); navigate('/landlord'); }}
                       >
                         Sesi Landlord
@@ -171,12 +171,12 @@ export default function LandingPage() {
                   </>
                 ) : (
                   <li>
-                    <a 
-                      href="#" 
-                      className="nav-link" 
-                      onClick={(e) => { 
-                        e.preventDefault(); 
-                        navigate(currentUser.role === 'admin' ? '/admin' : '/tenant'); 
+                    <a
+                      href="#"
+                      className="nav-link"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        navigate(currentUser.role === 'admin' ? '/admin' : '/tenant');
                       }}
                     >
                       Dashboard ({currentUser.name})
@@ -184,12 +184,12 @@ export default function LandingPage() {
                   </li>
                 )}
                 <li>
-                  <button 
-                    className="btn btn-outline" 
-                    onClick={() => { 
-                      localStorage.removeItem('user'); 
-                      localStorage.removeItem('token'); 
-                      window.location.reload(); 
+                  <button
+                    className="btn btn-outline"
+                    onClick={() => {
+                      localStorage.removeItem('user');
+                      localStorage.removeItem('token');
+                      window.location.reload();
                     }}
                   >
                     Keluar
@@ -213,12 +213,12 @@ export default function LandingPage() {
           <p className="hero-desc">
             fasilitas all-inclusive dan gak bikin ribet di kantong.
           </p>
-          <a 
-            href="https://drive.google.com/drive/folders/YOUR_FOLDER_ID" 
-            target="_blank" 
+          <a
+            href="https://drive.google.com/drive/folders/1PAebHs8setFkcATSIotBtRWzvW83au3o?usp=sharing"
+            target="_blank"
             rel="noopener noreferrer"
             className="btn btn-primary"
-            style={{ 
+            style={{
               display: 'inline-flex', alignItems: 'center', gap: '8px',
               marginTop: '16px', padding: '12px 28px', fontSize: '1rem',
               background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
@@ -237,9 +237,9 @@ export default function LandingPage() {
         <form onSubmit={handleSearch} className="filter-bar glass-panel">
           <div>
             <label className="form-label">Kabupaten / Kota</label>
-            <select 
-              className="form-select" 
-              value={district} 
+            <select
+              className="form-select"
+              value={district}
               onChange={(e) => setDistrict(e.target.value)}
             >
               <option value="Semua">Semua Wilayah</option>
@@ -251,14 +251,14 @@ export default function LandingPage() {
 
           <div>
             <label className="form-label">Harga Maksimal ({formatPrice(priceMax)}/bln)</label>
-            <input 
-              type="range" 
-              className="form-input" 
+            <input
+              type="range"
+              className="form-input"
               style={{ padding: '8px 0', cursor: 'pointer' }}
-              min="1000000" 
-              max="10000000" 
+              min="1000000"
+              max="10000000"
               step="500000"
-              value={priceMax} 
+              value={priceMax}
               onChange={(e) => setPriceMax(parseInt(e.target.value))}
             />
           </div>
@@ -319,9 +319,9 @@ export default function LandingPage() {
               return (
                 <div key={prop.id} className="card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                   <div style={{ position: 'relative', height: '220px', overflow: 'hidden' }}>
-                    <img 
-                      src={prop.image} 
-                      alt={prop.name} 
+                    <img
+                      src={prop.image}
+                      alt={prop.name}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                     <div style={{ position: 'absolute', top: '12px', left: '12px' }} className="badge badge-primary">
@@ -331,7 +331,7 @@ export default function LandingPage() {
                       <Heart size={16} style={{ color: 'var(--danger)', fill: 'var(--danger)' }} />
                     </div>
                   </div>
-                  
+
                   <div style={{ padding: '20px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                     <div>
                       <div className="flex-between" style={{ marginBottom: '8px' }}>
@@ -344,7 +344,7 @@ export default function LandingPage() {
                           <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: 400 }}>({propReviews.length})</span>
                         </div>
                       </div>
-                      
+
                       <h3 style={{ fontSize: '18px', marginBottom: '8px', lineHeight: 1.3 }}>{prop.name}</h3>
                       <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                         {prop.description}
@@ -400,13 +400,13 @@ export default function LandingPage() {
                   </div>
                   <div style={{ display: 'flex', gap: '2px' }}>
                     {[...Array(5)].map((_, i) => (
-                      <Star 
-                        key={i} 
-                        size={14} 
-                        style={{ 
-                          fill: i < rev.rating ? '#f59e0b' : 'transparent', 
-                          color: i < rev.rating ? '#f59e0b' : '#cbd5e1' 
-                        }} 
+                      <Star
+                        key={i}
+                        size={14}
+                        style={{
+                          fill: i < rev.rating ? '#f59e0b' : 'transparent',
+                          color: i < rev.rating ? '#f59e0b' : '#cbd5e1'
+                        }}
                       />
                     ))}
                   </div>
@@ -430,7 +430,7 @@ export default function LandingPage() {
             <button className="modal-close" onClick={() => setSelectedProperty(null)}>
               <X size={20} />
             </button>
-            
+
             {showContract ? (
               /* Simulated Contract signing view (matching 'Tinjauan Kontrak' screenshot) */
               <div style={{ padding: '40px' }}>
@@ -439,11 +439,11 @@ export default function LandingPage() {
                   <h2>Tinjauan Kontrak Sewa</h2>
                   <p style={{ color: 'var(--text-muted)' }}>Silakan tinjau dan tanda tangani surat perjanjian sewa menyewa properti kos.</p>
                 </div>
-                
-                <div style={{ 
-                  background: '#f8fafc', 
-                  border: '1px solid var(--border-color)', 
-                  padding: '24px', 
+
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1px solid var(--border-color)',
+                  padding: '24px',
                   borderRadius: 'var(--radius-md)',
                   maxHeight: '300px',
                   overflowY: 'auto',
@@ -485,8 +485,8 @@ export default function LandingPage() {
                   <button className="btn btn-outline" onClick={() => setShowContract(false)}>
                     Kembali
                   </button>
-                  <button 
-                    className="btn btn-primary" 
+                  <button
+                    className="btn btn-primary"
                     disabled={contractSigned}
                     onClick={() => {
                       const agree = document.getElementById('agree');
@@ -505,16 +505,16 @@ export default function LandingPage() {
               /* Standard Property Detail View */
               <div>
                 <div style={{ height: '350px', position: 'relative' }}>
-                  <img 
-                    src={selectedProperty.image} 
-                    alt={selectedProperty.name} 
+                  <img
+                    src={selectedProperty.image}
+                    alt={selectedProperty.name}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
-                  <div style={{ 
-                    position: 'absolute', 
-                    bottom: '0', 
-                    left: '0', 
-                    right: '0', 
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '0',
+                    left: '0',
+                    right: '0',
                     background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)',
                     padding: '30px 40px',
                     color: 'white'
@@ -584,18 +584,18 @@ export default function LandingPage() {
                         <span style={{ fontWeight: 600 }}>{selectedProperty.totalRooms - selectedProperty.occupiedRooms} / {selectedProperty.totalRooms} Kamar</span>
                       </div>
                       <div style={{ background: '#e2e8f0', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
-                        <div style={{ 
-                          background: 'var(--primary)', 
-                          height: '100%', 
-                          width: `${(selectedProperty.occupiedRooms / selectedProperty.totalRooms) * 100}%` 
+                        <div style={{
+                          background: 'var(--primary)',
+                          height: '100%',
+                          width: `${(selectedProperty.occupiedRooms / selectedProperty.totalRooms) * 100}%`
                         }}></div>
                       </div>
                     </div>
 
                     {currentUser ? (
                       currentUser.role === 'tenant' ? (
-                        <button 
-                          className="btn btn-primary" 
+                        <button
+                          className="btn btn-primary"
                           style={{ width: '100%', padding: '12px' }}
                           onClick={() => setShowContract(true)}
                           disabled={selectedProperty.totalRooms <= selectedProperty.occupiedRooms}
@@ -608,8 +608,8 @@ export default function LandingPage() {
                         </div>
                       )
                     ) : (
-                      <button 
-                        className="btn btn-primary" 
+                      <button
+                        className="btn btn-primary"
                         style={{ width: '100%', padding: '12px' }}
                         onClick={() => navigate('/login')}
                       >
@@ -636,13 +636,13 @@ export default function LandingPage() {
                             <strong style={{ fontSize: '14px' }}>{rev.userName}</strong>
                             <div style={{ display: 'flex', gap: '2px' }}>
                               {[...Array(5)].map((_, i) => (
-                                <Star 
-                                  key={i} 
-                                  size={12} 
-                                  style={{ 
-                                    fill: i < rev.rating ? '#f59e0b' : 'transparent', 
-                                    color: i < rev.rating ? '#f59e0b' : '#cbd5e1' 
-                                  }} 
+                                <Star
+                                  key={i}
+                                  size={12}
+                                  style={{
+                                    fill: i < rev.rating ? '#f59e0b' : 'transparent',
+                                    color: i < rev.rating ? '#f59e0b' : '#cbd5e1'
+                                  }}
                                 />
                               ))}
                             </div>
@@ -671,7 +671,7 @@ export default function LandingPage() {
               <span>KOSMO</span>
             </div>
             <p style={{ fontSize: '14px', lineHeight: 1.6 }}>
-              KOSMO adalah platform co-living terintegrasi untuk digital nomad dan profesional muda di Bali. 
+              KOSMO adalah platform co-living terintegrasi untuk digital nomad dan profesional muda di Bali.
               Sewa kamar modern dengan fasilitas lengkap tanpa ribet.
             </p>
           </div>
