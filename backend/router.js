@@ -363,7 +363,7 @@ router.post('/properties', async (req, res) => {
 
 router.put('/properties/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, occupiedRooms, image } = req.body;
+  const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image } = req.body;
 
   const connection = await pool.getConnection();
   try {
@@ -376,11 +376,11 @@ router.put('/properties/:id', async (req, res) => {
 
     await connection.query(
       `UPDATE properties SET name = ?, district = ?, address = ?, price = ?, description = ?, 
-       latitude = ?, longitude = ?, totalRooms = ?, occupiedRooms = ?, image = ? 
+       latitude = ?, longitude = ?, totalRooms = ?, image = ? 
        WHERE id = ?`,
       [
         name, district, address, parseInt(price), description, 
-        latitude, longitude, parseInt(totalRooms), parseInt(occupiedRooms || 0), image, id
+        latitude, longitude, parseInt(totalRooms), image, id
       ]
     );
 
