@@ -971,14 +971,26 @@ router.post('/withdraw', authenticateToken, async (req: Request<Record<string, n
   }
 });
 
-router.get('/admin/withdrawals', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
+router.get('/admin/withdrawals', authenticateToken, requireRole(['admin']), async (req: Request, res: Response) => {
+  const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+  const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+  const offsetParam = req.query.offset ? parseInt(String(req.query.offset), 10) : (limitParam ? (pageParam - 1) * limitParam : 0);
+
   try {
-    const [rows] = await pool.query<WithdrawalRow[]>(`
+    let sql = `
       SELECT w.*, u.name as userName, u.email as userEmail, u.phone as userPhone
       FROM withdrawals w
       LEFT JOIN users u ON w.userId = u.id
       ORDER BY w.date DESC
-    `);
+    `;
+    const params: (string | number)[] = [];
+
+    if (limitParam && limitParam > 0) {
+      sql += ' LIMIT ? OFFSET ?';
+      params.push(limitParam, Math.max(0, offsetParam));
+    }
+
+    const [rows] = await pool.query<WithdrawalRow[]>(sql, params);
     res.json(rows);
   } catch (err) {
     console.error("Get admin withdrawals error:", err);
@@ -1405,13 +1417,24 @@ router.post('/auth/verify-password', async (req: Request<Record<string, never>, 
 // ==========================================
 router.get('/rentals', authenticateToken, async (req: Request, res: Response) => {
   const { tenantId } = req.query;
+  const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+  const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+  const offsetParam = req.query.offset ? parseInt(String(req.query.offset), 10) : (limitParam ? (pageParam - 1) * limitParam : 0);
+
   try {
     let sql = 'SELECT * FROM rentals WHERE 1=1';
-    const params: string[] = [];
+    const params: (string | number)[] = [];
     if (tenantId) {
       sql += ' AND tenantId = ?';
       params.push(String(tenantId));
     }
+    sql += ' ORDER BY id DESC';
+
+    if (limitParam && limitParam > 0) {
+      sql += ' LIMIT ? OFFSET ?';
+      params.push(limitParam, Math.max(0, offsetParam));
+    }
+
     const [rows] = await pool.query<RentalRow[]>(sql, params);
     res.json(rows);
   } catch (err) {

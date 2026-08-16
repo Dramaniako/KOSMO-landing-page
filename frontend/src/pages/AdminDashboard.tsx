@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Users, Building, Star, Trash2, Edit, Plus, LogOut, 
@@ -275,11 +275,58 @@ export default function AdminDashboard() {
     comment: ''
   });
 
+  const loadedTabs = useRef<Set<string>>(new Set());
+
+  const fetchUsers = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/users`);
+      const data = (await res.json()) as User[];
+      setUsers(Array.isArray(data) ? data : []);
+      loadedTabs.current.add('users');
+    } catch (err) {
+      console.error('Error loading users:', err);
+    }
+  }, []);
+
+  const fetchProperties = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/properties`);
+      const data = (await res.json()) as Property[];
+      setProperties(Array.isArray(data) ? data : []);
+      loadedTabs.current.add('properties');
+    } catch (err) {
+      console.error('Error loading properties:', err);
+    }
+  }, []);
+
+  const fetchReviews = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/reviews`);
+      const data = (await res.json()) as Review[];
+      setReviews(Array.isArray(data) ? data : []);
+      loadedTabs.current.add('reviews');
+    } catch (err) {
+      console.error('Error loading reviews:', err);
+    }
+  }, []);
+
+  const fetchWithdrawals = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/withdrawals`);
+      const data = (await res.json()) as Withdrawal[];
+      setWithdrawals(Array.isArray(data) ? data : []);
+      loadedTabs.current.add('withdrawals');
+    } catch (err) {
+      console.error('Error loading withdrawals:', err);
+    }
+  }, []);
+
   const fetchStats = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch(`${API_BASE}/admin/stats`);
       const data = (await res.json()) as AdminStats;
       setStats(data);
+      loadedTabs.current.add('tracking');
     } catch (err) {
       console.error('Error loading stats:', err);
     }
@@ -298,32 +345,20 @@ export default function AdminDashboard() {
   const fetchData = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
-      // Fetch users
-      const userRes = await fetch(`${API_BASE}/users`);
-      const userData = (await userRes.json()) as User[];
-      setUsers(Array.isArray(userData) ? userData : []);
-
-      // Fetch properties
-      const propRes = await fetch(`${API_BASE}/properties`);
-      const propData = (await propRes.json()) as Property[];
-      setProperties(Array.isArray(propData) ? propData : []);
-
-      // Fetch reviews
-      const revRes = await fetch(`${API_BASE}/reviews`);
-      const revData = (await revRes.json()) as Review[];
-      setReviews(Array.isArray(revData) ? revData : []);
-
-      // Fetch withdrawals
-      const withRes = await fetch(`${API_BASE}/admin/withdrawals`);
-      const withData = (await withRes.json()) as Withdrawal[];
-      setWithdrawals(Array.isArray(withData) ? withData : []);
+      await Promise.all([
+        fetchUsers(),
+        fetchProperties(),
+        fetchReviews(),
+        fetchWithdrawals()
+      ]);
     } catch (err) {
       console.error("Error loading admin dashboard data:", err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchUsers, fetchProperties, fetchReviews, fetchWithdrawals]);
 
+  // Auth check & on-demand tab loader
   useEffect(() => {
     const raw = localStorage.getItem('user');
     const curUser = raw ? (JSON.parse(raw) as User) : null;
@@ -331,10 +366,20 @@ export default function AdminDashboard() {
       navigate('/login');
       return;
     }
-    fetchData();
-    fetchStats();
-    fetchTrackingHistory();
-  }, [navigate, fetchData, fetchStats, fetchTrackingHistory]);
+
+    if (activeTab === 'users' && !loadedTabs.current.has('users')) {
+      fetchUsers();
+    } else if (activeTab === 'properties' && !loadedTabs.current.has('properties')) {
+      fetchProperties();
+    } else if (activeTab === 'reviews' && !loadedTabs.current.has('reviews')) {
+      fetchReviews();
+    } else if (activeTab === 'withdrawals' && !loadedTabs.current.has('withdrawals')) {
+      fetchWithdrawals();
+    } else if (activeTab === 'tracking' && !loadedTabs.current.has('tracking')) {
+      fetchStats();
+      fetchTrackingHistory();
+    }
+  }, [navigate, activeTab, fetchUsers, fetchProperties, fetchReviews, fetchWithdrawals, fetchStats, fetchTrackingHistory]);
 
   const handleLogout = (): void => {
     localStorage.removeItem('user');
