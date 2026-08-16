@@ -1,8 +1,24 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   MapPin, Star, X, ArrowRight, ShieldCheck, Download, CreditCard, Sparkles, Check
 } from 'lucide-react';
 import { Property, User } from '../types/index.ts';
+
+declare global {
+  interface Window {
+    snap?: {
+      pay: (
+        token: string,
+        options: {
+          onSuccess?: (result: unknown) => void;
+          onPending?: (result: unknown) => void;
+          onError?: (result: unknown) => void;
+          onClose?: () => void;
+        }
+      ) => void;
+    };
+  }
+}
 
 export interface Props {
   property: Property | null;
@@ -39,6 +55,18 @@ export default function BookingModal({
   onNavigateToLogin,
   renderFacilityIcon
 }: Props) {
+  useEffect(() => {
+    const snapScriptUrl = 'https://app.sandbox.midtrans.com/snap/snap.js';
+    const clientKey = 'SB-Mid-client-placeholder';
+    if (!document.querySelector(`script[src="${snapScriptUrl}"]`)) {
+      const script = document.createElement('script');
+      script.src = snapScriptUrl;
+      script.setAttribute('data-client-key', clientKey);
+      script.async = true;
+      document.body.appendChild(script);
+    }
+  }, []);
+
   if (!property) return null;
 
   const formatRupiah = (val: number): string => {

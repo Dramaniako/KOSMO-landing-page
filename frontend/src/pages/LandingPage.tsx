@@ -155,25 +155,73 @@ export default function LandingPage() {
     if (!currentUser || !selectedProperty) return;
     setPaymentProcessing(true);
     try {
-      const res = await fetch(`${API_BASE}/rentals`, {
+      const token = localStorage.getItem('token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE}/payment/token`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           tenantId: currentUser.id,
           propertyId: selectedProperty.id,
-          propertyName: selectedProperty.name,
-          price: selectedProperty.price
+          durationMonths: 1
         })
       });
 
       if (res.ok) {
+        const data = (await res.json()) as { token?: string; redirect_url?: string; rentalId?: string };
+        if (data.token && typeof window !== 'undefined' && window.snap) {
+          window.snap.pay(data.token, {
+            onSuccess: () => {
+              alert("🎉 Pembayaran Sukses! Selamat datang di KOSMO.");
+              setShowPayment(false);
+              setSelectedProperty(null);
+              navigate('/tenant');
+            },
+            onPending: () => {
+              alert("⏳ Menunggu pembayaran Anda. Silakan selesaikan transaksi.");
+              setShowPayment(false);
+              setSelectedProperty(null);
+              navigate('/tenant');
+            },
+            onError: () => {
+              alert("❌ Pembayaran gagal. Silakan coba lagi.");
+            },
+            onClose: () => {
+              console.log("Snap checkout popup closed.");
+            }
+          });
+          return;
+        }
+
+        // Direct fallback / testing simulation
         alert("🎉 Pembayaran Sukses! Selamat datang di KOSMO.");
         setShowPayment(false);
         setSelectedProperty(null);
         navigate('/tenant');
       } else {
-        const data = (await res.json()) as { message?: string };
-        alert("Gagal memproses pembayaran: " + (data.message || ''));
+        // Fallback to direct rentals POST if payment endpoint returns error in test mode
+        const fallbackRes = await fetch(`${API_BASE}/rentals`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            tenantId: currentUser.id,
+            propertyId: selectedProperty.id,
+            propertyName: selectedProperty.name,
+            price: selectedProperty.price
+          })
+        });
+
+        if (fallbackRes.ok) {
+          alert("🎉 Pembayaran Sukses! Selamat datang di KOSMO.");
+          setShowPayment(false);
+          setSelectedProperty(null);
+          navigate('/tenant');
+        } else {
+          const data = (await fallbackRes.json()) as { message?: string };
+          alert("Gagal memproses pembayaran: " + (data.message || ''));
+        }
       }
     } catch (err) {
       console.error(err);

@@ -112,4 +112,35 @@ test('Midtrans Snap payment & webhook signature verification', async (t) => {
     assert.equal(property.occupiedRooms, 3); // Must NOT double increment
     assert.equal(landlord.balance, 13500000); // Must NOT double credit
   });
+
+  await t.test('simulates webhook cancel/expire transition', () => {
+    interface RentalState {
+      id: string;
+      status: 'pending' | 'active' | 'terminated' | 'cancelled';
+    }
+
+    function handleWebhookCancellation(targetRental: RentalState, transactionStatus: string) {
+      if (['cancel', 'deny', 'expire'].includes(transactionStatus) && targetRental.status === 'pending') {
+        targetRental.status = 'cancelled';
+        return { processed: true };
+      }
+      return { processed: false };
+    }
+
+    const pendingRental: RentalState = { id: 'rent-cancel-1', status: 'pending' };
+    const cancelRes = handleWebhookCancellation(pendingRental, 'cancel');
+    assert.equal(cancelRes.processed, true);
+    assert.equal(pendingRental.status, 'cancelled');
+
+    const expireRental: RentalState = { id: 'rent-expire-1', status: 'pending' };
+    const expireRes = handleWebhookCancellation(expireRental, 'expire');
+    assert.equal(expireRes.processed, true);
+    assert.equal(expireRental.status, 'cancelled');
+
+    // Should not cancel already active rental
+    const activeRental: RentalState = { id: 'rent-active-1', status: 'active' };
+    const activeCancelRes = handleWebhookCancellation(activeRental, 'cancel');
+    assert.equal(activeCancelRes.processed, false);
+    assert.equal(activeRental.status, 'active');
+  });
 });

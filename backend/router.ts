@@ -1711,6 +1711,17 @@ router.post('/payment/webhook', async (req: Request<Record<string, never>, unkno
     }
   }
 
+  // Handle cancel, deny, or expire
+  if (transaction_status === 'cancel' || transaction_status === 'deny' || transaction_status === 'expire') {
+    try {
+      await pool.query("UPDATE rentals SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [order_id]);
+      return res.json({ message: `Status transaksi dibatalkan (${transaction_status}).` });
+    } catch (err: unknown) {
+      console.error("Cancel rental error:", err);
+      return res.status(500).json({ message: "Gagal memperbarui status transaksi." });
+    }
+  }
+
   res.json({ message: "Status notifikasi diterima." });
 });
 

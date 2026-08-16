@@ -251,12 +251,16 @@ export async function initDb(): Promise<void> {
           propertyName VARCHAR(100),
           price INT,
           startDate VARCHAR(50),
-          status ENUM('pending','active','terminated') DEFAULT 'pending',
+          status ENUM('pending','active','terminated','cancelled') DEFAULT 'pending',
           document VARCHAR(255) DEFAULT '',
           FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
           FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
+
+      try {
+        await pool.query("ALTER TABLE rentals MODIFY status ENUM('pending','active','terminated','cancelled') DEFAULT 'pending'");
+      } catch (e) {}
 
       // Seed Users if empty
       const [userRows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM users');
