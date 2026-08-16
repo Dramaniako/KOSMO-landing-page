@@ -1,0 +1,54 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  verify:
+    name: Verify & Test Suite
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      PORT: 5000
+      JWT_SECRET: super-secret-jwt-key-with-high-entropy-minimum-32-chars
+      DB_HOST: ${{ secrets.DB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com' }}
+      DB_PORT: ${{ secrets.DB_PORT || '4000' }}
+      DB_USER: ${{ secrets.DB_USER || '279JPYgaVYKwVMe.root' }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD || 'GoNOAo3Wuiljqq5d' }}
+      DB_NAME: ${{ secrets.DB_NAME || 'kosmo_db' }}
+      DB_SSL: 'true'
+      CLOUDINARY_CLOUD_NAME: kosmo-bali
+      CLOUDINARY_API_KEY: '123456789012345'
+      CLOUDINARY_API_SECRET: sample-secret-api-key-here
+      MIDTRANS_SERVER_KEY: SB-Mid-server-your-server-key-here
+      MIDTRANS_CLIENT_KEY: SB-Mid-client-your-client-key-here
+      MIDTRANS_IS_PRODUCTION: 'false'
+      CI: 'true'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Root Dependencies
+        run: npm ci
+
+      - name: Install Frontend Dependencies
+        run: npm --prefix frontend ci
+
+      - name: Install Playwright Browsers & OS Dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Set Execution Permissions for Verification Gate
+        run: chmod +x scripts/verify.sh
+
+      - name: Run Full 5-Gate Verification Pipeline
+        run: ./scripts/verify.sh
