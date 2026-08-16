@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "cd frontend && npm install && npm run build",
-    "start": "cd backend && node server.js"
+    "start": "cd backend && node server.js",
+    "test": "node --experimental-strip-types --test tests/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
