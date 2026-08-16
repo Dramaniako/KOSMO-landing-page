@@ -212,38 +212,36 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="landing-page">
+    <div className="min-h-screen bg-slate-50 text-slate-800 landing-page">
       {/* Header Navigation */}
-      <header className="site-header glass-panel">
-        <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => navigate('/')}>
-            <div className="flex-center" style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--primary)', color: 'white' }}>
-              <ShieldCheck size={24} />
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-sm site-header">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate('/')}>
+            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
+              <ShieldCheck size={22} />
             </div>
             <div>
-              <span style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '-0.5px' }}>KOSMO</span>
-              <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 700, display: 'block', lineHeight: 1 }}>BALI CO-LIVING</span>
+              <span className="text-xl font-black tracking-tight text-slate-900 leading-none block">KOSMO</span>
+              <span className="text-[10px] font-bold text-blue-600 tracking-wider block mt-0.5">BALI CO-LIVING</span>
             </div>
           </div>
 
-          <nav style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <a href="#properties" style={{ textDecoration: 'none', color: 'var(--text-main)', fontSize: '14px', fontWeight: 600 }}>Properti</a>
-            <a href="#all-inclusive" style={{ textDecoration: 'none', color: 'var(--text-main)', fontSize: '14px', fontWeight: 600 }}>All-Inclusive</a>
-            <a href="#reviews" style={{ textDecoration: 'none', color: 'var(--text-main)', fontSize: '14px', fontWeight: 600 }}>Ulasan</a>
+          <nav className="flex items-center gap-6">
+            <a href="#properties" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors hidden sm:block">Properti</a>
+            <a href="#all-inclusive" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors hidden sm:block">All-Inclusive</a>
+            <a href="#reviews" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors hidden sm:block">Ulasan</a>
 
             {currentUser ? (
               <button
-                className="btn btn-primary"
+                className="btn btn-primary bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-sm transition-all"
                 onClick={handleUserDashboardRedirect}
-                style={{ padding: '8px 16px', fontSize: '13px' }}
               >
                 Dasbor ({currentUser.name})
               </button>
             ) : (
               <button
-                className="btn btn-outline"
+                className="btn btn-outline border border-slate-300 hover:border-slate-400 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl bg-white hover:bg-slate-50 transition-all"
                 onClick={() => navigate('/login')}
-                style={{ padding: '8px 16px', fontSize: '13px' }}
               >
                 Masuk / Daftar
               </button>
@@ -253,23 +251,23 @@ export default function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="hero-section">
-        <div className="container" style={{ textAlign: 'center', maxWidth: '800px', margin: '0 auto', position: 'relative', zIndex: 1 }}>
-          <div className="badge flex-center" style={{ width: 'fit-content', margin: '0 auto 16px auto', gap: '6px' }}>
+      <section className="relative overflow-hidden bg-gradient-to-b from-blue-50/60 via-slate-50 to-slate-50 pt-16 pb-20 hero-section">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-100/80 text-blue-700 text-xs font-bold mb-6 border border-blue-200/60 shadow-sm">
             <Sparkles size={14} />
             <span>Smart Co-Living Experience in Bali</span>
           </div>
-          <h1 style={{ fontSize: '46px', fontWeight: 900, lineHeight: 1.15, marginBottom: '20px', letterSpacing: '-1px' }}>
-            Tinggal Nyaman, Bebas Ribet dengan <span style={{ color: 'var(--primary)' }}>All-Inclusive</span> Rent
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 tracking-tight max-w-4xl mx-auto leading-tight mb-6">
+            Tinggal Nyaman, Bebas Ribet dengan <span className="text-blue-600">All-Inclusive</span> Rent
           </h1>
-          <p style={{ fontSize: '18px', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '32px' }}>
+          <p className="text-base sm:text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed mb-8">
             Satu harga bulanan sudah termasuk Listrik, Air, Wifi High-Speed, Kebersihan, Keamanan & Parkir. Tanpa tagihan tak terduga.
           </p>
         </div>
       </section>
 
       {/* Search and Filters */}
-      <section className="container" style={{ marginTop: '-40px', position: 'relative', zIndex: 2 }}>
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 relative z-20">
         <SearchFilterBar
           district={district}
           setDistrict={setDistrict}
@@ -284,35 +282,35 @@ export default function LandingPage() {
       </section>
 
       {/* Property Listings */}
-      <section id="properties" className="container" style={{ padding: '60px 24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px' }}>
+      <section id="properties" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-2">
           <div>
-            <h2 style={{ fontSize: '28px', fontWeight: 800 }}>Pilihan Kos & Co-Living</h2>
-            <p style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Pilihan Kos & Co-Living</h2>
+            <p className="text-sm text-slate-500 mt-1">
               Daftar hunian eksklusif dengan sistem smart lock dan fasilitas lengkap di Bali
             </p>
           </div>
-          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-muted)' }}>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
             Menampilkan {properties.length} properti
           </span>
         </div>
 
         {loading ? (
-          <div className="flex-center" style={{ minHeight: '300px' }}>
-            <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Memuat properti...</div>
+          <div className="flex items-center justify-center min-h-[300px]">
+            <div className="text-center text-slate-400 font-medium text-sm">Memuat properti...</div>
           </div>
         ) : properties.length === 0 ? (
-          <div className="card glass-panel" style={{ padding: '48px', textAlign: 'center' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>Tidak Ada Properti Ditemukan</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '20px' }}>
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-sm">
+            <h3 className="text-lg font-bold text-slate-800 mb-2">Tidak Ada Properti Ditemukan</h3>
+            <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
               Coba sesuaikan filter wilayah atau turunkan fasilitas pencarian Anda.
             </p>
-            <button className="btn btn-primary" onClick={resetFilters}>
+            <button className="btn btn-primary bg-blue-600 text-white text-xs font-semibold px-5 py-2.5 rounded-xl" onClick={resetFilters}>
               Reset Semua Filter
             </button>
           </div>
         ) : (
-          <div className="property-grid">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 property-grid">
             {properties.map((prop) => (
               <KosCard
                 key={prop.id}
@@ -326,46 +324,46 @@ export default function LandingPage() {
       </section>
 
       {/* All-Inclusive Feature Highlight Section */}
-      <section id="all-inclusive" style={{ backgroundColor: 'var(--bg-main)', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', padding: '80px 24px' }}>
-        <div className="container" style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'center' }}>
-          <div className="badge flex-center" style={{ width: 'fit-content', margin: '0 auto 16px auto', gap: '6px' }}>
+      <section id="all-inclusive" className="bg-white border-y border-slate-200/80 py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold mb-4 border border-blue-100">
             <Zap size={14} />
             <span>KOSMO Transparency Guarantee</span>
           </div>
-          <h2 style={{ fontSize: '32px', fontWeight: 800, marginBottom: '16px' }}>
+          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight mb-4">
             Kenapa Memilih KOSMO All-Inclusive?
           </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '16px', maxWidth: '640px', margin: '0 auto 48px auto' }}>
+          <p className="text-slate-600 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed mb-12">
             Tidak ada lagi kejutan tagihan listrik jebol atau internet lemot di akhir bulan. Semua kebutuhan utama Anda sudah tercover.
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', textAlign: 'left' }}>
-            <div className="card glass-panel" style={{ padding: '24px' }}>
-              <div className="flex-center" style={{ width: '44px', height: '44px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', marginBottom: '16px' }}>
-                <Zap size={22} />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200/80">
+              <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4">
+                <Zap size={24} />
               </div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>Listrik & Air Tanpa Batas</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.6 }}>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Listrik & Air Tanpa Batas</h3>
+              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
                 Gunakan AC dan peralatan elektronik Anda dengan tenang tanpa pusing memikirkan token listrik habis tengah malam.
               </p>
             </div>
 
-            <div className="card glass-panel" style={{ padding: '24px' }}>
-              <div className="flex-center" style={{ width: '44px', height: '44px', borderRadius: 'var(--radius-sm)', backgroundColor: '#fdf2f8', color: '#db2777', marginBottom: '16px' }}>
-                <Wifi size={22} />
+            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200/80">
+              <div className="w-12 h-12 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center mb-4">
+                <Wifi size={24} />
               </div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>Dedicated High-Speed WiFi</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.6 }}>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Dedicated High-Speed WiFi</h3>
+              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
                 Dirancang khusus untuk remote worker dan digital nomad dengan koneksi stabil, backup provider, dan area coworking.
               </p>
             </div>
 
-            <div className="card glass-panel" style={{ padding: '24px' }}>
-              <div className="flex-center" style={{ width: '44px', height: '44px', borderRadius: 'var(--radius-sm)', backgroundColor: '#ecfdf5', color: '#10b981', marginBottom: '16px' }}>
-                <ShieldCheck size={22} />
+            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200/80">
+              <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-4">
+                <ShieldCheck size={24} />
               </div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>Smart Lock & Keamanan 24/7</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.6 }}>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Smart Lock & Keamanan 24/7</h3>
+              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
                 Akses pintu kamar menggunakan PIN/Smart Card dan CCTV area umum untuk privasi dan kenyamanan maksimal.
               </p>
             </div>
@@ -374,34 +372,34 @@ export default function LandingPage() {
       </section>
 
       {/* Reviews Section */}
-      <section id="reviews" className="container" style={{ padding: '80px 24px' }}>
-        <div style={{ textAlign: 'center', marginBottom: '48px' }}>
-          <h2 style={{ fontSize: '30px', fontWeight: 800 }}>Apa Kata Penghuni KOSMO?</h2>
-          <p style={{ color: 'var(--text-muted)', marginTop: '6px' }}>
+      <section id="reviews" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Apa Kata Penghuni KOSMO?</h2>
+          <p className="text-sm text-slate-500 mt-2">
             Ulasan asli dan pengalaman langsung dari para digital nomad & tenant kami di Bali
           </p>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {reviews.map((rev) => (
-            <div key={rev.id} className="card glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div key={rev.id} className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                <div className="flex justify-between items-start mb-3">
                   <div>
-                    <h4 style={{ fontSize: '15px', fontWeight: 700 }}>{rev.userName}</h4>
-                    <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 600 }}>{rev.propertyName}</span>
+                    <h4 className="text-sm font-bold text-slate-900">{rev.userName}</h4>
+                    <span className="text-xs font-semibold text-blue-600">{rev.propertyName}</span>
                   </div>
-                  <div style={{ display: 'flex', color: '#f59e0b', gap: '2px' }}>
+                  <div className="flex text-amber-400">
                     {[...Array(rev.rating)].map((_, i) => (
-                      <Star key={i} size={14} fill="currentColor" />
+                      <Star key={i} size={13} fill="currentColor" />
                     ))}
                   </div>
                 </div>
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.6, fontStyle: 'italic' }}>
+                <p className="text-slate-600 text-xs leading-relaxed italic">
                   "{rev.comment}"
                 </p>
               </div>
-              <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-color)', fontSize: '11px', color: 'var(--text-muted)' }}>
+              <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400">
                 {rev.date}
               </div>
             </div>
@@ -410,18 +408,18 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer style={{ backgroundColor: 'white', borderTop: '1px solid var(--border-color)', padding: '40px 24px', textAlign: 'center' }}>
-        <div className="container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div className="flex-center" style={{ width: '32px', height: '32px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--primary)', color: 'white' }}>
+      <footer className="bg-white border-t border-slate-200/80 py-12 text-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
               <ShieldCheck size={18} />
             </div>
-            <span style={{ fontSize: '18px', fontWeight: 800 }}>KOSMO Bali</span>
+            <span className="text-base font-extrabold text-slate-900">KOSMO Bali</span>
           </div>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', maxWidth: '480px' }}>
+          <p className="text-xs text-slate-500 max-w-md">
             Platform persewaan kos & co-living all-inclusive terpercaya untuk kemudahan tinggal jangka panjang di Pulau Dewata.
           </p>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          <div className="text-[11px] text-slate-400">
             &copy; {new Date().getFullYear()} KOSMO Bali. Seluruh hak cipta dilindungi undang-undang.
           </div>
         </div>
