@@ -49,9 +49,9 @@ export function generateRentalContractPdf(
       doc.on('error', (err: Error) => reject(err));
 
       // Header / Document Title
-      doc.fontSize(18).font('Helvetica-Bold').text('SURAT PERJANJIAN SEWA KOS', { align: 'center' });
+      doc.fontSize(18).font('Helvetica-Bold').text('SURAT PERJANJIAN SEWA KOS KOSMO', { align: 'center' });
       doc.moveDown(0.3);
-      doc.fontSize(10).font('Helvetica').text(`Nomor Kontrak: KOSMO/${data.rentalId.toUpperCase()}`, { align: 'center' });
+      doc.fontSize(10).font('Helvetica').text(`Nomor Kontrak: KOSMO/${data.rentalId.toUpperCase()} • Tanggal: ${data.startDate}`, { align: 'center' });
       doc.moveDown(1.2);
 
       // Preamble

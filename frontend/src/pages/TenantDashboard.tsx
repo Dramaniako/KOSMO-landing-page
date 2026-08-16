@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   User as UserIcon, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
-  Plus, LogOut, Globe, MessageSquare, Building, X
+  Plus, LogOut, Globe, MessageSquare, Building, X, Download
 } from 'lucide-react';
 import { User, Property, Review, Rental } from '../types/index.ts';
 
@@ -483,18 +483,30 @@ export default function TenantDashboard() {
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <strong style={{ fontSize: '18px', color: 'var(--primary)', display: 'block' }}>Rp {rent.price ? rent.price.toLocaleString('id-ID') : '0'}/bln</strong>
-                      {rent.status === 'active' && (
-                        <button 
-                          className="btn btn-outline btn-danger" 
-                          style={{ marginTop: '8px', padding: '4px 12px', fontSize: '12px' }}
-                          onClick={() => {
-                            setTerminateRental(rent);
-                            setShowTerminateModal(true);
-                          }}
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                        <a
+                          href={`${API_BASE}/rentals/${rent.id}/contract`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-outline"
+                          style={{ padding: '4px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                         >
-                          Berhenti Menyewa
-                        </button>
-                      )}
+                          <Download size={13} />
+                          Unduh Kontrak Sewa (PDF)
+                        </a>
+                        {rent.status === 'active' && (
+                          <button 
+                            className="btn btn-outline btn-danger" 
+                            style={{ padding: '4px 12px', fontSize: '12px' }}
+                            onClick={() => {
+                              setTerminateRental(rent);
+                              setShowTerminateModal(true);
+                            }}
+                          >
+                            Berhenti Menyewa
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}

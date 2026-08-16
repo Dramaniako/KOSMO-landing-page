@@ -1470,6 +1470,42 @@ router.post('/rentals/:id/terminate', authenticateToken, async (req: Request<{ i
   }
 });
 
+router.get('/rentals/:id/contract', async (req: Request<{ id: string }>, res: Response) => {
+  const { id } = req.params;
+  try {
+    const [rentalRows] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE id = ?', [id]);
+    const rental = rentalRows[0];
+    if (!rental) {
+      return res.status(404).json({ message: "Data sewa tidak ditemukan." });
+    }
+
+    const [userRows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [rental.tenantId]);
+    const tenant = userRows[0];
+
+    const [propRows] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [rental.propertyId]);
+    const property = propRows[0];
+
+    const { buffer, fileName } = await generateRentalContractPdf({
+      rentalId: rental.id,
+      tenantName: tenant ? tenant.name : 'Penghuni KOSMO',
+      tenantEmail: tenant ? tenant.email : '',
+      tenantPhone: tenant ? (tenant.phone || '') : '',
+      propertyName: rental.propertyName || (property ? property.name : 'Unit KOSMO Bali'),
+      propertyAddress: property ? property.address : 'Bali, Indonesia',
+      pricePerMonth: rental.price || (property ? property.price : 0),
+      startDate: rental.startDate || new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
+      durationMonths: 1
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error("Get contract PDF error:", err);
+    res.status(500).json({ message: "Gagal membuat dokumen kontrak PDF." });
+  }
+});
+
 // ==========================================
 // Midtrans Snap Sandbox Payment Gateway
 // ==========================================

@@ -49,6 +49,7 @@ test('Express router endpoints registration', async (t) => {
       { path: '/rentals', method: 'get' },
       { path: '/rentals', method: 'post' },
       { path: '/rentals/:id/terminate', method: 'post' },
+      { path: '/rentals/:id/contract', method: 'get' },
       { path: '/payment/token', method: 'post' },
       { path: '/payment/webhook', method: 'post' }
     ];
