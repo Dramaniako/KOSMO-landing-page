@@ -1,11 +1,13 @@
 import express from 'express';
-import type { Request, Response, Router } from 'express';
+import type { Request, Response, Router, NextFunction } from 'express';
 import { pool } from './db.ts';
 import XLSX from 'xlsx';
 import multer from 'multer';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import type { SignOptions } from 'jsonwebtoken';
 import midtransClient from 'midtrans-client';
 import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
@@ -21,6 +23,64 @@ import type {
 } from './types/index.ts';
 
 const router: Router = express.Router();
+
+// ==========================================
+// JWT Authentication & Middleware
+// ==========================================
+export interface JWTPayload {
+  id: string;
+  email: string;
+  role: UserRole;
+}
+
+export function generateJwtToken(
+  payload: JWTPayload,
+  secret = process.env.JWT_SECRET || 'super-secret-jwt-key-with-high-entropy-minimum-32-chars',
+  expiresIn: SignOptions['expiresIn'] = '7d'
+): string {
+  const options: SignOptions = {};
+  if (expiresIn !== undefined) {
+    options.expiresIn = expiresIn;
+  }
+  return jwt.sign(payload, secret, options);
+}
+
+export function verifyJwtToken(
+  token: string,
+  secret = process.env.JWT_SECRET || 'super-secret-jwt-key-with-high-entropy-minimum-32-chars'
+): JWTPayload {
+  const decoded = jwt.verify(token, secret);
+  if (!decoded || typeof decoded !== 'object') {
+    throw new Error('Invalid token payload');
+  }
+  const { id, email, role } = decoded as Partial<JWTPayload>;
+  if (!id || !email || !role) {
+    throw new Error('Malformed token claims');
+  }
+  return { id, email, role };
+}
+
+export interface AuthenticatedRequest extends Request {
+  user?: JWTPayload;
+}
+
+export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+  if (!token) {
+    res.status(401).json({ message: 'Akses ditolak. Token otentikasi diperlukan.' });
+    return;
+  }
+
+  try {
+    const user = verifyJwtToken(token);
+    (req as AuthenticatedRequest).user = user;
+    next();
+  } catch (err: unknown) {
+    res.status(403).json({ message: 'Token tidak valid atau telah kedaluwarsa.' });
+  }
+};
 
 // Cloudinary CDN Configuration
 cloudinary.config({
@@ -173,7 +233,11 @@ router.post('/auth/login', async (req: Request<Record<string, never>, unknown, L
     // Exclude password from the returned object
     const safeUser: Partial<UserRow> = { ...user };
     delete safeUser.password;
-    const token = `token-${user.id}-${Date.now()}`;
+    const token = generateJwtToken({
+      id: user.id,
+      email: user.email,
+      role: user.role
+    });
 
     res.json({
       message: "Login berhasil!",
@@ -210,7 +274,11 @@ router.post('/auth/register', async (req: Request<Record<string, never>, unknown
     const newUser = newUsers[0];
     const safeUser: Partial<UserRow> = { ...newUser };
     delete safeUser.password;
-    const token = `token-${newUser.id}-${Date.now()}`;
+    const token = generateJwtToken({
+      id: newUser.id,
+      email: newUser.email,
+      role: newUser.role
+    });
 
     res.status(201).json({
       message: "Registrasi berhasil!",
@@ -252,7 +320,7 @@ interface AdminUpdateUserBody {
   password?: string;
 }
 
-router.get('/users/profile/:id', async (req: Request<{ id: string }>, res: Response) => {
+router.get('/users/profile/:id', authenticateToken, async (req: Request<{ id: string }>, res: Response) => {
   try {
     const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [req.params.id]);
     const user = rows[0];
@@ -267,7 +335,7 @@ router.get('/users/profile/:id', async (req: Request<{ id: string }>, res: Respo
   }
 });
 
-router.put('/users/profile/:id', async (req: Request<{ id: string }, unknown, UserProfileBody>, res: Response) => {
+router.put('/users/profile/:id', authenticateToken, async (req: Request<{ id: string }, unknown, UserProfileBody>, res: Response) => {
   const { id } = req.params;
   const { name, phone, paymentMethod, notifications, language } = req.body;
 
@@ -844,7 +912,7 @@ interface WithdrawBody {
   userId?: string;
 }
 
-router.post('/withdraw', async (req: Request<Record<string, never>, unknown, WithdrawBody>, res: Response) => {
+router.post('/withdraw', authenticateToken, async (req: Request<Record<string, never>, unknown, WithdrawBody>, res: Response) => {
   const { amount, bankName, accountNumber, userId } = req.body;
   if (!amount || !bankName || !accountNumber) {
     return res.status(400).json({ message: "Jumlah, nama bank, dan nomor rekening wajib diisi." });
@@ -934,7 +1002,7 @@ interface SumRow extends RowDataPacket {
   sum: number | null;
 }
 
-router.get('/admin/stats', async (_req: Request, res: Response) => {
+router.get('/admin/stats', authenticateToken, async (_req: Request, res: Response) => {
   try {
     const [visitorRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking');
     const totalVisitors = visitorRows[0].count;
@@ -970,7 +1038,7 @@ interface TrackingHistoryRow extends RowDataPacket {
   count: number;
 }
 
-router.get('/admin/tracking-history', async (_req: Request, res: Response) => {
+router.get('/admin/tracking-history', authenticateToken, async (_req: Request, res: Response) => {
   try {
     // 1. Last 24 Hours (grouped by hour)
     const [rows24h] = await pool.query<TrackingHistoryRow[]>(`
@@ -1081,7 +1149,7 @@ interface VisitorTrackingRow extends RowDataPacket {
   visited_at: Date | string;
 }
 
-router.get('/reports/tracking/excel', async (_req: Request, res: Response) => {
+router.get('/reports/tracking/excel', authenticateToken, async (_req: Request, res: Response) => {
   try {
     const [visitorRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking');
     const [userRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users');
@@ -1138,7 +1206,7 @@ interface RentalRow extends RowDataPacket {
   status: 'active' | 'terminated';
 }
 
-router.get('/reports/landlord/excel', async (req: Request, res: Response) => {
+router.get('/reports/landlord/excel', authenticateToken, async (req: Request, res: Response) => {
   const landlordId = String(req.query.landlordId || '');
   if (!landlordId) return res.status(400).json({ message: 'landlordId diperlukan.' });
   try {
@@ -1212,7 +1280,7 @@ router.post('/auth/verify-password', async (req: Request<Record<string, never>, 
 // ==========================================
 // Rentals / Booking Endpoints
 // ==========================================
-router.get('/rentals', async (req: Request, res: Response) => {
+router.get('/rentals', authenticateToken, async (req: Request, res: Response) => {
   const { tenantId } = req.query;
   try {
     let sql = 'SELECT * FROM rentals WHERE 1=1';
@@ -1236,7 +1304,7 @@ interface CreateRentalBody {
   price?: number;
 }
 
-router.post('/rentals', async (req: Request<Record<string, never>, unknown, CreateRentalBody>, res: Response) => {
+router.post('/rentals', authenticateToken, async (req: Request<Record<string, never>, unknown, CreateRentalBody>, res: Response) => {
   const { tenantId, propertyId, propertyName, price } = req.body;
   if (!tenantId || !propertyId) {
     return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
@@ -1291,7 +1359,7 @@ router.post('/rentals', async (req: Request<Record<string, never>, unknown, Crea
   }
 });
 
-router.post('/rentals/:id/terminate', async (req: Request<{ id: string }, unknown, { password?: string }>, res: Response) => {
+router.post('/rentals/:id/terminate', authenticateToken, async (req: Request<{ id: string }, unknown, { password?: string }>, res: Response) => {
   const { id } = req.params;
   const { password } = req.body;
   if (!password) {
@@ -1371,7 +1439,7 @@ interface PaymentTokenBody {
   durationMonths?: number;
 }
 
-router.post('/payment/token', async (req: Request<Record<string, never>, unknown, PaymentTokenBody>, res: Response) => {
+router.post('/payment/token', authenticateToken, async (req: Request<Record<string, never>, unknown, PaymentTokenBody>, res: Response) => {
   const { propertyId, tenantId, durationMonths } = req.body;
   if (!propertyId || !tenantId) {
     return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
