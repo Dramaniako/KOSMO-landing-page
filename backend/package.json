@@ -2,11 +2,11 @@
   "name": "kosmo-backend",
   "version": "1.0.0",
   "description": "Backend API for KOSMO Boarding House Rental System",
-  "main": "server.js",
+  "main": "server.ts",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node --experimental-strip-types server.ts",
+    "dev": "node --experimental-strip-types server.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

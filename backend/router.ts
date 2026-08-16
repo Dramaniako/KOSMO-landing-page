@@ -1,31 +1,36 @@
 import express from 'express';
-import { pool } from './db.js';
+import type { Request, Response, Router } from 'express';
+import { pool } from './db.ts';
 import XLSX from 'xlsx';
 import multer from 'multer';
+import type { File as MulterFile } from 'multer';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
+import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import type {
+  KosRoom,
+  Booking,
+  User,
+  UserRole,
+  Amenity,
+  BookingStatus
+} from './types/index.ts';
 
-const router = express.Router();
+const router: Router = express.Router();
 
-// Multer File Upload configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
+// Multer in-memory file upload configuration
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
 
 // Generic Upload endpoint
-router.post('/upload', upload.single('image'), (req, res) => {
+interface MulterRequest extends Request {
+  file?: MulterFile;
+}
+
+router.post('/upload', upload.single('image'), (req: MulterRequest, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ message: 'Tidak ada file yang diunggah.' });
   }
@@ -34,27 +39,59 @@ router.post('/upload', upload.single('image'), (req, res) => {
 });
 
 // ID Generator
-const generateId = (prefix) => `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
+const generateId = (prefix: string): string => `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
 
 // ==========================================
 // Authentication Endpoints
 // ==========================================
-router.post('/auth/login', async (req, res) => {
+interface LoginBody {
+  email?: string;
+  password?: string;
+}
+
+interface RegisterBody {
+  email?: string;
+  password?: string;
+  name?: string;
+  phone?: string;
+}
+
+interface UserRow extends RowDataPacket {
+  id: string;
+  email: string;
+  password?: string;
+  name: string;
+  role: UserRole;
+  phone: string;
+  paymentMethod?: string;
+  avatar?: string | null;
+  notifications?: boolean | number;
+  language?: string;
+  balance?: number | string;
+  totalRevenue?: number | string;
+  totalWithdrawn?: number | string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountHolder?: string;
+}
+
+router.post('/auth/login', async (req: Request<Record<string, never>, unknown, LoginBody>, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ message: "Email dan password wajib diisi." });
   }
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE email = ?', [email]);
     const user = rows[0];
 
-    if (!user || !bcrypt.compareSync(password, user.password)) {
+    if (!user || !user.password || !bcrypt.compareSync(password, user.password)) {
       return res.status(401).json({ message: "Email atau password salah." });
     }
 
     // Exclude password from the returned object
-    const { password: _, ...safeUser } = user;
+    const safeUser: Partial<UserRow> = { ...user };
+    delete safeUser.password;
     const token = `token-${user.id}-${Date.now()}`;
 
     res.json({
@@ -68,14 +105,14 @@ router.post('/auth/login', async (req, res) => {
   }
 });
 
-router.post('/auth/register', async (req, res) => {
+router.post('/auth/register', async (req: Request<Record<string, never>, unknown, RegisterBody>, res: Response) => {
   const { email, password, name, phone } = req.body;
   if (!email || !password || !name) {
     return res.status(400).json({ message: "Nama, email, dan password wajib diisi." });
   }
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE email = ?', [email]);
     if (rows.length > 0) {
       return res.status(400).json({ message: "Email sudah terdaftar." });
     }
@@ -88,8 +125,10 @@ router.post('/auth/register', async (req, res) => {
       [userId, email, hashedPassword, name, phone || '']
     );
 
-    const [[newUser]] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
-    const { password: _, ...safeUser } = newUser;
+    const [newUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [userId]);
+    const newUser = newUsers[0];
+    const safeUser: Partial<UserRow> = { ...newUser };
+    delete safeUser.password;
     const token = `token-${newUser.id}-${Date.now()}`;
 
     res.status(201).json({
@@ -103,30 +142,56 @@ router.post('/auth/register', async (req, res) => {
   }
 });
 
-
 // ==========================================
 // User Profiles & Admin User Management (CRUD)
 // ==========================================
-router.get('/users/profile/:id', async (req, res) => {
+interface UserProfileBody {
+  name?: string;
+  phone?: string;
+  paymentMethod?: string;
+  notifications?: boolean;
+  language?: string;
+}
+
+interface AdminCreateUserBody {
+  email?: string;
+  password?: string;
+  name?: string;
+  role?: UserRole;
+  phone?: string;
+  paymentMethod?: string;
+}
+
+interface AdminUpdateUserBody {
+  name?: string;
+  email?: string;
+  role?: UserRole;
+  phone?: string;
+  paymentMethod?: string;
+  password?: string;
+}
+
+router.get('/users/profile/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [req.params.id]);
     const user = rows[0];
     if (!user) {
       return res.status(404).json({ message: "User tidak ditemukan." });
     }
-    const { password: _, ...safeUser } = user;
+    const safeUser: Partial<UserRow> = { ...user };
+    delete safeUser.password;
     res.json(safeUser);
   } catch (err) {
     res.status(500).json({ message: "Gagal mengambil profil user." });
   }
 });
 
-router.put('/users/profile/:id', async (req, res) => {
+router.put('/users/profile/:id', async (req: Request<{ id: string }, unknown, UserProfileBody>, res: Response) => {
   const { id } = req.params;
   const { name, phone, paymentMethod, notifications, language } = req.body;
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [id]);
     if (rows.length === 0) {
       return res.status(404).json({ message: "User tidak ditemukan." });
     }
@@ -140,8 +205,10 @@ router.put('/users/profile/:id', async (req, res) => {
       [name, phone, paymentMethod, notifVal, language, id]
     );
 
-    const [[updatedUser]] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
-    const { password: _, ...safeUser } = updatedUser;
+    const [updatedUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [id]);
+    const updatedUser = updatedUsers[0];
+    const safeUser: Partial<UserRow> = { ...updatedUser };
+    delete safeUser.password;
     res.json({
       message: "Profil berhasil diperbarui!",
       user: safeUser
@@ -153,9 +220,11 @@ router.put('/users/profile/:id', async (req, res) => {
 });
 
 // Admin Route: Get all users
-router.get('/users', async (req, res) => {
+router.get('/users', async (_req: Request, res: Response) => {
   try {
-    const [rows] = await pool.query('SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users');
+    const [rows] = await pool.query<UserRow[]>(
+      'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users'
+    );
     res.json(rows);
   } catch (err) {
     res.status(500).json({ message: "Gagal mengambil data user." });
@@ -163,14 +232,14 @@ router.get('/users', async (req, res) => {
 });
 
 // Admin Route: Create user
-router.post('/users', async (req, res) => {
+router.post('/users', async (req: Request<Record<string, never>, unknown, AdminCreateUserBody>, res: Response) => {
   const { email, password, name, role, phone, paymentMethod } = req.body;
   if (!email || !password || !name || !role) {
     return res.status(400).json({ message: "Nama, email, password, dan role wajib diisi." });
   }
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE email = ?', [email]);
     if (rows.length > 0) {
       return res.status(400).json({ message: "Email sudah terdaftar." });
     }
@@ -190,12 +259,12 @@ router.post('/users', async (req, res) => {
 });
 
 // Admin Route: Update user role / details
-router.put('/users/:id', async (req, res) => {
+router.put('/users/:id', async (req: Request<{ id: string }, unknown, AdminUpdateUserBody>, res: Response) => {
   const { id } = req.params;
   const { name, email, role, phone, paymentMethod, password } = req.body;
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [id]);
     if (rows.length === 0) {
       return res.status(404).json({ message: "User tidak ditemukan." });
     }
@@ -220,7 +289,7 @@ router.put('/users/:id', async (req, res) => {
 });
 
 // Admin Route: Delete user
-router.delete('/users/:id', async (req, res) => {
+router.delete('/users/:id', async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   if (id === 'user-admin') {
     return res.status(400).json({ message: "Admin utama tidak dapat dihapus." });
@@ -234,65 +303,101 @@ router.delete('/users/:id', async (req, res) => {
   }
 });
 
-
 // ==========================================
 // Properties API (CRUD)
 // ==========================================
-router.get('/properties', async (req, res) => {
+interface PropertyRow extends RowDataPacket {
+  id: string;
+  name: string;
+  district: string;
+  address: string;
+  price: number;
+  rating: number;
+  image: string;
+  description: string;
+  latitude: string;
+  longitude: string;
+  totalRooms: number;
+  occupiedRooms: number;
+  ownerId: string | null;
+  document: string;
+  facilities?: Amenity[] | string[];
+}
+
+interface FacilityRow extends RowDataPacket {
+  facility: string;
+}
+
+interface CreatePropertyBody {
+  name?: string;
+  district?: string;
+  address?: string;
+  price?: number | string;
+  description?: string;
+  facilities?: string[];
+  latitude?: string;
+  longitude?: string;
+  totalRooms?: number | string;
+  image?: string;
+  ownerId?: string;
+}
+
+router.get('/properties', async (req: Request, res: Response) => {
   const { district, priceMin, priceMax, facility } = req.query;
 
   try {
     let sql = 'SELECT * FROM properties WHERE 1=1';
-    const params = [];
+    const params: (string | number)[] = [];
 
     if (district && district !== 'Semua') {
       sql += ' AND district = ?';
-      params.push(district);
+      params.push(String(district));
     }
     if (priceMin) {
       sql += ' AND price >= ?';
-      params.push(parseInt(priceMin));
+      params.push(parseInt(String(priceMin), 10));
     }
     if (priceMax) {
       sql += ' AND price <= ?';
-      params.push(parseInt(priceMax));
+      params.push(parseInt(String(priceMax), 10));
     }
 
-    const [properties] = await pool.query(sql, params);
+    const [properties] = await pool.query<PropertyRow[]>(sql, params);
 
     // Fetch facilities for each property
-    for (let prop of properties) {
-      const [facRows] = await pool.query('SELECT facility FROM property_facilities WHERE propertyId = ?', [prop.id]);
+    for (const prop of properties) {
+      const [facRows] = await pool.query<FacilityRow[]>('SELECT facility FROM property_facilities WHERE propertyId = ?', [prop.id]);
       prop.facilities = facRows.map(r => r.facility);
     }
 
     // Filter by facility in JS if requested
     let filteredProperties = properties;
     if (facility) {
-      const facilitiesList = Array.isArray(facility) ? facility : [facility];
+      const facilitiesList = Array.isArray(facility) ? facility.map(String) : [String(facility)];
       filteredProperties = properties.filter(p =>
-        facilitiesList.every(f => p.facilities.map(item => item.toLowerCase()).includes(f.toLowerCase()))
+        facilitiesList.every(f => (p.facilities || []).map(item => item.toLowerCase()).includes(f.toLowerCase()))
       );
     }
 
     res.json(filteredProperties);
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Get properties error:", err);
     try {
-      fs.appendFileSync('db_error.log', `[${new Date().toISOString()}] GET /properties error: ${err.stack || err}\n`);
+      const errorMsg = err instanceof Error ? err.stack || err.message : String(err);
+      fs.appendFileSync('db_error.log', `[${new Date().toISOString()}] GET /properties error: ${errorMsg}\n`);
     } catch (e) {}
-    res.status(500).json({ message: "Gagal mengambil properti: " + err.message });
+    res.status(500).json({ message: "Gagal mengambil properti." });
   }
 });
 
-router.get('/properties/:id', async (req, res) => {
+router.get('/properties/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM properties WHERE id = ?', [req.params.id]);
+    const [rows] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [req.params.id]);
     if (rows.length === 0) {
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
     const prop = rows[0];
-    const [facRows] = await pool.query('SELECT facility FROM property_facilities WHERE propertyId = ?', [prop.id]);
+    const [facRows] = await pool.query<FacilityRow[]>('SELECT facility FROM property_facilities WHERE propertyId = ?', [prop.id]);
     prop.facilities = facRows.map(r => r.facility);
 
     res.json(prop);
@@ -301,7 +406,7 @@ router.get('/properties/:id', async (req, res) => {
   }
 });
 
-router.post('/properties', async (req, res) => {
+router.post('/properties', async (req: Request<Record<string, never>, unknown, CreatePropertyBody>, res: Response) => {
   const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image, ownerId } = req.body;
 
   if (!name || !district || !address || !price) {
@@ -319,33 +424,18 @@ router.post('/properties', async (req, res) => {
       `INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document) 
        VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, 0, ?, 'sertifikat_kepemilikan.pdf')`,
       [
-        propId, name, district, address, parseInt(price), 
+        propId, name, district, address, parseInt(String(price), 10), 
         image || "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80",
         description || "", latitude || "-8.6500", longitude || "115.2166", 
-        parseInt(totalRooms) || 5, landlordId
+        parseInt(String(totalRooms || '5'), 10), landlordId
       ]
     );
 
     if (facilities && facilities.length > 0) {
-      for (let fac of facilities) {
+      for (const fac of facilities) {
         await connection.query(
           'INSERT INTO property_facilities (propertyId, facility) VALUES (?, ?)', 
           [propId, fac]
-        );
-      }
-    }
-
-    // Auto-create rooms for mobile app support (Issue #1)
-    const [[insertedProp]] = await connection.query('SELECT id_int FROM properties WHERE id = ?', [propId]);
-    const propIntId = insertedProp ? insertedProp.id_int : null;
-    if (propIntId) {
-      const roomCount = parseInt(totalRooms) || 5;
-      for (let i = 1; i <= roomCount; i++) {
-        const roomNumber = `Kamar ${100 + i}`;
-        await connection.query(
-          `INSERT INTO rooms (property_id, room_number, tenant_id, price, is_all_inclusive, all_inclusive_bills) 
-           VALUES (?, ?, NULL, ?, 1, 'Listrik, Air, Wifi')`,
-          [propIntId, roomNumber, parseInt(price)]
         );
       }
     }
@@ -361,7 +451,7 @@ router.post('/properties', async (req, res) => {
   }
 });
 
-router.put('/properties/:id', async (req, res) => {
+router.put('/properties/:id', async (req: Request<{ id: string }, unknown, CreatePropertyBody>, res: Response) => {
   const { id } = req.params;
   const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image } = req.body;
 
@@ -369,7 +459,7 @@ router.put('/properties/:id', async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [rows] = await connection.query('SELECT * FROM properties WHERE id = ?', [id]);
+    const [rows] = await connection.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [id]);
     if (rows.length === 0) {
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
@@ -379,15 +469,15 @@ router.put('/properties/:id', async (req, res) => {
        latitude = ?, longitude = ?, totalRooms = ?, image = ? 
        WHERE id = ?`,
       [
-        name, district, address, parseInt(price), description, 
-        latitude, longitude, parseInt(totalRooms), image, id
+        name, district, address, parseInt(String(price || 0), 10), description, 
+        latitude, longitude, parseInt(String(totalRooms || 0), 10), image, id
       ]
     );
 
     if (facilities !== undefined) {
       await connection.query('DELETE FROM property_facilities WHERE propertyId = ?', [id]);
       if (facilities.length > 0) {
-        for (let fac of facilities) {
+        for (const fac of facilities) {
           await connection.query('INSERT INTO property_facilities (propertyId, facility) VALUES (?, ?)', [id, fac]);
         }
       }
@@ -404,7 +494,12 @@ router.put('/properties/:id', async (req, res) => {
   }
 });
 
-router.delete('/properties/:id', async (req, res) => {
+interface DeletePropertyBody {
+  password?: string;
+  landlordId?: string;
+}
+
+router.delete('/properties/:id', async (req: Request<{ id: string }, unknown, DeletePropertyBody>, res: Response) => {
   const { id } = req.params;
   const { password, landlordId } = req.body;
 
@@ -413,7 +508,7 @@ router.delete('/properties/:id', async (req, res) => {
   }
 
   try {
-    const [propRows] = await pool.query('SELECT * FROM properties WHERE id = ?', [id]);
+    const [propRows] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [id]);
     const property = propRows[0];
     if (!property) {
       return res.status(404).json({ message: "Properti tidak ditemukan." });
@@ -424,9 +519,9 @@ router.delete('/properties/:id', async (req, res) => {
     }
 
     // Verify landlord password
-    const [userRows] = await pool.query('SELECT password FROM users WHERE id = ?', [landlordId]);
+    const [userRows] = await pool.query<UserRow[]>('SELECT password FROM users WHERE id = ?', [landlordId]);
     const user = userRows[0];
-    if (!user || !bcrypt.compareSync(password, user.password)) {
+    if (!user || !user.password || !bcrypt.compareSync(password, user.password)) {
       return res.status(401).json({ message: "Password salah." });
     }
 
@@ -438,34 +533,53 @@ router.delete('/properties/:id', async (req, res) => {
   }
 });
 
-
 // ==========================================
 // Reviews API (CRUD)
 // ==========================================
-router.get('/reviews', async (req, res) => {
+interface ReviewRow extends RowDataPacket {
+  id: string;
+  propertyId: string;
+  propertyName: string;
+  userId: string;
+  userName: string;
+  rating: number;
+  comment: string;
+  date: string;
+}
+
+interface CreateReviewBody {
+  propertyId?: string;
+  userId?: string;
+  userName?: string;
+  rating?: number | string;
+  comment?: string;
+}
+
+router.get('/reviews', async (req: Request, res: Response) => {
   const { propertyId, userId } = req.query;
 
   try {
     let sql = 'SELECT * FROM reviews WHERE 1=1';
-    const params = [];
+    const params: string[] = [];
 
     if (propertyId) {
       sql += ' AND propertyId = ?';
-      params.push(propertyId);
+      params.push(String(propertyId));
     }
     if (userId) {
       sql += ' AND userId = ?';
-      params.push(userId);
+      params.push(String(userId));
     }
 
-    const [rows] = await pool.query(sql, params);
+    const [rows] = await pool.query<ReviewRow[]>(sql, params);
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ message: "Gagal mengambil data review: " + err.message });
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ message: "Gagal mengambil data review: " + errorMsg });
   }
 });
 
-router.post('/reviews', async (req, res) => {
+router.post('/reviews', async (req: Request<Record<string, never>, unknown, CreateReviewBody>, res: Response) => {
   const { propertyId, userId, userName, rating, comment } = req.body;
 
   if (!propertyId || !userId || !rating || !comment) {
@@ -476,7 +590,7 @@ router.post('/reviews', async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [propRows] = await connection.query('SELECT * FROM properties WHERE id = ?', [propertyId]);
+    const [propRows] = await connection.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [propertyId]);
     const property = propRows[0];
     if (!property) {
       return res.status(404).json({ message: "Properti tidak ditemukan." });
@@ -488,11 +602,11 @@ router.post('/reviews', async (req, res) => {
     await connection.query(
       `INSERT INTO reviews (id, propertyId, propertyName, userId, userName, rating, comment, date) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [revId, propertyId, property.name, userId, userName || "Anonim", parseInt(rating), comment, dateStr]
+      [revId, propertyId, property.name, userId, userName || "Anonim", parseInt(String(rating), 10), comment, dateStr]
     );
 
     // Recalculate average rating
-    const [revRows] = await connection.query('SELECT rating FROM reviews WHERE propertyId = ?', [propertyId]);
+    const [revRows] = await connection.query<ReviewRow[]>('SELECT rating FROM reviews WHERE propertyId = ?', [propertyId]);
     const avgRating = revRows.reduce((sum, r) => sum + r.rating, 0) / revRows.length;
 
     await connection.query('UPDATE properties SET rating = ? WHERE id = ?', [parseFloat(avgRating.toFixed(1)), propertyId]);
@@ -508,7 +622,7 @@ router.post('/reviews', async (req, res) => {
   }
 });
 
-router.put('/reviews/:id', async (req, res) => {
+router.put('/reviews/:id', async (req: Request<{ id: string }, unknown, { rating?: number | string; comment?: string }>, res: Response) => {
   const { id } = req.params;
   const { rating, comment } = req.body;
 
@@ -516,7 +630,7 @@ router.put('/reviews/:id', async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [rows] = await connection.query('SELECT * FROM reviews WHERE id = ?', [id]);
+    const [rows] = await connection.query<ReviewRow[]>('SELECT * FROM reviews WHERE id = ?', [id]);
     const review = rows[0];
     if (!review) {
       return res.status(404).json({ message: "Review tidak ditemukan." });
@@ -524,11 +638,11 @@ router.put('/reviews/:id', async (req, res) => {
 
     await connection.query(
       'UPDATE reviews SET rating = ?, comment = ? WHERE id = ?',
-      [parseInt(rating), comment, id]
+      [parseInt(String(rating || 0), 10), comment, id]
     );
 
     // Recalculate average rating for property
-    const [revRows] = await connection.query('SELECT rating FROM reviews WHERE propertyId = ?', [review.propertyId]);
+    const [revRows] = await connection.query<ReviewRow[]>('SELECT rating FROM reviews WHERE propertyId = ?', [review.propertyId]);
     const avgRating = revRows.reduce((sum, r) => sum + r.rating, 0) / revRows.length;
 
     await connection.query('UPDATE properties SET rating = ? WHERE id = ?', [parseFloat(avgRating.toFixed(1)), review.propertyId]);
@@ -544,14 +658,14 @@ router.put('/reviews/:id', async (req, res) => {
   }
 });
 
-router.delete('/reviews/:id', async (req, res) => {
+router.delete('/reviews/:id', async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const [rows] = await connection.query('SELECT * FROM reviews WHERE id = ?', [id]);
+    const [rows] = await connection.query<ReviewRow[]>('SELECT * FROM reviews WHERE id = ?', [id]);
     const review = rows[0];
     if (!review) {
       return res.status(404).json({ message: "Review tidak ditemukan." });
@@ -560,7 +674,7 @@ router.delete('/reviews/:id', async (req, res) => {
     await connection.query('DELETE FROM reviews WHERE id = ?', [id]);
 
     // Recalculate average rating for property
-    const [revRows] = await connection.query('SELECT rating FROM reviews WHERE propertyId = ?', [review.propertyId]);
+    const [revRows] = await connection.query<ReviewRow[]>('SELECT rating FROM reviews WHERE propertyId = ?', [review.propertyId]);
     let avgRating = 0.0;
     if (revRows.length > 0) {
       avgRating = revRows.reduce((sum, r) => sum + r.rating, 0) / revRows.length;
@@ -578,29 +692,38 @@ router.delete('/reviews/:id', async (req, res) => {
   }
 });
 
-
 // ==========================================
 // Statistics & Withdrawal API (Landlord Panel)
 // ==========================================
-router.get('/stats', async (req, res) => {
-  const landlordId = req.query.landlordId || 'user-landlord';
+interface WithdrawalRow extends RowDataPacket {
+  id: string;
+  userId: string;
+  bankName: string;
+  accountNumber: string;
+  amount: number | string;
+  date: string;
+  status: string;
+}
+
+router.get('/stats', async (req: Request, res: Response) => {
+  const landlordId = String(req.query.landlordId || 'user-landlord');
 
   try {
-    const [userRows] = await pool.query('SELECT * FROM users WHERE id = ?', [landlordId]);
+    const [userRows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlordId]);
     const landlord = userRows[0];
     if (!landlord) {
       return res.status(404).json({ message: "Landlord tidak ditemukan." });
     }
 
-    const [properties] = await pool.query('SELECT * FROM properties WHERE ownerId = ?', [landlordId]);
-    const [reviews] = await pool.query(
+    const [properties] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ?', [landlordId]);
+    const [reviews] = await pool.query<ReviewRow[]>(
       `SELECT r.* FROM reviews r 
        JOIN properties p ON r.propertyId = p.id 
        WHERE p.ownerId = ?`, 
       [landlordId]
     );
 
-    const [withdrawals] = await pool.query(
+    const [withdrawals] = await pool.query<WithdrawalRow[]>(
       'SELECT * FROM withdrawals WHERE userId = ? ORDER BY date DESC', 
       [landlordId]
     );
@@ -616,9 +739,9 @@ router.get('/stats', async (req, res) => {
     const occupancyRate = totalRooms > 0 ? parseFloat(((occupiedRooms / totalRooms) * 100).toFixed(1)) : 0;
 
     res.json({
-      balance: parseFloat(landlord.balance),
-      totalRevenue: parseFloat(landlord.totalRevenue),
-      totalWithdrawn: parseFloat(landlord.totalWithdrawn),
+      balance: parseFloat(String(landlord.balance || 0)),
+      totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
+      totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
       totalProperti: properties.length,
       totalRooms,
       occupiedRooms,
@@ -633,14 +756,21 @@ router.get('/stats', async (req, res) => {
   }
 });
 
-router.post('/withdraw', async (req, res) => {
+interface WithdrawBody {
+  amount?: number | string;
+  bankName?: string;
+  accountNumber?: string;
+  userId?: string;
+}
+
+router.post('/withdraw', async (req: Request<Record<string, never>, unknown, WithdrawBody>, res: Response) => {
   const { amount, bankName, accountNumber, userId } = req.body;
   if (!amount || !bankName || !accountNumber) {
     return res.status(400).json({ message: "Jumlah, nama bank, dan nomor rekening wajib diisi." });
   }
 
   const targetUserId = userId || 'user-landlord';
-  const withdrawAmount = parseFloat(amount);
+  const withdrawAmount = parseFloat(String(amount));
 
   if (withdrawAmount <= 0) {
     return res.status(400).json({ message: "Jumlah penarikan harus lebih besar dari 0." });
@@ -650,19 +780,21 @@ router.post('/withdraw', async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [rows] = await connection.query('SELECT * FROM users WHERE id = ? FOR UPDATE', [targetUserId]);
+    const [rows] = await connection.query<UserRow[]>('SELECT * FROM users WHERE id = ? FOR UPDATE', [targetUserId]);
     const user = rows[0];
     if (!user) {
-      return connection.rollback(), res.status(404).json({ message: "User tidak ditemukan." });
+      await connection.rollback();
+      return res.status(404).json({ message: "User tidak ditemukan." });
     }
 
-    if (parseFloat(user.balance) < withdrawAmount) {
-      return connection.rollback(), res.status(400).json({ message: "Saldo tidak mencukupi." });
+    if (parseFloat(String(user.balance || 0)) < withdrawAmount) {
+      await connection.rollback();
+      return res.status(400).json({ message: "Saldo tidak mencukupi." });
     }
 
     // Deduct balance and update withdrawn statistics
-    const newBalance = parseFloat(user.balance) - withdrawAmount;
-    const newWithdrawn = parseFloat(user.totalWithdrawn) + withdrawAmount;
+    const newBalance = parseFloat(String(user.balance || 0)) - withdrawAmount;
+    const newWithdrawn = parseFloat(String(user.totalWithdrawn || 0)) + withdrawAmount;
 
     await connection.query(
       'UPDATE users SET balance = ?, totalWithdrawn = ? WHERE id = ?',
@@ -696,37 +828,47 @@ router.post('/withdraw', async (req, res) => {
 // ==========================================
 // Tracking & Admin Stats API
 // ==========================================
-router.post('/tracking/visit', async (req, res) => {
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-  const userAgent = req.headers['user-agent'] || '';
+router.post('/tracking/visit', async (req: Request, res: Response) => {
+  const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+  const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+  const userAgent = String(req.headers['user-agent'] || '');
   try {
     await pool.query(
       'INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)',
       [ip, userAgent]
     );
     res.status(201).json({ message: "Kunjungan berhasil dilacak." });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Tracking error:", err);
-    res.status(500).json({ message: "Gagal melacak kunjungan: " + err.message });
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ message: "Gagal melacak kunjungan: " + errorMsg });
   }
 });
 
-router.get('/admin/stats', async (req, res) => {
+interface CountRow extends RowDataPacket {
+  count: number;
+}
+
+interface SumRow extends RowDataPacket {
+  sum: number | null;
+}
+
+router.get('/admin/stats', async (_req: Request, res: Response) => {
   try {
-    const [[visitorRow]] = await pool.query('SELECT COUNT(*) as count FROM visitor_tracking');
-    const totalVisitors = visitorRow.count;
+    const [visitorRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking');
+    const totalVisitors = visitorRows[0].count;
 
-    const [[userRow]] = await pool.query('SELECT COUNT(*) as count FROM users');
-    const totalUsers = userRow.count;
+    const [userRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users');
+    const totalUsers = userRows[0].count;
 
-    const [[landlordRow]] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
-    const totalLandlords = landlordRow.count;
+    const [landlordRows] = await pool.query<CountRow[]>("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
+    const totalLandlords = landlordRows[0].count;
 
-    const [[propertyRow]] = await pool.query('SELECT COUNT(*) as count FROM properties');
-    const totalProperties = propertyRow.count;
+    const [propertyRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM properties');
+    const totalProperties = propertyRows[0].count;
 
-    const [[roomsRow]] = await pool.query('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
-    const totalRooms = roomsRow.sum || 0;
+    const [roomsRows] = await pool.query<SumRow[]>('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
+    const totalRooms = roomsRows[0].sum || 0;
 
     res.json({
       totalVisitors,
@@ -741,10 +883,16 @@ router.get('/admin/stats', async (req, res) => {
   }
 });
 
-router.get('/admin/tracking-history', async (req, res) => {
+interface TrackingHistoryRow extends RowDataPacket {
+  label_time?: string;
+  label_date?: string;
+  count: number;
+}
+
+router.get('/admin/tracking-history', async (_req: Request, res: Response) => {
   try {
     // 1. Last 24 Hours (grouped by hour)
-    const [rows24h] = await pool.query(`
+    const [rows24h] = await pool.query<TrackingHistoryRow[]>(`
       SELECT 
         DATE_FORMAT(visited_at, '%Y-%m-%d %H:00:00') as label_time,
         COUNT(*) as count
@@ -755,7 +903,7 @@ router.get('/admin/tracking-history', async (req, res) => {
     `);
 
     // 2. Last 7 Days (grouped by day)
-    const [rows7d] = await pool.query(`
+    const [rows7d] = await pool.query<TrackingHistoryRow[]>(`
       SELECT 
         DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
         COUNT(*) as count
@@ -766,7 +914,7 @@ router.get('/admin/tracking-history', async (req, res) => {
     `);
 
     // 3. Last 30 Days (grouped by day)
-    const [rows30d] = await pool.query(`
+    const [rows30d] = await pool.query<TrackingHistoryRow[]>(`
       SELECT 
         DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
         COUNT(*) as count
@@ -780,7 +928,7 @@ router.get('/admin/tracking-history', async (req, res) => {
     const now = new Date();
     
     // 24h helper
-    const data24h = [];
+    const data24h: { label: string; count: number }[] = [];
     for (let i = 23; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 60 * 60 * 1000);
       const year = d.getFullYear();
@@ -798,7 +946,7 @@ router.get('/admin/tracking-history', async (req, res) => {
     }
 
     // 7d helper
-    const data7d = [];
+    const data7d: { label: string; count: number }[] = [];
     const daysName = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
@@ -816,7 +964,7 @@ router.get('/admin/tracking-history', async (req, res) => {
     }
 
     // 30d helper
-    const data30d = [];
+    const data30d: { label: string; count: number }[] = [];
     for (let i = 29; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
       const year = d.getFullYear();
@@ -846,39 +994,45 @@ router.get('/admin/tracking-history', async (req, res) => {
 // ==========================================
 // Excel Report Endpoints
 // ==========================================
-router.get('/reports/tracking/excel', async (req, res) => {
-  try {
-    const [[visitorRow]] = await pool.query('SELECT COUNT(*) as count FROM visitor_tracking');
-    const [[userRow]] = await pool.query('SELECT COUNT(*) as count FROM users');
-    const [[landlordRow]] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
-    const [[propertyRow]] = await pool.query('SELECT COUNT(*) as count FROM properties');
-    const [[roomsRow]] = await pool.query('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
+interface VisitorTrackingRow extends RowDataPacket {
+  ip_address: string;
+  user_agent: string;
+  visited_at: Date | string;
+}
 
-    const [visitors] = await pool.query('SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000');
-    const [users] = await pool.query('SELECT id, email, name, role, phone FROM users ORDER BY id DESC');
+router.get('/reports/tracking/excel', async (_req: Request, res: Response) => {
+  try {
+    const [visitorRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking');
+    const [userRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users');
+    const [landlordRows] = await pool.query<CountRow[]>("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
+    const [propertyRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM properties');
+    const [roomsRows] = await pool.query<SumRow[]>('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
+
+    const [visitors] = await pool.query<VisitorTrackingRow[]>('SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000');
+    const [users] = await pool.query<UserRow[]>('SELECT id, email, name, role, phone FROM users ORDER BY id DESC');
 
     const wb = XLSX.utils.book_new();
 
     // Summary sheet
-    const summaryData = [
+    const summaryData: (string | number)[][] = [
       ['Metrik', 'Jumlah'],
-      ['Total Pengunjung Website', visitorRow.count],
-      ['Total Pengguna Terdaftar', userRow.count],
-      ['Total Landlord', landlordRow.count],
-      ['Total Properti', propertyRow.count],
-      ['Total Kamar', roomsRow.sum || 0]
+      ['Total Pengunjung Website', visitorRows[0].count],
+      ['Total Pengguna Terdaftar', userRows[0].count],
+      ['Total Landlord', landlordRows[0].count],
+      ['Total Properti', propertyRows[0].count],
+      ['Total Kamar', roomsRows[0].sum || 0]
     ];
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan');
 
     // Visitor details sheet
-    const visitorData = [['IP Address', 'User Agent', 'Waktu Kunjungan']];
+    const visitorData: (string | number)[][] = [['IP Address', 'User Agent', 'Waktu Kunjungan']];
     visitors.forEach(v => visitorData.push([v.ip_address, v.user_agent, v.visited_at ? new Date(v.visited_at).toLocaleString('id-ID') : '']));
     const visitorSheet = XLSX.utils.aoa_to_sheet(visitorData);
     XLSX.utils.book_append_sheet(wb, visitorSheet, 'Pengunjung');
 
     // Users sheet
-    const userData = [['ID', 'Email', 'Nama', 'Role', 'Telepon']];
+    const userData: (string | number)[][] = [['ID', 'Email', 'Nama', 'Role', 'Telepon']];
     users.forEach(u => userData.push([u.id, u.email, u.name, u.role, u.phone]));
     const userSheet = XLSX.utils.aoa_to_sheet(userData);
     XLSX.utils.book_append_sheet(wb, userSheet, 'Pengguna');
@@ -893,15 +1047,26 @@ router.get('/reports/tracking/excel', async (req, res) => {
   }
 });
 
-router.get('/reports/landlord/excel', async (req, res) => {
-  const { landlordId } = req.query;
+interface RentalRow extends RowDataPacket {
+  id: string;
+  tenantId: string;
+  propertyId: string;
+  propertyName?: string;
+  price?: number;
+  startDate?: string;
+  status: 'active' | 'terminated';
+}
+
+router.get('/reports/landlord/excel', async (req: Request, res: Response) => {
+  const landlordId = String(req.query.landlordId || '');
   if (!landlordId) return res.status(400).json({ message: 'landlordId diperlukan.' });
   try {
-    const [[landlord]] = await pool.query('SELECT * FROM users WHERE id = ?', [landlordId]);
+    const [landlords] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlordId]);
+    const landlord = landlords[0];
     if (!landlord) return res.status(404).json({ message: 'Landlord tidak ditemukan.' });
 
-    const [properties] = await pool.query('SELECT * FROM properties WHERE ownerId = ?', [landlord.id]);
-    const [transactions] = await pool.query(
+    const [properties] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ?', [landlord.id]);
+    const [transactions] = await pool.query<RentalRow[]>(
       `SELECT r.*, p.name as propertyName FROM rentals r 
        JOIN properties p ON r.propertyId = p.id 
        WHERE p.ownerId = ? ORDER BY r.id DESC`, [landlord.id]
@@ -910,7 +1075,7 @@ router.get('/reports/landlord/excel', async (req, res) => {
     const wb = XLSX.utils.book_new();
 
     // Financial Summary sheet
-    const summaryData = [
+    const summaryData: (string | number)[][] = [
       ['Laporan Keuangan Landlord'],
       ['Nama', landlord.name],
       ['Email', landlord.email],
@@ -926,8 +1091,8 @@ router.get('/reports/landlord/excel', async (req, res) => {
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan Keuangan');
 
     // Transactions sheet
-    const txData = [['ID Transaksi', 'Properti', 'Tanggal', 'Jumlah', 'Status']];
-    transactions.forEach(t => txData.push([t.id, t.propertyName, t.startDate, t.price, t.status === 'active' ? 'Aktif' : 'Selesai']));
+    const txData: (string | number)[][] = [['ID Transaksi', 'Properti', 'Tanggal', 'Jumlah', 'Status']];
+    transactions.forEach(t => txData.push([t.id, t.propertyName || '', t.startDate || '', t.price || 0, t.status === 'active' ? 'Aktif' : 'Selesai']));
     const txSheet = XLSX.utils.aoa_to_sheet(txData);
     XLSX.utils.book_append_sheet(wb, txSheet, 'Transaksi');
 
@@ -944,15 +1109,15 @@ router.get('/reports/landlord/excel', async (req, res) => {
 // ==========================================
 // Password Verification Endpoint
 // ==========================================
-router.post('/auth/verify-password', async (req, res) => {
+router.post('/auth/verify-password', async (req: Request<Record<string, never>, unknown, { userId?: string; password?: string }>, res: Response) => {
   const { userId, password } = req.body;
   if (!userId || !password) {
     return res.status(400).json({ message: "userId dan password wajib diisi." });
   }
   try {
-    const [rows] = await pool.query('SELECT password FROM users WHERE id = ?', [userId]);
+    const [rows] = await pool.query<UserRow[]>('SELECT password FROM users WHERE id = ?', [userId]);
     const user = rows[0];
-    if (!user) {
+    if (!user || !user.password) {
       return res.status(404).json({ message: "User tidak ditemukan." });
     }
     const valid = bcrypt.compareSync(password, user.password);
@@ -966,16 +1131,16 @@ router.post('/auth/verify-password', async (req, res) => {
 // ==========================================
 // Rentals / Booking Endpoints
 // ==========================================
-router.get('/rentals', async (req, res) => {
+router.get('/rentals', async (req: Request, res: Response) => {
   const { tenantId } = req.query;
   try {
     let sql = 'SELECT * FROM rentals WHERE 1=1';
-    const params = [];
+    const params: string[] = [];
     if (tenantId) {
       sql += ' AND tenantId = ?';
-      params.push(tenantId);
+      params.push(String(tenantId));
     }
-    const [rows] = await pool.query(sql, params);
+    const [rows] = await pool.query<RentalRow[]>(sql, params);
     res.json(rows);
   } catch (err) {
     console.error("Get rentals error:", err);
@@ -983,7 +1148,14 @@ router.get('/rentals', async (req, res) => {
   }
 });
 
-router.post('/rentals', async (req, res) => {
+interface CreateRentalBody {
+  tenantId?: string;
+  propertyId?: string;
+  propertyName?: string;
+  price?: number;
+}
+
+router.post('/rentals', async (req: Request<Record<string, never>, unknown, CreateRentalBody>, res: Response) => {
   const { tenantId, propertyId, propertyName, price } = req.body;
   if (!tenantId || !propertyId) {
     return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
@@ -993,13 +1165,14 @@ router.post('/rentals', async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [[property]] = await connection.query('SELECT totalRooms, occupiedRooms, price, name, ownerId FROM properties WHERE id = ?', [propertyId]);
+    const [propRows] = await connection.query<PropertyRow[]>('SELECT totalRooms, occupiedRooms, price, name, ownerId FROM properties WHERE id = ?', [propertyId]);
+    const property = propRows[0];
     if (!property) {
-      connection.release();
+      await connection.rollback();
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
     if (property.occupiedRooms >= property.totalRooms) {
-      connection.release();
+      await connection.rollback();
       return res.status(400).json({ message: "Kamar kos sudah penuh." });
     }
 
@@ -1037,7 +1210,7 @@ router.post('/rentals', async (req, res) => {
   }
 });
 
-router.post('/rentals/:id/terminate', async (req, res) => {
+router.post('/rentals/:id/terminate', async (req: Request<{ id: string }, unknown, { password?: string }>, res: Response) => {
   const { id } = req.params;
   const { password } = req.body;
   if (!password) {
@@ -1048,19 +1221,21 @@ router.post('/rentals/:id/terminate', async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [[rental]] = await connection.query('SELECT * FROM rentals WHERE id = ?', [id]);
+    const [rentalRows] = await connection.query<RentalRow[]>('SELECT * FROM rentals WHERE id = ?', [id]);
+    const rental = rentalRows[0];
     if (!rental) {
-      connection.release();
+      await connection.rollback();
       return res.status(404).json({ message: "Data sewa tidak ditemukan." });
     }
     if (rental.status === 'terminated') {
-      connection.release();
+      await connection.rollback();
       return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
     }
 
-    const [[user]] = await connection.query('SELECT password FROM users WHERE id = ?', [rental.tenantId]);
-    if (!user || !bcrypt.compareSync(password, user.password)) {
-      connection.release();
+    const [userRows] = await connection.query<UserRow[]>('SELECT password FROM users WHERE id = ?', [rental.tenantId]);
+    const user = userRows[0];
+    if (!user || !user.password || !bcrypt.compareSync(password, user.password)) {
+      await connection.rollback();
       return res.status(401).json({ message: "Password salah." });
     }
 

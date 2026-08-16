@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import morgan from 'morgan';
-import { initDb } from '../backend/db.js';
-import router from '../backend/router.js';
+import { initDb } from '../backend/db.ts';
+import router from '../backend/router.ts';
 
 const app = express();
 

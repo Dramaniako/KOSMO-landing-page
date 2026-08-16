@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise';
+import type { Connection, ConnectionOptions, FieldPacket, QueryResult, RowDataPacket } from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
@@ -8,7 +9,7 @@ try {
   const envPath = path.resolve('.env');
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf8');
-    envContent.split(/\r?\n/).forEach(line => {
+    envContent.split(/\r?\n/).forEach((line: string) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return;
       const [key, ...valParts] = trimmed.split('=');
@@ -21,17 +22,17 @@ try {
   console.warn("Failed to load .env file:", e);
 }
 
-const dbConfig = {
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT || '15616'),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+const dbConfig: ConnectionOptions = {
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '15616', 10),
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'defaultdb',
   ssl: {
     rejectUnauthorized: false
   },
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '1'),
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '1', 10),
   maxIdle: 1,
   idleTimeout: 1000,
   queueLimit: 0
@@ -39,42 +40,58 @@ const dbConfig = {
 
 // Only attempt database creation if host is localhost/127.0.0.1
 if (dbConfig.host === 'localhost' || dbConfig.host === '127.0.0.1') {
-  let baseConnection;
-  try {
-    baseConnection = await mysql.createConnection({
-      host: dbConfig.host,
-      user: dbConfig.user,
-      password: dbConfig.password
-    });
-    await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\`;`);
-  } catch (err) {
-    console.error("Failed to connect to base MySQL server. Make sure MySQL service is running.", err);
-  } finally {
-    if (baseConnection) await baseConnection.end();
-  }
+  (async () => {
+    let baseConnection: Connection | null = null;
+    try {
+      baseConnection = await mysql.createConnection({
+        host: dbConfig.host,
+        user: dbConfig.user,
+        password: dbConfig.password
+      });
+      await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\`;`);
+    } catch (err) {
+      console.error("Failed to connect to base MySQL server. Make sure MySQL service is running.", err);
+    } finally {
+      if (baseConnection) await baseConnection.end();
+    }
+  })();
+}
+
+export interface CustomConnection extends Connection {
+  release: () => Promise<void>;
 }
 
 export const pool = {
-  query: async (sql, values) => {
+  query: async <T extends QueryResult = RowDataPacket[]>(
+    sql: string,
+    values?: unknown[]
+  ): Promise<[T, FieldPacket[]]> => {
     const conn = await mysql.createConnection(dbConfig);
     try {
-      const [rows, fields] = await conn.query(sql, values);
+      const [rows, fields] = values !== undefined
+        ? await conn.query<T>(sql, values as (string | number | boolean | null)[])
+        : await conn.query<T>(sql);
       return [rows, fields];
     } finally {
       await conn.end();
     }
   },
-  execute: async (sql, values) => {
+  execute: async <T extends QueryResult = RowDataPacket[]>(
+    sql: string,
+    values?: unknown[]
+  ): Promise<[T, FieldPacket[]]> => {
     const conn = await mysql.createConnection(dbConfig);
     try {
-      const [rows, fields] = await conn.execute(sql, values);
+      const [rows, fields] = values !== undefined
+        ? await conn.execute<T>(sql, values as (string | number | boolean | null)[])
+        : await conn.execute<T>(sql);
       return [rows, fields];
     } finally {
       await conn.end();
     }
   },
-  getConnection: async () => {
-    const conn = await mysql.createConnection(dbConfig);
+  getConnection: async (): Promise<CustomConnection> => {
+    const conn = (await mysql.createConnection(dbConfig)) as CustomConnection;
     conn.release = async () => {
       await conn.end();
     };
@@ -82,17 +99,17 @@ export const pool = {
   }
 };
 
-let initPromise = null;
+let initPromise: Promise<void> | null = null;
 let isInitialized = false;
 
-export async function initDb() {
+export async function initDb(): Promise<void> {
   if (isInitialized) return;
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     try {
       // Optimasi serverless: Cek apakah semua tabel wajib sudah ada
-      const [tableRows] = await pool.query("SHOW TABLES");
+      const [tableRows] = await pool.query<RowDataPacket[]>("SHOW TABLES");
       const existingTables = tableRows.map(row => Object.values(row)[0].toLowerCase());
       
       const requiredTables = [
@@ -223,7 +240,7 @@ export async function initDb() {
       `);
 
       // Seed Users if empty
-      const [userRows] = await pool.query('SELECT COUNT(*) as count FROM users');
+      const [userRows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM users');
       if (userRows[0].count === 0) {
         const adminHash = bcrypt.hashSync('admin', 10);
         const landlordHash = bcrypt.hashSync('landlord', 10);
@@ -244,8 +261,8 @@ export async function initDb() {
         `);
       } else {
         // Migrate existing plaintext users if any
-        const [existing] = await pool.query('SELECT id, password FROM users');
-        for (let u of existing) {
+        const [existing] = await pool.query<RowDataPacket[]>('SELECT id, password FROM users');
+        for (const u of existing) {
           if (u.password) {
             const isHashed = u.password.startsWith('$2a$') || u.password.startsWith('$2b$') || u.password.startsWith('$2y$');
             if (!isHashed) {
@@ -257,7 +274,7 @@ export async function initDb() {
       }
 
       // Seed Properties if empty
-      const [propRows] = await pool.query('SELECT COUNT(*) as count FROM properties');
+      const [propRows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM properties');
       if (propRows[0].count === 0) {
         await pool.query(`
           INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document)
@@ -278,7 +295,7 @@ export async function initDb() {
       }
 
       // Seed Reviews if empty
-      const [revRows] = await pool.query('SELECT COUNT(*) as count FROM reviews');
+      const [revRows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM reviews');
       if (revRows[0].count === 0) {
         await pool.query(`
           INSERT INTO reviews (id, propertyId, propertyName, userId, userName, rating, comment, date)
@@ -291,11 +308,12 @@ export async function initDb() {
 
       isInitialized = true;
       console.log("MySQL Database Kosmo initialized, tables created, and seeded successfully!");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Failed to initialize database tables or seed default values:", err);
       initPromise = null;
       try {
-        fs.writeFileSync('db_error.log', `[${new Date().toISOString()}] initDb error: ${err.stack || err}\n`);
+        const errorStack = err instanceof Error ? err.stack || err.message : String(err);
+        fs.writeFileSync('db_error.log', `[${new Date().toISOString()}] initDb error: ${errorStack}\n`);
       } catch (e) {}
     }
   })();
@@ -305,12 +323,12 @@ export async function initDb() {
 
 export const db = {
   users: {
-    getById: async (id) => {
-      const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+    getById: async <T extends RowDataPacket = RowDataPacket>(id: string): Promise<T | null> => {
+      const [rows] = await pool.query<T[]>('SELECT * FROM users WHERE id = ?', [id]);
       return rows[0] || null;
     },
-    getByEmail: async (email) => {
-      const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    getByEmail: async <T extends RowDataPacket = RowDataPacket>(email: string): Promise<T | null> => {
+      const [rows] = await pool.query<T[]>('SELECT * FROM users WHERE email = ?', [email]);
       return rows[0] || null;
     }
   }
