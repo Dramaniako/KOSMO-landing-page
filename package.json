@@ -10,6 +10,7 @@
   "dependencies": {
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.2.0",
+    "@types/pdfkit": "^0.17.6",
     "bcryptjs": "^3.0.3",
     "body-parser": "^1.20.3",
     "cloudinary": "^2.10.0",
@@ -20,6 +21,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
     "mysql2": "^3.22.5",
+    "pdfkit": "^0.19.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

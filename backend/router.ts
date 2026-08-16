@@ -13,6 +13,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
 import fs from 'fs';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { generateRentalContractPdf } from './services/contract.ts';
 import type {
   KosRoom,
   Booking,
@@ -1302,10 +1303,12 @@ interface CreateRentalBody {
   propertyId?: string;
   propertyName?: string;
   price?: number;
+  durationMonths?: number;
+  signature?: string;
 }
 
 router.post('/rentals', authenticateToken, async (req: Request<Record<string, never>, unknown, CreateRentalBody>, res: Response) => {
-  const { tenantId, propertyId, propertyName, price } = req.body;
+  const { tenantId, propertyId, propertyName, price, durationMonths, signature } = req.body;
   if (!tenantId || !propertyId) {
     return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
   }
@@ -1314,7 +1317,7 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
   try {
     await connection.beginTransaction();
 
-    const [propRows] = await connection.query<PropertyRow[]>('SELECT totalRooms, occupiedRooms, price, name, ownerId FROM properties WHERE id = ?', [propertyId]);
+    const [propRows] = await connection.query<PropertyRow[]>('SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ?', [propertyId]);
     const property = propRows[0];
     if (!property) {
       await connection.rollback();
@@ -1325,15 +1328,37 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
       return res.status(400).json({ message: "Kamar kos sudah penuh." });
     }
 
+    const [userRows] = await connection.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [tenantId]);
+    const tenant = userRows[0];
+
     const rentalId = generateId("rent");
     const startDate = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
     const rentalPrice = price || property.price;
     const rentalName = propertyName || property.name;
 
+    let documentPath = 'sertifikat_kepemilikan.pdf';
+    try {
+      const contractResult = await generateRentalContractPdf({
+        rentalId,
+        tenantName: tenant ? tenant.name : 'Penyewa',
+        tenantEmail: tenant ? tenant.email : '',
+        tenantPhone: tenant ? tenant.phone : '',
+        propertyName: rentalName,
+        propertyAddress: property.address || '',
+        pricePerMonth: rentalPrice,
+        startDate,
+        durationMonths: durationMonths || 1,
+        signatureBase64: signature
+      });
+      documentPath = contractResult.filePath;
+    } catch (contractErr) {
+      console.warn("PDF contract generation warning:", contractErr);
+    }
+
     await connection.query(
-      `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'active')`,
-      [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate]
+      `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document) 
+       VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
+      [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath]
     );
 
     await connection.query(
@@ -1349,7 +1374,11 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
     }
 
     await connection.commit();
-    res.status(201).json({ message: "Penyewaan kos berhasil diproses!", rentalId });
+    res.status(201).json({
+      message: "Penyewaan kos berhasil diproses!",
+      rentalId,
+      document: documentPath
+    });
   } catch (err) {
     await connection.rollback();
     console.error("Create rental error:", err);
