@@ -6,17 +6,22 @@ import bcrypt from 'bcryptjs';
 
 // Load .env locally if it exists
 try {
-  const envPath = path.resolve('.env');
-  if (fs.existsSync(envPath)) {
-    const envContent = fs.readFileSync(envPath, 'utf8');
-    envContent.split(/\r?\n/).forEach((line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return;
-      const [key, ...valParts] = trimmed.split('=');
-      if (key && valParts.length > 0) {
-        process.env[key.trim()] = valParts.join('=').trim();
-      }
-    });
+  const possibleEnvPaths = [
+    path.resolve('.env'),
+    path.resolve('backend', '.env')
+  ];
+  for (const envPath of possibleEnvPaths) {
+    if (fs.existsSync(envPath)) {
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      envContent.split(/\r?\n/).forEach((line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+        const [key, ...valParts] = trimmed.split('=');
+        if (key && valParts.length > 0 && !process.env[key.trim()]) {
+          process.env[key.trim()] = valParts.join('=').trim();
+        }
+      });
+    }
   }
 } catch (e) {
   console.warn("Failed to load .env file:", e);
@@ -24,17 +29,15 @@ try {
 
 const dbConfig: ConnectionOptions = {
   host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '15616', 10),
+  port: parseInt(process.env.DB_PORT || '3306', 10),
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'defaultdb',
-  ssl: {
-    rejectUnauthorized: false
-  },
+  ...(process.env.DB_SSL === 'false' ? {} : { ssl: { rejectUnauthorized: false } }),
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '1', 10),
-  maxIdle: 1,
-  idleTimeout: 1000,
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '3', 10),
+  maxIdle: 3,
+  idleTimeout: 10000,
   queueLimit: 0
 };
 
