@@ -16,10 +16,17 @@ if [ -d "frontend" ]; then
 fi
 
 echo "=========================================="
-echo " 3. Running Test Suite & DB Integrity     "
+echo " 3. Running Backend Test Suite            "
 echo "=========================================="
 if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
-  npm test || node --test tests/*.test.js 2>/dev/null || echo "No automated runner configured yet."
+  npm test || node --experimental-strip-types --test tests/*.test.*
+fi
+
+echo "=========================================="
+echo " 4. Running Frontend Component Unit Tests "
+echo "=========================================="
+if [ -d "frontend" ]; then
+  npm --prefix frontend test -- --run
 fi
 
 echo "=========================================="

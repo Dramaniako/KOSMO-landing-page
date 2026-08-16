@@ -40,8 +40,9 @@ export default function SearchFilterBar({
 
           {/* District selector */}
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Wilayah di Bali</label>
+            <label htmlFor="district-select" className="form-label">Wilayah di Bali</label>
             <select
+              id="district-select"
               className="form-select"
               value={district}
               onChange={(e) => setDistrict(e.target.value)}
