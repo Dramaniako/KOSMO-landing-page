@@ -214,33 +214,35 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 landing-page">
       {/* Header Navigation */}
-      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-sm site-header">
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-100 site-header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate('/')}>
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
-              <ShieldCheck size={22} />
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate('/')}>
+            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
+              <ShieldCheck size={20} />
             </div>
-            <div>
-              <span className="text-xl font-black tracking-tight text-slate-900 leading-none block">KOSMO</span>
-              <span className="text-[10px] font-bold text-blue-600 tracking-wider block mt-0.5">BALI CO-LIVING</span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xl font-bold text-blue-600 tracking-tight">KOSMO</span>
+              <span className="text-[10px] font-bold text-slate-400 tracking-wider hidden sm:inline">BALI CO-LIVING</span>
             </div>
           </div>
 
           <nav className="flex items-center gap-6">
-            <a href="#properties" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors hidden sm:block">Properti</a>
-            <a href="#all-inclusive" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors hidden sm:block">All-Inclusive</a>
-            <a href="#reviews" className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors hidden sm:block">Ulasan</a>
+            <div className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+              <a href="#properties" className="hover:text-blue-600 transition-colors">Properti</a>
+              <a href="#all-inclusive" className="hover:text-blue-600 transition-colors">All-Inclusive</a>
+              <a href="#reviews" className="hover:text-blue-600 transition-colors">Ulasan</a>
+            </div>
 
             {currentUser ? (
               <button
-                className="btn btn-primary bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-sm transition-all"
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition btn btn-primary"
                 onClick={handleUserDashboardRedirect}
               >
                 Dasbor ({currentUser.name})
               </button>
             ) : (
               <button
-                className="btn btn-outline border border-slate-300 hover:border-slate-400 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl bg-white hover:bg-slate-50 transition-all"
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition btn btn-primary"
                 onClick={() => navigate('/login')}
               >
                 Masuk / Daftar
@@ -251,7 +253,7 @@ export default function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-blue-50/60 via-slate-50 to-slate-50 pt-16 pb-20 hero-section">
+      <section className="relative overflow-hidden bg-gradient-to-b from-blue-50/50 via-slate-50 to-slate-50 pt-16 pb-20 hero-section">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-100/80 text-blue-700 text-xs font-bold mb-6 border border-blue-200/60 shadow-sm">
             <Sparkles size={14} />
@@ -267,7 +269,7 @@ export default function LandingPage() {
       </section>
 
       {/* Search and Filters */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 relative z-20">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20">
         <SearchFilterBar
           district={district}
           setDistrict={setDistrict}
@@ -282,7 +284,7 @@ export default function LandingPage() {
       </section>
 
       {/* Property Listings */}
-      <section id="properties" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <section id="properties" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-8">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-2">
           <div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Pilihan Kos & Co-Living</h2>
