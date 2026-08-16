@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Users, Building, Star, Trash2, Edit, Plus, LogOut, 
   Key, LayoutDashboard, MessageSquare,
-  BarChart3, Eye, Download, ShieldAlert, X
+  BarChart3, Eye, Download, ShieldAlert, X,
+  Landmark, CheckCircle, XCircle
 } from 'lucide-react';
 import { 
   User, Property, Review, AdminStats, TrackingHistory, 
-  TrackingHistoryItem, FacilityFilterState 
+  TrackingHistoryItem, FacilityFilterState, Withdrawal 
 } from '../types/index.ts';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
@@ -217,10 +218,11 @@ function VisitorChart({ data, timeRange }: VisitorChartProps) {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'users' | 'properties' | 'reviews' | 'tracking'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [trackingHistory, setTrackingHistory] = useState<TrackingHistory | null>(null);
@@ -310,6 +312,11 @@ export default function AdminDashboard() {
       const revRes = await fetch(`${API_BASE}/reviews`);
       const revData = (await revRes.json()) as Review[];
       setReviews(Array.isArray(revData) ? revData : []);
+
+      // Fetch withdrawals
+      const withRes = await fetch(`${API_BASE}/admin/withdrawals`);
+      const withData = (await withRes.json()) as Withdrawal[];
+      setWithdrawals(Array.isArray(withData) ? withData : []);
     } catch (err) {
       console.error("Error loading admin dashboard data:", err);
     } finally {
@@ -582,6 +589,43 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleProcessWithdrawal = async (id: string): Promise<void> => {
+    if (!window.confirm("Konfirmasi proses pencairan dana ke landlord?")) return;
+    try {
+      const res = await fetch(`${API_BASE}/admin/withdrawals/${id}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'completed' })
+      });
+      const data = (await res.json()) as { message: string };
+      if (!res.ok) throw new Error(data.message);
+      alert(data.message);
+      fetchData();
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
+    }
+  };
+
+  const handleRejectWithdrawal = async (id: string): Promise<void> => {
+    const reason = window.prompt("Masukkan alasan penolakan pencairan dana:");
+    if (reason === null) return;
+    try {
+      const res = await fetch(`${API_BASE}/admin/withdrawals/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      const data = (await res.json()) as { message: string };
+      if (!res.ok) throw new Error(data.message);
+      alert(data.message);
+      fetchData();
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
+    }
+  };
+
   const formatRupiah = (num: number | string | undefined): string => {
     if (num === undefined || num === null) return 'Rp 0';
     return 'Rp ' + parseFloat(String(num)).toLocaleString('id-ID');
@@ -623,6 +667,15 @@ export default function AdminDashboard() {
               >
                 <MessageSquare size={18} />
                 Manajemen Review
+              </button>
+            </li>
+            <li>
+              <button 
+                className={`sidebar-link ${activeTab === 'withdrawals' ? 'active' : ''}`}
+                onClick={() => setActiveTab('withdrawals')}
+              >
+                <Landmark size={18} />
+                Pencairan Dana ({withdrawals.filter(w => w.status === 'pending' || w.status === 'processing').length})
               </button>
             </li>
             <li>
@@ -938,6 +991,102 @@ export default function AdminDashboard() {
                   </>
                 ) : (
                   <p style={{ color: 'var(--text-muted)' }}>Memuat statistik...</p>
+                )}
+              </div>
+            )}
+
+            {/* WITHDRAWALS MANAGEMENT TAB */}
+            {activeTab === 'withdrawals' && (
+              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+                <div className="flex-between" style={{ marginBottom: '24px' }}>
+                  <div>
+                    <h3 style={{ fontSize: '20px' }}>Moderasi Pencairan Dana Landlord ({withdrawals.length})</h3>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '2px' }}>
+                      Kelola dan verifikasi transfer penarikan saldo pendapatan mitra kos.
+                    </p>
+                  </div>
+                </div>
+
+                {withdrawals.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '40px' }}>
+                    Belum ada riwayat permohonan pencairan dana.
+                  </p>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Tanggal & ID</th>
+                          <th>Landlord</th>
+                          <th>Bank & Rekening</th>
+                          <th>Nominal</th>
+                          <th>Status</th>
+                          <th>Ref ID</th>
+                          <th>Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {withdrawals.map((w) => (
+                          <tr key={w.id}>
+                            <td>
+                              <strong style={{ fontSize: '13px', display: 'block' }}>{w.id}</strong>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.date}</span>
+                            </td>
+                            <td>
+                              <p style={{ fontWeight: 600, fontSize: '13px' }}>{w.userName || w.userId}</p>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.userEmail || '-'}</span>
+                            </td>
+                            <td>
+                              <span className="badge" style={{ backgroundColor: '#e0f2fe', color: '#0369a1', fontSize: '11px', fontWeight: 600 }}>{w.bankName}</span>
+                              <p style={{ fontSize: '13px', marginTop: '4px', fontWeight: 500 }}>{w.accountNumber}</p>
+                              {w.accountHolder && <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>a.n. {w.accountHolder}</p>}
+                            </td>
+                            <td>
+                              <strong style={{ color: 'var(--primary)', fontSize: '14px' }}>{formatRupiah(w.amount)}</strong>
+                            </td>
+                            <td>
+                              <span 
+                                className={`badge ${w.status === 'completed' ? 'badge-success' : w.status === 'rejected' ? 'badge-danger' : w.status === 'processing' ? 'badge-warning' : 'badge-secondary'}`}
+                                title={w.rejectionReason ? `Alasan: ${w.rejectionReason}` : undefined}
+                              >
+                                {w.status === 'completed' ? 'Selesai' : w.status === 'rejected' ? 'Ditolak' : w.status === 'processing' ? 'Diproses' : 'Menunggu'}
+                              </span>
+                              {w.rejectionReason && (
+                                <p style={{ fontSize: '10px', color: 'var(--danger)', marginTop: '2px' }}>{w.rejectionReason}</p>
+                              )}
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                                {w.referenceId || '-'}
+                              </span>
+                            </td>
+                            <td>
+                              {w.status === 'pending' || w.status === 'processing' ? (
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button 
+                                    className="btn btn-sm btn-primary"
+                                    style={{ padding: '4px 8px', fontSize: '11px' }}
+                                    onClick={() => handleProcessWithdrawal(w.id)}
+                                  >
+                                    Selesaikan
+                                  </button>
+                                  <button 
+                                    className="btn btn-sm btn-danger btn-outline"
+                                    style={{ padding: '4px 8px', fontSize: '11px' }}
+                                    onClick={() => handleRejectWithdrawal(w.id)}
+                                  >
+                                    Tolak
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Telah Diproses</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             )}

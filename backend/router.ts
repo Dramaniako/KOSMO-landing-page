@@ -787,9 +787,16 @@ interface WithdrawalRow extends RowDataPacket {
   userId: string;
   bankName: string;
   accountNumber: string;
+  accountHolder?: string;
   amount: number | string;
   date: string;
-  status: string;
+  status: 'pending' | 'processing' | 'completed' | 'rejected';
+  referenceId?: string;
+  rejectionReason?: string;
+  processedAt?: string;
+  userName?: string;
+  userEmail?: string;
+  userPhone?: string;
 }
 
 router.get('/stats', async (req: Request, res: Response) => {
@@ -847,11 +854,12 @@ interface WithdrawBody {
   amount?: number | string;
   bankName?: string;
   accountNumber?: string;
+  accountHolder?: string;
   userId?: string;
 }
 
 router.post('/withdraw', authenticateToken, async (req: Request<Record<string, never>, unknown, WithdrawBody>, res: Response) => {
-  const { amount, bankName, accountNumber, userId } = req.body;
+  const { amount, bankName, accountNumber, accountHolder, userId } = req.body;
   if (!amount || !bankName || !accountNumber) {
     return res.status(400).json({ message: "Jumlah, nama bank, dan nomor rekening wajib diisi." });
   }
@@ -859,7 +867,7 @@ router.post('/withdraw', authenticateToken, async (req: Request<Record<string, n
   const targetUserId = userId || 'user-landlord';
   const withdrawAmount = parseFloat(String(amount));
 
-  if (withdrawAmount <= 0) {
+  if (withdrawAmount <= 0 || isNaN(withdrawAmount)) {
     return res.status(400).json({ message: "Jumlah penarikan harus lebih besar dari 0." });
   }
 
@@ -890,11 +898,12 @@ router.post('/withdraw', authenticateToken, async (req: Request<Record<string, n
 
     const withdrawalId = generateId("w");
     const dateStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+    const holder = accountHolder || user.bankAccountHolder || user.name || '';
 
     await connection.query(
-      `INSERT INTO withdrawals (id, userId, bankName, accountNumber, amount, date, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [withdrawalId, targetUserId, bankName, accountNumber, withdrawAmount, dateStr]
+      `INSERT INTO withdrawals (id, userId, bankName, accountNumber, accountHolder, amount, date, status, referenceId, rejectionReason, processedAt) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', '', '', '')`,
+      [withdrawalId, targetUserId, bankName, accountNumber, holder, withdrawAmount, dateStr]
     );
 
     await connection.commit();
@@ -914,8 +923,24 @@ router.post('/withdraw', authenticateToken, async (req: Request<Record<string, n
   }
 });
 
-router.post('/admin/withdrawals/:id/process', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }>, res: Response) => {
+router.get('/admin/withdrawals', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
+  try {
+    const [rows] = await pool.query<WithdrawalRow[]>(`
+      SELECT w.*, u.name as userName, u.email as userEmail, u.phone as userPhone
+      FROM withdrawals w
+      LEFT JOIN users u ON w.userId = u.id
+      ORDER BY w.date DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error("Get admin withdrawals error:", err);
+    res.status(500).json({ message: "Gagal mengambil data penarikan dana." });
+  }
+});
+
+router.post('/admin/withdrawals/:id/process', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }, unknown, { status?: 'processing' | 'completed'; referenceId?: string }>, res: Response) => {
   const { id } = req.params;
+  const targetStatus = req.body?.status || 'completed';
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -937,13 +962,23 @@ router.post('/admin/withdrawals/:id/process', authenticateToken, requireRole(['a
       return res.status(400).json({ message: "Penarikan yang sudah ditolak tidak dapat diproses." });
     }
 
-    await connection.query("UPDATE withdrawals SET status = 'completed' WHERE id = ?", [id]);
+    const refId = req.body?.referenceId || withdrawal.referenceId || `REF-${Date.now().toString(36).toUpperCase()}`;
+    const processedAt = new Date().toISOString();
+
+    await connection.query(
+      "UPDATE withdrawals SET status = ?, referenceId = ?, processedAt = ? WHERE id = ?", 
+      [targetStatus, refId, processedAt, id]
+    );
 
     await connection.commit();
     res.json({
-      message: "Disbursement berhasil diproses dan status diselesaikan.",
+      message: targetStatus === 'completed' 
+        ? "Disbursement berhasil diproses dan status diselesaikan." 
+        : "Status pencairan dana diperbarui ke sedang diproses.",
       withdrawalId: id,
-      status: 'completed'
+      status: targetStatus,
+      referenceId: refId,
+      processedAt
     });
   } catch (err: unknown) {
     await connection.rollback();
@@ -986,14 +1021,21 @@ router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['ad
       [withdrawAmount, withdrawAmount, withdrawal.userId]
     );
 
-    await connection.query("UPDATE withdrawals SET status = 'rejected' WHERE id = ?", [id]);
+    const rejectionReason = reason || "Pencairan dana ditolak oleh administrator";
+    const processedAt = new Date().toISOString();
+
+    await connection.query(
+      "UPDATE withdrawals SET status = 'rejected', rejectionReason = ?, processedAt = ? WHERE id = ?", 
+      [rejectionReason, processedAt, id]
+    );
 
     await connection.commit();
     res.json({
       message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
       withdrawalId: id,
       status: 'rejected',
-      reason: reason || "Pencairan dana ditolak oleh administrator"
+      reason: rejectionReason,
+      processedAt
     });
   } catch (err: unknown) {
     await connection.rollback();

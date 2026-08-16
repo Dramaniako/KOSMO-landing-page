@@ -225,9 +225,13 @@ export async function initDb(): Promise<void> {
           userId VARCHAR(50) NOT NULL,
           bankName VARCHAR(50) NOT NULL,
           accountNumber VARCHAR(50) NOT NULL,
+          accountHolder VARCHAR(100) DEFAULT '',
           amount DECIMAL(15, 2) NOT NULL,
           date VARCHAR(50) NOT NULL,
           status ENUM('pending','processing','completed','rejected') DEFAULT 'pending',
+          referenceId VARCHAR(100) DEFAULT '',
+          rejectionReason TEXT,
+          processedAt VARCHAR(50) DEFAULT '',
           FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
@@ -248,11 +252,11 @@ export async function initDb(): Promise<void> {
           id VARCHAR(50) PRIMARY KEY,
           tenantId VARCHAR(50) NOT NULL,
           propertyId VARCHAR(50) NOT NULL,
-          propertyName VARCHAR(100),
-          price INT,
-          startDate VARCHAR(50),
-          status ENUM('pending','active','terminated','cancelled') DEFAULT 'pending',
-          document VARCHAR(255) DEFAULT '',
+          propertyName VARCHAR(100) NOT NULL,
+          price INT NOT NULL,
+          startDate VARCHAR(50) NOT NULL,
+          status ENUM('pending','active','terminated','cancelled') DEFAULT 'active',
+          document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
           FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
           FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -260,6 +264,18 @@ export async function initDb(): Promise<void> {
 
       try {
         await pool.query("ALTER TABLE rentals MODIFY status ENUM('pending','active','terminated','cancelled') DEFAULT 'pending'");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''");
       } catch (e) {}
 
       // Seed Users if empty

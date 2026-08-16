@@ -62,9 +62,16 @@ export interface Withdrawal {
   userId: string;
   bankName: string;
   accountNumber: string;
+  accountHolder?: string;
   amount: number;
   date: string;
-  status: string;
+  status: 'pending' | 'processing' | 'completed' | 'rejected' | string;
+  referenceId?: string;
+  rejectionReason?: string;
+  processedAt?: string;
+  userName?: string;
+  userEmail?: string;
+  userPhone?: string;
 }
 
 export interface AdminStats {

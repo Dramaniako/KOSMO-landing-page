@@ -546,18 +546,36 @@ export default function LandlordDashboard() {
                       <p style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic' }}>Belum ada riwayat penarikan dana.</p>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '180px', overflowY: 'auto' }}>
-                        {stats.withdrawals.map((w) => (
-                          <div key={w.id} className="flex-between" style={{ padding: '10px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #f1f5f9' }}>
-                            <div>
-                              <p style={{ fontWeight: 600, fontSize: '13px' }}>Transfer ke {w.bankName}</p>
-                              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.date} &bull; Rek: {w.accountNumber}</p>
+                        {stats.withdrawals.map((w) => {
+                          const isRejected = w.status === 'rejected';
+                          const isCompleted = w.status === 'completed';
+                          const isProcessing = w.status === 'processing';
+                          return (
+                            <div key={w.id} className="flex-between" style={{ padding: '10px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #f1f5f9' }}>
+                              <div>
+                                <p style={{ fontWeight: 600, fontSize: '13px' }}>Transfer ke {w.bankName}</p>
+                                <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.date} &bull; Rek: {w.accountNumber}</p>
+                                {isRejected && w.rejectionReason && (
+                                  <p style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '2px' }}>
+                                    Alasan: {w.rejectionReason} (Saldo telah dikembalikan)
+                                  </p>
+                                )}
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <p style={{ fontWeight: 700, fontSize: '14px', color: isRejected ? 'var(--text-muted)' : 'var(--danger)', textDecoration: isRejected ? 'line-through' : 'none' }}>
+                                  -{formatRupiah(w.amount)}
+                                </p>
+                                <span 
+                                  className={`badge ${isCompleted ? 'badge-success' : isRejected ? 'badge-danger' : isProcessing ? 'badge-warning' : 'badge-secondary'}`} 
+                                  style={{ fontSize: '10px', padding: '2px 6px', display: 'inline-block', marginTop: '2px' }}
+                                  title={w.rejectionReason ? `Alasan penolakan: ${w.rejectionReason}` : undefined}
+                                >
+                                  {isCompleted ? 'Selesai' : isRejected ? 'Ditolak' : isProcessing ? 'Diproses' : 'Menunggu'}
+                                </span>
+                              </div>
                             </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ fontWeight: 700, fontSize: '14px', color: 'var(--danger)' }}>-{formatRupiah(w.amount)}</p>
-                              <span className="badge badge-success" style={{ fontSize: '10px', padding: '2px 6px' }}>{w.status}</span>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

@@ -13,14 +13,19 @@ interface WithdrawalRecord {
   amount: number;
   bankName: string;
   accountNumber: string;
+  accountHolder?: string;
   status: 'pending' | 'processing' | 'completed' | 'rejected';
+  referenceId?: string;
+  rejectionReason?: string;
+  processedAt?: string;
 }
 
 function processWithdrawal(
   account: LandlordAccount,
   amount: number,
   bankName: string,
-  accountNumber: string
+  accountNumber: string,
+  accountHolder = ''
 ): { success: boolean; message?: string; updatedBalance?: number; updatedTotalWithdrawn?: number; withdrawal?: WithdrawalRecord } {
   if (!amount || !bankName || !accountNumber) {
     return { success: false, message: 'Jumlah, nama bank, dan nomor rekening wajib diisi.' };
@@ -43,6 +48,7 @@ function processWithdrawal(
     amount,
     bankName,
     accountNumber,
+    accountHolder,
     status: 'pending'
   };
 
@@ -55,8 +61,9 @@ function processWithdrawal(
 }
 
 function processAdminDisbursement(
-  withdrawal: WithdrawalRecord
-): { success: boolean; message?: string; updatedStatus?: 'completed' | 'rejected' } {
+  withdrawal: WithdrawalRecord,
+  targetStatus: 'processing' | 'completed' = 'completed'
+): { success: boolean; message?: string; updatedStatus?: 'processing' | 'completed' | 'rejected'; referenceId?: string } {
   if (withdrawal.status === 'completed') {
     return { success: false, message: 'Penarikan sudah berhasil diproses sebelumnya.' };
   }
@@ -64,13 +71,16 @@ function processAdminDisbursement(
     return { success: false, message: 'Penarikan yang sudah ditolak tidak dapat diproses.' };
   }
 
-  withdrawal.status = 'completed';
-  return { success: true, updatedStatus: 'completed' };
+  withdrawal.status = targetStatus;
+  withdrawal.referenceId = withdrawal.referenceId || `REF-${Date.now()}`;
+  withdrawal.processedAt = new Date().toISOString();
+  return { success: true, updatedStatus: targetStatus, referenceId: withdrawal.referenceId };
 }
 
 function rejectAdminDisbursement(
   withdrawal: WithdrawalRecord,
-  account: LandlordAccount
+  account: LandlordAccount,
+  reason = 'Pencairan ditolak admin'
 ): { success: boolean; message?: string; updatedBalance?: number; updatedTotalWithdrawn?: number } {
   if (withdrawal.status === 'rejected') {
     return { success: false, message: 'Penarikan sudah pernah ditolak.' };
@@ -80,6 +90,8 @@ function rejectAdminDisbursement(
   }
 
   withdrawal.status = 'rejected';
+  withdrawal.rejectionReason = reason;
+  withdrawal.processedAt = new Date().toISOString();
   account.balance += withdrawal.amount;
   account.totalWithdrawn = Math.max(0, account.totalWithdrawn - withdrawal.amount);
 
@@ -103,14 +115,15 @@ test('Landlord withdrawals and financial calculations', async (t) => {
       totalWithdrawn: 2000000
     };
 
-    const result = processWithdrawal(account, 4000000, 'BCA', '1234567890');
+    const result = processWithdrawal(account, 4000000, 'BCA', '1234567890', 'Pak Budi');
     assert.equal(result.success, true);
     assert.equal(result.updatedBalance, 6000000);
     assert.equal(result.updatedTotalWithdrawn, 6000000);
     assert.equal(result.withdrawal?.status, 'pending');
+    assert.equal(result.withdrawal?.accountHolder, 'Pak Budi');
   });
 
-  await t.test('admin can process pending withdrawal to completed', () => {
+  await t.test('admin can transition pending withdrawal to processing then completed', () => {
     const withdrawal: WithdrawalRecord = {
       id: 'w-101',
       userId: 'landlord-1',
@@ -120,8 +133,13 @@ test('Landlord withdrawals and financial calculations', async (t) => {
       status: 'pending'
     };
 
-    const result = processAdminDisbursement(withdrawal);
-    assert.equal(result.success, true);
+    const resProcessing = processAdminDisbursement(withdrawal, 'processing');
+    assert.equal(resProcessing.success, true);
+    assert.equal(withdrawal.status, 'processing');
+    assert.ok(withdrawal.referenceId?.startsWith('REF-'));
+
+    const resCompleted = processAdminDisbursement(withdrawal, 'completed');
+    assert.equal(resCompleted.success, true);
     assert.equal(withdrawal.status, 'completed');
   });
 
@@ -141,9 +159,10 @@ test('Landlord withdrawals and financial calculations', async (t) => {
       status: 'pending'
     };
 
-    const result = rejectAdminDisbursement(pendingWithdrawal, account);
+    const result = rejectAdminDisbursement(pendingWithdrawal, account, 'Rekening tidak valid');
     assert.equal(result.success, true);
     assert.equal(pendingWithdrawal.status, 'rejected');
+    assert.equal(pendingWithdrawal.rejectionReason, 'Rekening tidak valid');
     assert.equal(result.updatedBalance, 10000000);
     assert.equal(result.updatedTotalWithdrawn, 0);
   });
@@ -196,7 +215,7 @@ test('Landlord withdrawals and financial calculations', async (t) => {
     assert.equal(result.message, 'Saldo tidak mencukupi.');
   });
 
-  await t.test('rejects negative or zero withdrawal amount', () => {
+  await t.test('rejects negative, zero, or NaN withdrawal amount', () => {
     const account: LandlordAccount = {
       id: 'landlord-1',
       balance: 5000000,
@@ -205,6 +224,7 @@ test('Landlord withdrawals and financial calculations', async (t) => {
 
     assert.equal(processWithdrawal(account, -500000, 'BCA', '123').success, false);
     assert.equal(processWithdrawal(account, 0, 'BCA', '123').success, false);
+    assert.equal(processWithdrawal(account, NaN, 'BCA', '123').success, false);
   });
 
   await t.test('rejects missing bankName or accountNumber', () => {
