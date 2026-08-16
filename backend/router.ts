@@ -6,14 +6,26 @@ import multer from 'multer';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
-import type { SignOptions } from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import midtransClient from 'midtrans-client';
 import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
 import fs from 'fs';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { generateRentalContractPdf } from './services/contract.ts';
+import {
+  generateJwtToken,
+  verifyJwtToken,
+  authenticateToken,
+  requireRole
+} from './middleware/auth.ts';
+import type { JWTPayload, AuthenticatedRequest } from './middleware/auth.ts';
+import {
+  loginSchema,
+  registerSchema,
+  propertySchema,
+  validateBody
+} from './middleware/validation.ts';
 import type {
   KosRoom,
   Booking,
@@ -23,65 +35,24 @@ import type {
   BookingStatus
 } from './types/index.ts';
 
-const router: Router = express.Router();
-
-// ==========================================
-// JWT Authentication & Middleware
-// ==========================================
-export interface JWTPayload {
-  id: string;
-  email: string;
-  role: UserRole;
-}
-
-export function generateJwtToken(
-  payload: JWTPayload,
-  secret = process.env.JWT_SECRET || 'super-secret-jwt-key-with-high-entropy-minimum-32-chars',
-  expiresIn: SignOptions['expiresIn'] = '7d'
-): string {
-  const options: SignOptions = {};
-  if (expiresIn !== undefined) {
-    options.expiresIn = expiresIn;
-  }
-  return jwt.sign(payload, secret, options);
-}
-
-export function verifyJwtToken(
-  token: string,
-  secret = process.env.JWT_SECRET || 'super-secret-jwt-key-with-high-entropy-minimum-32-chars'
-): JWTPayload {
-  const decoded = jwt.verify(token, secret);
-  if (!decoded || typeof decoded !== 'object') {
-    throw new Error('Invalid token payload');
-  }
-  const { id, email, role } = decoded as Partial<JWTPayload>;
-  if (!id || !email || !role) {
-    throw new Error('Malformed token claims');
-  }
-  return { id, email, role };
-}
-
-export interface AuthenticatedRequest extends Request {
-  user?: JWTPayload;
-}
-
-export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
-  if (!token) {
-    res.status(401).json({ message: 'Akses ditolak. Token otentikasi diperlukan.' });
-    return;
-  }
-
-  try {
-    const user = verifyJwtToken(token);
-    (req as AuthenticatedRequest).user = user;
-    next();
-  } catch (err: unknown) {
-    res.status(403).json({ message: 'Token tidak valid atau telah kedaluwarsa.' });
-  }
+export {
+  generateJwtToken,
+  verifyJwtToken,
+  authenticateToken,
+  requireRole
 };
+export type { JWTPayload, AuthenticatedRequest };
+
+// Rate Limiter for Authentication Endpoints (max 10 requests per minute)
+export const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Terlalu banyak percobaan masuk/daftar. Silakan coba lagi dalam 1 menit.' }
+});
+
+const router: Router = express.Router();
 
 // Cloudinary CDN Configuration
 cloudinary.config({
@@ -217,7 +188,7 @@ interface UserRow extends RowDataPacket {
   bankAccountHolder?: string;
 }
 
-router.post('/auth/login', async (req: Request<Record<string, never>, unknown, LoginBody>, res: Response) => {
+router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req: Request<Record<string, never>, unknown, LoginBody>, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ message: "Email dan password wajib diisi." });
@@ -251,7 +222,7 @@ router.post('/auth/login', async (req: Request<Record<string, never>, unknown, L
   }
 });
 
-router.post('/auth/register', async (req: Request<Record<string, never>, unknown, RegisterBody>, res: Response) => {
+router.post('/auth/register', authLimiter, validateBody(registerSchema), async (req: Request<Record<string, never>, unknown, RegisterBody>, res: Response) => {
   const { email, password, name, phone } = req.body;
   if (!email || !password || !name) {
     return res.status(400).json({ message: "Nama, email, dan password wajib diisi." });
@@ -556,7 +527,7 @@ router.get('/properties/:id', async (req: Request<{ id: string }>, res: Response
   }
 });
 
-router.post('/properties', async (req: Request<Record<string, never>, unknown, CreatePropertyBody>, res: Response) => {
+router.post('/properties', authenticateToken, requireRole(['admin', 'landlord', 'owner']), validateBody(propertySchema), async (req: Request<Record<string, never>, unknown, CreatePropertyBody>, res: Response) => {
   const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image, ownerId } = req.body;
 
   if (!name || !district || !address || !price) {
@@ -601,7 +572,7 @@ router.post('/properties', async (req: Request<Record<string, never>, unknown, C
   }
 });
 
-router.put('/properties/:id', async (req: Request<{ id: string }, unknown, CreatePropertyBody>, res: Response) => {
+router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: Request<{ id: string }, unknown, CreatePropertyBody>, res: Response) => {
   const { id } = req.params;
   const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image } = req.body;
 
@@ -649,7 +620,7 @@ interface DeletePropertyBody {
   landlordId?: string;
 }
 
-router.delete('/properties/:id', async (req: Request<{ id: string }, unknown, DeletePropertyBody>, res: Response) => {
+router.delete('/properties/:id', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: Request<{ id: string }, unknown, DeletePropertyBody>, res: Response) => {
   const { id } = req.params;
   const { password, landlordId } = req.body;
 
@@ -977,7 +948,7 @@ router.post('/withdraw', authenticateToken, async (req: Request<Record<string, n
   }
 });
 
-router.post('/admin/withdrawals/:id/process', authenticateToken, async (req: Request<{ id: string }>, res: Response) => {
+router.post('/admin/withdrawals/:id/process', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   const connection = await pool.getConnection();
   try {
@@ -1017,7 +988,7 @@ router.post('/admin/withdrawals/:id/process', authenticateToken, async (req: Req
   }
 });
 
-router.post('/admin/withdrawals/:id/reject', authenticateToken, async (req: Request<{ id: string }, unknown, { reason?: string }>, res: Response) => {
+router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }, unknown, { reason?: string }>, res: Response) => {
   const { id } = req.params;
   const { reason } = req.body;
   const connection = await pool.getConnection();
@@ -1095,7 +1066,7 @@ interface SumRow extends RowDataPacket {
   sum: number | null;
 }
 
-router.get('/admin/stats', authenticateToken, async (_req: Request, res: Response) => {
+router.get('/admin/stats', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
   try {
     const [visitorRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking');
     const totalVisitors = visitorRows[0].count;
@@ -1131,7 +1102,7 @@ interface TrackingHistoryRow extends RowDataPacket {
   count: number;
 }
 
-router.get('/admin/tracking-history', authenticateToken, async (_req: Request, res: Response) => {
+router.get('/admin/tracking-history', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
   try {
     // 1. Last 24 Hours (grouped by hour)
     const [rows24h] = await pool.query<TrackingHistoryRow[]>(`
@@ -1242,13 +1213,16 @@ interface VisitorTrackingRow extends RowDataPacket {
   visited_at: Date | string;
 }
 
-router.get('/reports/tracking/excel', authenticateToken, async (_req: Request, res: Response) => {
+router.get('/reports/tracking/excel', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
   try {
     const [visitorRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking');
     const [userRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users');
     const [landlordRows] = await pool.query<CountRow[]>("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
+    const totalLandlords = landlordRows[0].count;
     const [propertyRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM properties');
+    const totalProperties = propertyRows[0].count;
     const [roomsRows] = await pool.query<SumRow[]>('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
+    const totalRooms = roomsRows[0].sum || 0;
 
     const [visitors] = await pool.query<VisitorTrackingRow[]>('SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000');
     const [users] = await pool.query<UserRow[]>('SELECT id, email, name, role, phone FROM users ORDER BY id DESC');
@@ -1260,9 +1234,9 @@ router.get('/reports/tracking/excel', authenticateToken, async (_req: Request, r
       ['Metrik', 'Jumlah'],
       ['Total Pengunjung Website', visitorRows[0].count],
       ['Total Pengguna Terdaftar', userRows[0].count],
-      ['Total Landlord', landlordRows[0].count],
-      ['Total Properti', propertyRows[0].count],
-      ['Total Kamar', roomsRows[0].sum || 0]
+      ['Total Landlord', totalLandlords],
+      ['Total Properti', totalProperties],
+      ['Total Kamar', totalRooms]
     ];
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan');
@@ -1299,7 +1273,7 @@ interface RentalRow extends RowDataPacket {
   status: 'active' | 'terminated';
 }
 
-router.get('/reports/landlord/excel', authenticateToken, async (req: Request, res: Response) => {
+router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: Request, res: Response) => {
   const landlordId = String(req.query.landlordId || '');
   if (!landlordId) return res.status(400).json({ message: 'landlordId diperlukan.' });
   try {

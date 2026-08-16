@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Request, Response, NextFunction, Application } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import bodyParser from 'body-parser';
 import morgan from 'morgan';
 import { initDb } from './db.ts';
@@ -23,6 +24,7 @@ const app: Application = express();
 const PORT: number = parseInt(process.env.PORT || '5000', 10);
 
 // Middleware
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors());
 app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ limit: '5mb', extended: true }));
