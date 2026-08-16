@@ -41,6 +41,7 @@ export default function KosCard({ property, onOpenDetail, renderFacilityIcon }: 
           alt={property.name || 'Kosmo Property'}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 property-img"
           loading="lazy"
+          decoding="async"
           onError={(e) => {
             (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
           }}

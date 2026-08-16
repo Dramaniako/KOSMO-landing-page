@@ -13,6 +13,7 @@ import { Readable } from 'stream';
 import fs from 'fs';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { generateRentalContractPdf } from './services/contract.ts';
+import { apiCache } from './services/cache.ts';
 import {
   generateJwtToken,
   verifyJwtToken,
@@ -431,30 +432,43 @@ function normalizeProperty(p: PropertyRow): PropertyRow {
 
 router.get('/properties', async (req: Request, res: Response) => {
   const { district, priceMin, priceMax, facility } = req.query;
+  const cacheKey = `properties:${district || 'all'}:${priceMin || 0}:${priceMax || 0}:${facility || 'all'}`;
+
+  const cachedData = apiCache.get<PropertyRow[]>(cacheKey);
+  if (cachedData) {
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    return res.json(cachedData);
+  }
 
   try {
-    let sql = 'SELECT * FROM properties WHERE 1=1';
+    let sql = `
+      SELECT p.*, GROUP_CONCAT(pf.facility SEPARATOR ',') as facilitiesString
+      FROM properties p
+      LEFT JOIN property_facilities pf ON p.id = pf.propertyId
+      WHERE 1=1
+    `;
     const params: (string | number)[] = [];
 
     if (district && district !== 'Semua') {
-      sql += ' AND district = ?';
+      sql += ' AND p.district = ?';
       params.push(String(district));
     }
     if (priceMin) {
-      sql += ' AND price >= ?';
+      sql += ' AND p.price >= ?';
       params.push(parseInt(String(priceMin), 10));
     }
     if (priceMax) {
-      sql += ' AND price <= ?';
+      sql += ' AND p.price <= ?';
       params.push(parseInt(String(priceMax), 10));
     }
 
-    const [properties] = await pool.query<PropertyRow[]>(sql, params);
+    sql += ' GROUP BY p.id';
 
-    // Fetch facilities for each property
+    const [properties] = await pool.query<(PropertyRow & { facilitiesString?: string })[]>(sql, params);
+
     for (const prop of properties) {
-      const [facRows] = await pool.query<FacilityRow[]>('SELECT facility FROM property_facilities WHERE propertyId = ?', [prop.id]);
-      prop.facilities = facRows.map(r => r.facility);
+      prop.facilities = prop.facilitiesString ? prop.facilitiesString.split(',').filter(Boolean) : [];
+      delete prop.facilitiesString;
     }
 
     // Filter by facility in JS if requested
@@ -466,7 +480,11 @@ router.get('/properties', async (req: Request, res: Response) => {
       );
     }
 
-    res.json(filteredProperties.map(normalizeProperty));
+    const normalized = filteredProperties.map(normalizeProperty);
+    apiCache.set(cacheKey, normalized, 60);
+
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    res.json(normalized);
   } catch (err: unknown) {
     console.error("Get properties error:", err);
     try {
@@ -478,6 +496,13 @@ router.get('/properties', async (req: Request, res: Response) => {
 });
 
 router.get('/properties/:id', async (req: Request<{ id: string }>, res: Response) => {
+  const cacheKey = `properties:detail:${req.params.id}`;
+  const cached = apiCache.get<PropertyRow>(cacheKey);
+  if (cached) {
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    return res.json(cached);
+  }
+
   try {
     const [rows] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [req.params.id]);
     if (rows.length === 0) {
@@ -487,7 +512,11 @@ router.get('/properties/:id', async (req: Request<{ id: string }>, res: Response
     const [facRows] = await pool.query<FacilityRow[]>('SELECT facility FROM property_facilities WHERE propertyId = ?', [prop.id]);
     prop.facilities = facRows.map(r => r.facility);
 
-    res.json(normalizeProperty(prop));
+    const normalized = normalizeProperty(prop);
+    apiCache.set(cacheKey, normalized, 60);
+
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    res.json(normalized);
   } catch (err) {
     res.status(500).json({ message: "Gagal mengambil detail properti." });
   }
@@ -528,6 +557,7 @@ router.post('/properties', authenticateToken, requireRole(['admin', 'landlord', 
     }
 
     await connection.commit();
+    apiCache.invalidatePattern('properties');
     res.status(201).json({ message: "Properti berhasil ditambahkan!" });
   } catch (err) {
     await connection.rollback();
@@ -571,6 +601,7 @@ router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord
     }
 
     await connection.commit();
+    apiCache.invalidatePattern('properties');
     res.json({ message: "Properti berhasil diperbarui!" });
   } catch (err) {
     await connection.rollback();
@@ -613,6 +644,7 @@ router.delete('/properties/:id', authenticateToken, requireRole(['admin', 'landl
     }
 
     await pool.query('DELETE FROM properties WHERE id = ?', [id]);
+    apiCache.invalidatePattern('properties');
     res.json({ message: "Properti berhasil dihapus!" });
   } catch (err) {
     console.error("Delete property error:", err);
@@ -644,6 +676,13 @@ interface CreateReviewBody {
 
 router.get('/reviews', async (req: Request, res: Response) => {
   const { propertyId, userId } = req.query;
+  const cacheKey = `reviews:${propertyId || 'all'}:${userId || 'all'}`;
+
+  const cachedReviews = apiCache.get<ReviewRow[]>(cacheKey);
+  if (cachedReviews) {
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    return res.json(cachedReviews);
+  }
 
   try {
     let sql = 'SELECT * FROM reviews WHERE 1=1';
@@ -659,6 +698,9 @@ router.get('/reviews', async (req: Request, res: Response) => {
     }
 
     const [rows] = await pool.query<ReviewRow[]>(sql, params);
+    apiCache.set(cacheKey, rows, 60);
+
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
     res.json(rows);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -699,6 +741,8 @@ router.post('/reviews', async (req: Request<Record<string, never>, unknown, Crea
     await connection.query('UPDATE properties SET rating = ? WHERE id = ?', [parseFloat(avgRating.toFixed(1)), propertyId]);
 
     await connection.commit();
+    apiCache.invalidatePattern('reviews');
+    apiCache.invalidatePattern('properties');
     res.status(201).json({ message: "Review berhasil ditambahkan!" });
   } catch (err) {
     await connection.rollback();
@@ -735,6 +779,8 @@ router.put('/reviews/:id', async (req: Request<{ id: string }, unknown, { rating
     await connection.query('UPDATE properties SET rating = ? WHERE id = ?', [parseFloat(avgRating.toFixed(1)), review.propertyId]);
 
     await connection.commit();
+    apiCache.invalidatePattern('reviews');
+    apiCache.invalidatePattern('properties');
     res.json({ message: "Review berhasil diperbarui!" });
   } catch (err) {
     await connection.rollback();
@@ -770,6 +816,8 @@ router.delete('/reviews/:id', async (req: Request<{ id: string }>, res: Response
     await connection.query('UPDATE properties SET rating = ? WHERE id = ?', [parseFloat(avgRating.toFixed(1)), review.propertyId]);
 
     await connection.commit();
+    apiCache.invalidatePattern('reviews');
+    apiCache.invalidatePattern('properties');
     res.json({ message: "Review berhasil dihapus!" });
   } catch (err) {
     await connection.rollback();
