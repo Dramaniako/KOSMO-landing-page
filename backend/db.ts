@@ -27,38 +27,46 @@ try {
   console.warn("Failed to load .env file:", e);
 }
 
+const host = process.env.DB_HOST || 'localhost';
+const isTiDB = host.includes('tidbcloud.com');
+const isSSLTrue = process.env.DB_SSL === 'true';
+
+const sslOption = (isTiDB || isSSLTrue)
+  ? { minVersion: 'TLSv1.2', rejectUnauthorized: true }
+  : (process.env.DB_SSL === 'false' ? undefined : { rejectUnauthorized: false });
+
 const dbConfig: ConnectionOptions = {
-  host: process.env.DB_HOST || 'localhost',
+  host,
   port: parseInt(process.env.DB_PORT || '3306', 10),
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'defaultdb',
-  ...(process.env.DB_SSL === 'false' ? {} : { ssl: { rejectUnauthorized: false } }),
+  database: process.env.DB_NAME || 'kosmo_db',
+  ...(sslOption ? { ssl: sslOption } : {}),
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '3', 10),
-  maxIdle: 3,
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '5', 10),
+  maxIdle: 5,
   idleTimeout: 10000,
   queueLimit: 0
 };
 
-// Only attempt database creation if host is localhost/127.0.0.1
-if (dbConfig.host === 'localhost' || dbConfig.host === '127.0.0.1') {
-  (async () => {
-    let baseConnection: Connection | null = null;
-    try {
-      baseConnection = await mysql.createConnection({
-        host: dbConfig.host,
-        user: dbConfig.user,
-        password: dbConfig.password
-      });
-      await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\`;`);
-    } catch (err) {
-      console.error("Failed to connect to base MySQL server. Make sure MySQL service is running.", err);
-    } finally {
-      if (baseConnection) await baseConnection.end();
-    }
-  })();
-}
+// Attempt database creation if needed
+(async () => {
+  let baseConnection: Connection | null = null;
+  try {
+    baseConnection = await mysql.createConnection({
+      host: dbConfig.host,
+      port: dbConfig.port,
+      user: dbConfig.user,
+      password: dbConfig.password,
+      ...(sslOption ? { ssl: sslOption } : {})
+    });
+    await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database || 'kosmo_db'}\`;`);
+  } catch (err) {
+    // If user lacks global CREATE DATABASE privilege on shared cloud MySQL, proceed to pool connection
+  } finally {
+    if (baseConnection) await baseConnection.end();
+  }
+})();
 
 export interface CustomConnection extends Connection {
   release: () => Promise<void>;
@@ -144,7 +152,7 @@ export async function initDb(): Promise<void> {
           role ENUM('admin', 'landlord', 'tenant') NOT NULL,
           phone VARCHAR(20) DEFAULT '',
           paymentMethod VARCHAR(100) DEFAULT 'Virtual Account',
-          avatar TEXT,
+          avatar LONGTEXT,
           notifications BOOLEAN DEFAULT TRUE,
           language VARCHAR(20) DEFAULT 'Indonesia',
           balance DECIMAL(15, 2) DEFAULT 0.00,
@@ -165,8 +173,8 @@ export async function initDb(): Promise<void> {
           address TEXT NOT NULL,
           price INT NOT NULL,
           rating DECIMAL(3, 1) DEFAULT 0.0,
-          image TEXT,
-          description TEXT,
+          image LONGTEXT,
+          description LONGTEXT,
           latitude VARCHAR(50) DEFAULT '-8.6500',
           longitude VARCHAR(50) DEFAULT '115.2166',
           totalRooms INT NOT NULL,
@@ -176,6 +184,13 @@ export async function initDb(): Promise<void> {
           FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
+
+      // Modify image column to LONGTEXT if table already existed with TEXT
+      try {
+        await pool.query('ALTER TABLE properties MODIFY image LONGTEXT');
+        await pool.query('ALTER TABLE properties MODIFY description LONGTEXT');
+        await pool.query('ALTER TABLE users MODIFY avatar LONGTEXT');
+      } catch (e) {}
 
       // 3. Property Facilities table (Listrik, Air, Wifi, Kebersihan, Keamanan, Parkir)
       await pool.query(`
@@ -261,7 +276,7 @@ export async function initDb(): Promise<void> {
         // Seed withdrawals
         await pool.query(`
           INSERT INTO withdrawals (id, userId, bankName, accountNumber, amount, date, status)
-          VALUES ('w-01', 'user-landlord', 'BCA', '1234567890', 1000000.0, '3 Jun 2026', 'Selesai');
+          VALUES ('w-01', 'user-landlord', 'BCA', '1234567890', 1000000.0, '3 Jun 2026', 'completed');
         `);
       } else {
         // Migrate existing plaintext users if any
