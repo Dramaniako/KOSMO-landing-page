@@ -7,7 +7,7 @@ export type RoomType = 'putra' | 'putri' | 'campur';
 
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 
-export type UserRole = 'tenant' | 'owner' | 'admin';
+export type UserRole = 'tenant' | 'landlord' | 'admin' | 'owner';
 
 export type Amenity =
   | 'Wifi'
@@ -63,7 +63,7 @@ export interface User {
 
 export const VALID_ROOM_TYPES: readonly RoomType[] = ['putra', 'putri', 'campur'] as const;
 export const VALID_BOOKING_STATUSES: readonly BookingStatus[] = ['pending', 'confirmed', 'cancelled'] as const;
-export const VALID_USER_ROLES: readonly UserRole[] = ['tenant', 'owner', 'admin'] as const;
+export const VALID_USER_ROLES: readonly UserRole[] = ['tenant', 'landlord', 'admin', 'owner'] as const;
 export const VALID_AMENITIES: readonly Amenity[] = [
   'Wifi',
   'AC',
@@ -206,6 +206,127 @@ export function validateUser(data: unknown): { valid: boolean; errors: string[] 
   }
   if (typeof user.role !== 'string' || !VALID_USER_ROLES.includes(user.role as UserRole)) {
     errors.push(`role must be one of: ${VALID_USER_ROLES.join(', ')}`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export interface Property {
+  id: string;
+  name: string;
+  district: string;
+  address: string;
+  price: number;
+  rating: number;
+  totalRooms: number;
+  occupiedRooms: number;
+  coordinates: Coordinates;
+  images: string[];
+  facilities: string[];
+  ownerId: string;
+}
+
+export interface Review {
+  id: string;
+  propertyId: string;
+  userName: string;
+  userAvatar?: string;
+  rating: number;
+  date: string;
+  comment: string;
+}
+
+/**
+ * Validation helper for Property schema
+ */
+export function validateProperty(data: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Property must be a non-null object'] };
+  }
+
+  const prop = data as Record<string, unknown>;
+
+  if (typeof prop.id !== 'string' || !prop.id.trim()) {
+    errors.push('id must be a non-empty string');
+  }
+  if (typeof prop.name !== 'string' || !prop.name.trim()) {
+    errors.push('name must be a non-empty string');
+  }
+  if (typeof prop.district !== 'string' || !prop.district.trim()) {
+    errors.push('district must be a non-empty string');
+  }
+  if (typeof prop.address !== 'string' || !prop.address.trim()) {
+    errors.push('address must be a non-empty string');
+  }
+  if (typeof prop.price !== 'number' || Number.isNaN(prop.price) || prop.price <= 0) {
+    errors.push('price must be a positive number');
+  }
+  if (typeof prop.rating !== 'number' || Number.isNaN(prop.rating) || prop.rating < 1 || prop.rating > 5) {
+    errors.push('rating must be a number between 1 and 5');
+  }
+  if (typeof prop.totalRooms !== 'number' || !Number.isInteger(prop.totalRooms) || prop.totalRooms <= 0) {
+    errors.push('totalRooms must be an integer greater than 0');
+  }
+  if (typeof prop.occupiedRooms !== 'number' || !Number.isInteger(prop.occupiedRooms) || prop.occupiedRooms < 0) {
+    errors.push('occupiedRooms must be a non-negative integer');
+  } else if (typeof prop.totalRooms === 'number' && prop.occupiedRooms > prop.totalRooms) {
+    errors.push('occupiedRooms cannot exceed totalRooms');
+  }
+
+  if (!prop.coordinates || typeof prop.coordinates !== 'object') {
+    errors.push('coordinates must be an object with lat and lng numbers');
+  } else {
+    const coords = prop.coordinates as Record<string, unknown>;
+    if (typeof coords.lat !== 'number' || Number.isNaN(coords.lat) || coords.lat < -90 || coords.lat > 90) {
+      errors.push('coordinates.lat must be a valid latitude between -90 and 90');
+    }
+    if (typeof coords.lng !== 'number' || Number.isNaN(coords.lng) || coords.lng < -180 || coords.lng > 180) {
+      errors.push('coordinates.lng must be a valid longitude between -180 and 180');
+    }
+  }
+
+  if (!Array.isArray(prop.images) || prop.images.some(img => typeof img !== 'string')) {
+    errors.push('images must be an array of strings');
+  }
+  if (!Array.isArray(prop.facilities) || prop.facilities.some(f => typeof f !== 'string')) {
+    errors.push('facilities must be an array of strings');
+  }
+  if (typeof prop.ownerId !== 'string' || !prop.ownerId.trim()) {
+    errors.push('ownerId must be a non-empty string');
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validation helper for Review schema
+ */
+export function validateReview(data: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Review must be a non-null object'] };
+  }
+
+  const review = data as Record<string, unknown>;
+
+  if (typeof review.id !== 'string' || !review.id.trim()) {
+    errors.push('id must be a non-empty string');
+  }
+  if (typeof review.propertyId !== 'string' || !review.propertyId.trim()) {
+    errors.push('propertyId must be a non-empty string');
+  }
+  if (typeof review.userName !== 'string' || !review.userName.trim()) {
+    errors.push('userName must be a non-empty string');
+  }
+  if (typeof review.rating !== 'number' || Number.isNaN(review.rating) || review.rating < 1 || review.rating > 5) {
+    errors.push('rating must be a number between 1 and 5');
+  }
+  if (typeof review.comment !== 'string' || !review.comment.trim()) {
+    errors.push('comment must be a non-empty string');
+  }
+  if (typeof review.date !== 'string' || !review.date.trim()) {
+    errors.push('date must be a non-empty string');
   }
 
   return { valid: errors.length === 0, errors };

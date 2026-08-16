@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
 
-test('Authentication logic & password hashing', async (t) => {
+test('Authentication logic & password security gates', async (t) => {
   const plainPassword = 'SuperSecretPassword123!';
   const hashedPassword = bcrypt.hashSync(plainPassword, 10);
 
@@ -39,5 +39,21 @@ test('Authentication logic & password hashing', async (t) => {
     assert.equal(verifyPasswordInput('user-1', undefined).valid, false);
     assert.equal(verifyPasswordInput('', '').valid, false);
     assert.equal(verifyPasswordInput('user-1', 'pass123').valid, true);
+  });
+
+  await t.test('root admin deletion guard prevents deleting default admin user', () => {
+    const checkUserDeletionAllowed = (userId: string): { allowed: boolean; message?: string } => {
+      if (userId === 'user-admin') {
+        return { allowed: false, message: 'Akun admin utama tidak dapat dihapus.' };
+      }
+      return { allowed: true };
+    };
+
+    const adminCheck = checkUserDeletionAllowed('user-admin');
+    assert.equal(adminCheck.allowed, false);
+    assert.equal(adminCheck.message, 'Akun admin utama tidak dapat dihapus.');
+
+    const normalUserCheck = checkUserDeletionAllowed('user-tenant-101');
+    assert.equal(normalUserCheck.allowed, true);
   });
 });

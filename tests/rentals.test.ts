@@ -11,19 +11,26 @@ interface RentalSimulationState {
 
 function processNewRental(
   property: { totalRooms: number; occupiedRooms: number; price: number; ownerId: string },
-  tenantId: string
-): { success: boolean; message?: string; updatedOccupiedRooms?: number; addedRevenue?: number } {
+  tenantId: string,
+  durationMonths = 1
+): { success: boolean; message?: string; updatedOccupiedRooms?: number; addedRevenue?: number; totalPrice?: number } {
   if (!tenantId) {
     return { success: false, message: 'tenantId wajib diisi.' };
+  }
+  if (durationMonths <= 0 || !Number.isInteger(durationMonths)) {
+    return { success: false, message: 'Durasi sewa minimal 1 bulan.' };
   }
   if (property.occupiedRooms >= property.totalRooms) {
     return { success: false, message: 'Kamar kos sudah penuh.' };
   }
 
+  const totalPrice = property.price * durationMonths;
+
   return {
     success: true,
     updatedOccupiedRooms: property.occupiedRooms + 1,
-    addedRevenue: property.price
+    addedRevenue: totalPrice,
+    totalPrice
   };
 }
 
@@ -48,11 +55,27 @@ function terminateRental(
 test('Rental booking and occupancy state transitions', async (t) => {
   await t.test('allows booking when available rooms exist and increments occupancy', () => {
     const property = { totalRooms: 10, occupiedRooms: 3, price: 3000000, ownerId: 'landlord-1' };
-    const result = processNewRental(property, 'tenant-1');
+    const result = processNewRental(property, 'tenant-1', 1);
 
     assert.equal(result.success, true);
     assert.equal(result.updatedOccupiedRooms, 4);
     assert.equal(result.addedRevenue, 3000000);
+    assert.equal(result.totalPrice, 3000000);
+  });
+
+  await t.test('calculates multi-month duration pricing correctly', () => {
+    const property = { totalRooms: 10, occupiedRooms: 2, price: 2500000, ownerId: 'landlord-1' };
+    const result = processNewRental(property, 'tenant-2', 6);
+
+    assert.equal(result.success, true);
+    assert.equal(result.totalPrice, 15000000);
+    assert.equal(result.addedRevenue, 15000000);
+  });
+
+  await t.test('rejects booking with invalid duration', () => {
+    const property = { totalRooms: 10, occupiedRooms: 2, price: 2000000, ownerId: 'landlord-1' };
+    assert.equal(processNewRental(property, 'tenant-1', 0).success, false);
+    assert.equal(processNewRental(property, 'tenant-1', -3).success, false);
   });
 
   await t.test('rejects booking when rooms are fully occupied', () => {
