@@ -956,20 +956,112 @@ router.post('/withdraw', authenticateToken, async (req: Request<Record<string, n
 
     await connection.query(
       `INSERT INTO withdrawals (id, userId, bankName, accountNumber, amount, date, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'Selesai')`,
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
       [withdrawalId, targetUserId, bankName, accountNumber, withdrawAmount, dateStr]
     );
 
     await connection.commit();
     res.json({
-      message: "Penarikan dana berhasil diproses!",
+      message: "Permintaan penarikan dana berhasil diajukan dan sedang menunggu proses.",
+      withdrawalId,
       balance: newBalance,
-      totalWithdrawn: newWithdrawn
+      totalWithdrawn: newWithdrawn,
+      status: 'pending'
     });
   } catch (err) {
     await connection.rollback();
     console.error("Withdrawal error:", err);
     res.status(500).json({ message: "Gagal memproses penarikan dana." });
+  } finally {
+    connection.release();
+  }
+});
+
+router.post('/admin/withdrawals/:id/process', authenticateToken, async (req: Request<{ id: string }>, res: Response) => {
+  const { id } = req.params;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query<WithdrawalRow[]>('SELECT * FROM withdrawals WHERE id = ? FOR UPDATE', [id]);
+    const withdrawal = rows[0];
+    if (!withdrawal) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+    }
+
+    if (withdrawal.status === 'completed') {
+      await connection.rollback();
+      return res.status(400).json({ message: "Penarikan sudah berhasil diproses sebelumnya." });
+    }
+
+    if (withdrawal.status === 'rejected') {
+      await connection.rollback();
+      return res.status(400).json({ message: "Penarikan yang sudah ditolak tidak dapat diproses." });
+    }
+
+    await connection.query("UPDATE withdrawals SET status = 'completed' WHERE id = ?", [id]);
+
+    await connection.commit();
+    res.json({
+      message: "Disbursement berhasil diproses dan status diselesaikan.",
+      withdrawalId: id,
+      status: 'completed'
+    });
+  } catch (err: unknown) {
+    await connection.rollback();
+    console.error("Process withdrawal error:", err);
+    res.status(500).json({ message: "Gagal memproses pencairan dana." });
+  } finally {
+    connection.release();
+  }
+});
+
+router.post('/admin/withdrawals/:id/reject', authenticateToken, async (req: Request<{ id: string }, unknown, { reason?: string }>, res: Response) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query<WithdrawalRow[]>('SELECT * FROM withdrawals WHERE id = ? FOR UPDATE', [id]);
+    const withdrawal = rows[0];
+    if (!withdrawal) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+    }
+
+    if (withdrawal.status === 'rejected') {
+      await connection.rollback();
+      return res.status(400).json({ message: "Penarikan sudah pernah ditolak." });
+    }
+
+    if (withdrawal.status === 'completed') {
+      await connection.rollback();
+      return res.status(400).json({ message: "Penarikan yang sudah selesai tidak dapat ditolak." });
+    }
+
+    const withdrawAmount = parseFloat(String(withdrawal.amount));
+
+    // Reverse balance deduction and reduce totalWithdrawn
+    await connection.query(
+      'UPDATE users SET balance = balance + ?, totalWithdrawn = GREATEST(0, totalWithdrawn - ?) WHERE id = ?',
+      [withdrawAmount, withdrawAmount, withdrawal.userId]
+    );
+
+    await connection.query("UPDATE withdrawals SET status = 'rejected' WHERE id = ?", [id]);
+
+    await connection.commit();
+    res.json({
+      message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
+      withdrawalId: id,
+      status: 'rejected',
+      reason: reason || "Pencairan dana ditolak oleh administrator"
+    });
+  } catch (err: unknown) {
+    await connection.rollback();
+    console.error("Reject withdrawal error:", err);
+    res.status(500).json({ message: "Gagal menolak dan mereverse penarikan dana." });
   } finally {
     connection.release();
   }

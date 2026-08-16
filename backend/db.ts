@@ -209,7 +209,7 @@ export async function initDb(): Promise<void> {
           accountNumber VARCHAR(50) NOT NULL,
           amount DECIMAL(15, 2) NOT NULL,
           date VARCHAR(50) NOT NULL,
-          status VARCHAR(20) NOT NULL,
+          status ENUM('pending','processing','completed','rejected') DEFAULT 'pending',
           FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
