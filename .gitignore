@@ -32,3 +32,7 @@ backend/*.xlsx
 
 # Backend uploads
 backend/uploads/
+
+# Playwright Test Artifacts
+test-results/
+playwright-report/

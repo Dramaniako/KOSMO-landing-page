@@ -30,5 +30,12 @@ if [ -d "frontend" ]; then
 fi
 
 echo "=========================================="
+echo " 5. Running Playwright E2E Test Suite     "
+echo "=========================================="
+if [ -f "playwright.config.ts" ]; then
+  npx playwright test
+fi
+
+echo "=========================================="
 echo "✅ All verification checks passed!"
 echo "=========================================="
