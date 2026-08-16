@@ -1,133 +1,155 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  User, CreditCard, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
-  Plus, LogOut, CheckCircle, Shield, Phone, Globe, MessageSquare, Building
+  User as UserIcon, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
+  Plus, LogOut, Globe, MessageSquare, Building, X
 } from 'lucide-react';
+import { User, Property, Review, Rental } from '../types/index.ts';
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
+
+interface ReviewFormState {
+  propertyId: string;
+  rating: number;
+  comment: string;
+}
+
+interface ProfileFormState {
+  name: string;
+  phone: string;
+  paymentMethod: string;
+  notifications: boolean;
+  language: string;
+}
 
 export default function TenantDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('profile'); // profile, rentals, bills, reviews
-  const [currentUser, setCurrentUser] = useState(null);
-  const [properties, setProperties] = useState([]);
-  const [myReviews, setMyReviews] = useState([]);
-  const [myRentals, setMyRentals] = useState([]);
+  const [activeTab, setActiveTab] = useState<'profile' | 'rentals' | 'bills' | 'reviews'>('profile');
+  
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const raw = localStorage.getItem('user');
+    return raw ? (JSON.parse(raw) as User) : null;
+  });
+
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [myReviews, setMyReviews] = useState<Review[]>([]);
+  const [myRentals, setMyRentals] = useState<Rental[]>([]);
 
   // Terminate Rental States
-  const [showTerminateModal, setShowTerminateModal] = useState(false);
-  const [terminateRental, setTerminateRental] = useState(null);
-  const [terminatePassword, setTerminatePassword] = useState('');
-  const [terminateProcessing, setTerminateProcessing] = useState(false);
+  const [showTerminateModal, setShowTerminateModal] = useState<boolean>(false);
+  const [terminateRental, setTerminateRental] = useState<Rental | null>(null);
+  const [terminatePassword, setTerminatePassword] = useState<string>('');
+  const [terminateProcessing, setTerminateProcessing] = useState<boolean>(false);
   
-  const [showRevModal, setShowRevModal] = useState(false);
-  const [editingReview, setEditingReview] = useState(null);
+  const [showRevModal, setShowRevModal] = useState<boolean>(false);
+  const [editingReview, setEditingReview] = useState<Review | null>(null);
   
   // Review form states
-  const [reviewForm, setReviewForm] = useState({
+  const [reviewForm, setReviewForm] = useState<ReviewFormState>({
     propertyId: '',
     rating: 5,
     comment: ''
   });
 
   // Profile Edit form states
-  const [profileForm, setProfileForm] = useState({
-    name: '',
-    phone: '',
-    paymentMethod: 'Virtual Account',
-    notifications: true,
-    language: 'Indonesia'
-  });
+  const [profileForm, setProfileForm] = useState<ProfileFormState>(() => ({
+    name: currentUser?.name || '',
+    phone: currentUser?.phone || '',
+    paymentMethod: currentUser?.paymentMethod || 'Virtual Account',
+    notifications: currentUser?.notifications !== undefined ? currentUser.notifications : true,
+    language: currentUser?.language || 'Indonesia'
+  }));
 
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
 
-  useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('user'));
-    if (!user || (user.role !== 'tenant' && user.role !== 'landlord')) {
-      navigate('/login');
-      return;
-    }
-    setCurrentUser(user);
-    
-    // Load profile form initial values
-    setProfileForm({
-      name: user.name,
-      phone: user.phone || '',
-      paymentMethod: user.paymentMethod || 'Virtual Account',
-      notifications: user.notifications !== undefined ? user.notifications : true,
-      language: user.language || 'Indonesia'
-    });
-
-    fetchData(user.id);
-  }, [navigate]);
-
-  const fetchData = async (userId) => {
+  const fetchData = useCallback(async (userId: string): Promise<void> => {
     try {
       // Fetch properties
       const propRes = await fetch(`${API_BASE}/properties`);
-      const propData = await propRes.json();
-      setProperties(propData);
+      const propData = (await propRes.json()) as Property[];
+      const safeProps = Array.isArray(propData) ? propData : [];
+      setProperties(safeProps);
       
-      if (propData.length > 0) {
-        setReviewForm(prev => ({ ...prev, propertyId: propData[0].id }));
+      if (safeProps.length > 0) {
+        setReviewForm((prev) => ({ ...prev, propertyId: prev.propertyId || safeProps[0].id }));
       }
 
       // Fetch reviews by user
-      const revRes = await fetch(`${API_BASE}/reviews?userId=${userId}`);
-      const revData = await revRes.json();
-      setMyReviews(revData);
+      const revRes = await fetch(`${API_BASE}/reviews?userId=${encodeURIComponent(userId)}`);
+      const revData = (await revRes.json()) as Review[];
+      setMyReviews(Array.isArray(revData) ? revData : []);
 
       // Fetch rentals by user
-      const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${userId}`);
-      const rentData = await rentRes.json();
-      setMyRentals(rentData);
+      const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`);
+      const rentData = (await rentRes.json()) as Rental[];
+      setMyRentals(Array.isArray(rentData) ? rentData : []);
     } catch (err) {
       console.error("Error loading tenant dashboard data:", err);
     }
-  };
+  }, []);
 
-  const handleLogout = () => {
+  useEffect(() => {
+    if (!currentUser || (currentUser.role !== 'tenant' && currentUser.role !== 'landlord')) {
+      navigate('/login');
+      return;
+    }
+
+    fetchData(currentUser.id);
+  }, [currentUser, navigate, fetchData]);
+
+  const handleLogout = (): void => {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
     navigate('/');
   };
 
-  const handleProfileSubmit = async (e) => {
+  const handleProfileSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
+    if (!currentUser) return;
     try {
       const res = await fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileForm)
       });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string; user: User };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       setCurrentUser(data.user);
       localStorage.setItem('user', JSON.stringify(data.user));
       setIsEditingProfile(false);
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
+  const resetReviewForm = (): void => {
+    setEditingReview(null);
+    setReviewForm({
+      propertyId: properties[0]?.id || '',
+      rating: 5,
+      comment: ''
+    });
+  };
+
   // Create or Update Review submit
-  const handleReviewSubmit = async (e) => {
+  const handleReviewSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
+    if (!currentUser) return;
     if (!reviewForm.propertyId || !reviewForm.comment) {
       alert("Properti dan komentar ulasan wajib diisi.");
       return;
     }
 
     const payload = editingReview 
-      ? { rating: parseInt(reviewForm.rating), comment: reviewForm.comment }
+      ? { rating: reviewForm.rating, comment: reviewForm.comment }
       : { 
           propertyId: reviewForm.propertyId, 
           userId: currentUser.id, 
           userName: currentUser.name, 
-          rating: parseInt(reviewForm.rating), 
+          rating: reviewForm.rating, 
           comment: reviewForm.comment 
         };
 
@@ -143,19 +165,20 @@ export default function TenantDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       setShowRevModal(false);
       resetReviewForm();
       fetchData(currentUser.id);
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const handleEditReview = (rev) => {
+  const handleEditReview = (rev: Review): void => {
     setEditingReview(rev);
     setReviewForm({
       propertyId: rev.propertyId,
@@ -165,32 +188,21 @@ export default function TenantDashboard() {
     setShowRevModal(true);
   };
 
-  const handleDeleteReview = async (id) => {
+  const handleDeleteReview = async (id: string): Promise<void> => {
+    if (!currentUser) return;
     if (!window.confirm("Apakah Anda yakin ingin menghapus review ini?")) return;
 
     try {
       const res = await fetch(`${API_BASE}/reviews/${id}`, { method: 'DELETE' });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       fetchData(currentUser.id);
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
-  };
-
-  const resetReviewForm = () => {
-    setEditingReview(null);
-    setReviewForm({
-      propertyId: properties[0]?.id || '',
-      rating: 5,
-      comment: ''
-    });
-  };
-
-  const formatRupiah = (num) => {
-    return 'Rp ' + num.toLocaleString('id-ID');
   };
 
   if (!currentUser) return null;
@@ -202,8 +214,8 @@ export default function TenantDashboard() {
         <div>
           {/* Tenant short profile summary */}
           <div style={{ textAlign: 'center', marginBottom: '32px', padding: '0 8px' }}>
-            <div style={{ position: 'relative', width: '72px', height: '72px', margin: '0 auto 12px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center' }}>
-              <User size={36} style={{ color: 'var(--primary)' }} />
+            <div style={{ position: 'relative', width: '72px', height: '72px', margin: '0 auto 12px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <UserIcon size={36} style={{ color: 'var(--primary)' }} />
               <div style={{ position: 'absolute', bottom: '0', right: '0', background: 'var(--success)', border: '2px solid white', width: '18px', height: '18px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ width: '6px', height: '6px', backgroundColor: 'white', borderRadius: '50%' }}></div>
               </div>
@@ -220,7 +232,7 @@ export default function TenantDashboard() {
                 className={`sidebar-link ${activeTab === 'profile' ? 'active' : ''}`}
                 onClick={() => setActiveTab('profile')}
               >
-                <User size={18} />
+                <UserIcon size={18} />
                 Profil Saya
               </button>
             </li>
@@ -387,17 +399,17 @@ export default function TenantDashboard() {
                     checked={profileForm.notifications}
                     onChange={(e) => {
                       const updated = e.target.checked;
-                      setProfileForm(prev => {
+                      setProfileForm((prev) => {
                         const next = { ...prev, notifications: updated };
                         // Persist immediately on change
                         fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
                           method: 'PUT',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify(next)
-                        }).then(res => res.json()).then(data => {
+                        }).then((res) => res.json()).then((data: { user: User }) => {
                           setCurrentUser(data.user);
                           localStorage.setItem('user', JSON.stringify(data.user));
-                        });
+                        }).catch(console.error);
                         return next;
                       });
                     }}
@@ -418,16 +430,16 @@ export default function TenantDashboard() {
                     value={profileForm.language}
                     onChange={(e) => {
                       const updated = e.target.value;
-                      setProfileForm(prev => {
+                      setProfileForm((prev) => {
                         const next = { ...prev, language: updated };
                         fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
                           method: 'PUT',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify(next)
-                        }).then(res => res.json()).then(data => {
+                        }).then((res) => res.json()).then((data: { user: User }) => {
                           setCurrentUser(data.user);
                           localStorage.setItem('user', JSON.stringify(data.user));
-                        });
+                        }).catch(console.error);
                         return next;
                       });
                     }}
@@ -449,7 +461,7 @@ export default function TenantDashboard() {
           </div>
         )}
 
-        {/* RENTALS TAB (Issue #3) */}
+        {/* RENTALS TAB */}
         {activeTab === 'rentals' && (
           <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
             <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Properti Kos yang Sedang Disewa</h3>
@@ -460,7 +472,7 @@ export default function TenantDashboard() {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {myRentals.map(rent => (
+                {myRentals.map((rent) => (
                   <div key={rent.id} className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: rent.status === 'active' ? '#ffffff' : '#f8fafc' }}>
                     <div>
                       <span className={`badge ${rent.status === 'active' ? 'badge-success' : 'badge-danger'}`} style={{ marginBottom: '6px', fontSize: '10px' }}>
@@ -497,7 +509,6 @@ export default function TenantDashboard() {
             <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Riwayat Transaksi & Tagihan</h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Mock active bills matching "Riwayat Tagihan" screenshot */}
               <div className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#ffffff' }}>
                 <div>
                   <span className="badge badge-success" style={{ marginBottom: '6px', fontSize: '10px' }}>Berhasil</span>
@@ -551,7 +562,7 @@ export default function TenantDashboard() {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {myReviews.map(rev => (
+                {myReviews.map((rev) => (
                   <div key={rev.id} style={{ padding: '20px', background: '#f8fafc', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }} className="flex-between">
                     <div style={{ flex: 1, marginRight: '24px' }}>
                       <div className="flex-between" style={{ marginBottom: '6px' }}>
@@ -614,7 +625,7 @@ export default function TenantDashboard() {
                       value={reviewForm.propertyId}
                       onChange={(e) => setReviewForm({ ...reviewForm, propertyId: e.target.value })}
                     >
-                      {properties.map(p => (
+                      {properties.map((p) => (
                         <option key={p.id} value={p.id}>{p.name} ({p.district})</option>
                       ))}
                     </select>
@@ -626,7 +637,7 @@ export default function TenantDashboard() {
                   <select 
                     className="form-select"
                     value={reviewForm.rating}
-                    onChange={(e) => setReviewForm({ ...reviewForm, rating: parseInt(e.target.value) })}
+                    onChange={(e) => setReviewForm({ ...reviewForm, rating: parseInt(e.target.value, 10) })}
                   >
                     <option value={5}>5 Bintang (Sangat Puas)</option>
                     <option value={4}>4 Bintang (Puas)</option>
@@ -640,7 +651,7 @@ export default function TenantDashboard() {
                   <label className="form-label">Komentar Ulasan</label>
                   <textarea 
                     className="form-textarea" 
-                    rows="4"
+                    rows={4}
                     placeholder="Berikan ulasan jujur mengenai fasilitas, kebersihan, dan kenyamanan hunian..."
                     value={reviewForm.comment}
                     onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
@@ -662,8 +673,8 @@ export default function TenantDashboard() {
         </div>
       )}
 
-      {/* Terminate Rental Password Modal (Issue #4) */}
-      {showTerminateModal && (
+      {/* Terminate Rental Password Modal */}
+      {showTerminateModal && terminateRental && (
         <div className="modal-overlay">
           <div className="modal-container" style={{ maxWidth: '400px' }}>
             <button className="modal-close" onClick={() => { setShowTerminateModal(false); setTerminatePassword(''); }}>
@@ -672,7 +683,7 @@ export default function TenantDashboard() {
             <div style={{ padding: '32px' }}>
               <h3 style={{ fontSize: '18px', marginBottom: '12px' }}>Konfirmasi Penghentian Sewa</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-                Untuk berhenti menyewa <strong>{terminateRental?.propertyName}</strong>, harap masukkan password akun Anda untuk konfirmasi keamanan.
+                Untuk berhenti menyewa <strong>{terminateRental.propertyName}</strong>, harap masukkan password akun Anda untuk konfirmasi keamanan.
               </p>
               
               <form onSubmit={async (e) => {
@@ -684,15 +695,16 @@ export default function TenantDashboard() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ password: terminatePassword })
                   });
-                  const data = await res.json();
+                  const data = (await res.json()) as { message: string };
                   if (!res.ok) throw new Error(data.message);
 
                   alert("Sewa kos berhasil diberhentikan.");
                   setShowTerminateModal(false);
                   setTerminatePassword('');
                   fetchData(currentUser.id);
-                } catch (err) {
-                  alert(err.message);
+                } catch (err: unknown) {
+                  const errorMsg = err instanceof Error ? err.message : String(err);
+                  alert(errorMsg);
                 } finally {
                   setTerminateProcessing(false);
                 }
@@ -724,15 +736,5 @@ export default function TenantDashboard() {
         </div>
       )}
     </div>
-  );
-}
-
-// Simple local mock components for modal close button
-function X({ size }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18"></line>
-      <line x1="6" y1="6" x2="18" y2="18"></line>
-    </svg>
   );
 }

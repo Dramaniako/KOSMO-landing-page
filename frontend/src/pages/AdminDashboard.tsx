@@ -1,32 +1,239 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Users, Building, Star, Trash2, Edit, Plus, LogOut, 
-  UserPlus, Mail, ShieldAlert, Key, Phone, LayoutDashboard, Globe, MessageSquare,
-  BarChart3, Eye, Download
+  Key, LayoutDashboard, MessageSquare,
+  BarChart3, Eye, Download, ShieldAlert, X
 } from 'lucide-react';
+import { 
+  User, Property, Review, AdminStats, TrackingHistory, 
+  TrackingHistoryItem, FacilityFilterState 
+} from '../types/index.ts';
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
+
+interface UserFormState {
+  name: string;
+  email: string;
+  password: string;
+  role: 'tenant' | 'landlord' | 'admin';
+  phone: string;
+  paymentMethod: string;
+}
+
+interface PropertyFormState {
+  name: string;
+  district: string;
+  address: string;
+  description: string;
+  price: string;
+  latitude: string;
+  longitude: string;
+  totalRooms: string;
+  occupiedRooms: string;
+  image: string;
+  ownerId: string;
+  facilities: FacilityFilterState;
+}
+
+interface ReviewFormState {
+  rating: number;
+  comment: string;
+}
+
+interface ChartPoint {
+  x: number;
+  y: number;
+  label: string;
+  count: number;
+  index: number;
+}
+
+interface VisitorChartProps {
+  data: TrackingHistoryItem[];
+  timeRange: '24h' | '7d' | '30d';
+}
+
+function VisitorChart({ data, timeRange }: VisitorChartProps) {
+  const [hoveredPoint, setHoveredPoint] = useState<ChartPoint | null>(null);
+  if (!data || data.length === 0) return null;
+
+  const maxVal = Math.max(...data.map((d) => d.count), 5);
+  const width = 800;
+  const height = 280;
+  
+  const paddingLeft = 45;
+  const paddingRight = 20;
+  const paddingTop = 20;
+  const paddingBottom = 40;
+  
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  const points: ChartPoint[] = data.map((item, i) => {
+    const x = paddingLeft + (i / (data.length - 1 || 1)) * chartWidth;
+    const y = height - paddingBottom - (item.count / maxVal) * chartHeight;
+    return { x, y, label: item.label, count: item.count, index: i };
+  });
+
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  const areaPath = points.length > 0 
+    ? `${linePath} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`
+    : '';
+
+  const gridLevels: { y: number; val: number }[] = [];
+  for (let i = 0; i <= 4; i++) {
+    const val = Math.round((maxVal / 4) * i);
+    const y = height - paddingBottom - (val / maxVal) * chartHeight;
+    gridLevels.push({ y, val });
+  }
+
+  const xLabelsCount = timeRange === '24h' ? 6 : timeRange === '7d' ? 7 : 6;
+  const step = Math.max(Math.floor(data.length / xLabelsCount), 1);
+  const xLabels = points.filter((_, idx) => idx % step === 0 || idx === data.length - 1);
+
+  return (
+    <div style={{ position: 'relative', width: '100%', overflowX: 'auto', backgroundColor: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)', marginTop: '24px' }}>
+      <h4 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '16px' }}>
+        Grafik Aktivitas Pengunjung ({timeRange === '24h' ? '24 Jam Terakhir' : timeRange === '7d' ? '1 Minggu Terakhir' : '1 Bulan Terakhir'})
+      </h4>
+      <div style={{ position: 'relative', width: '100%', minWidth: '700px' }}>
+        <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ overflow: 'visible' }}>
+          <defs>
+            <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25"/>
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0"/>
+            </linearGradient>
+            <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#6366f1"/>
+              <stop offset="100%" stopColor="#8b5cf6"/>
+            </linearGradient>
+          </defs>
+
+          {/* Grid lines & Y labels */}
+          {gridLevels.map((lvl, idx) => (
+            <g key={idx} opacity={0.6}>
+              <line 
+                x1={paddingLeft} 
+                y1={lvl.y} 
+                x2={width - paddingRight} 
+                y2={lvl.y} 
+                stroke="#e2e8f0" 
+                strokeWidth={1}
+                strokeDasharray={idx === 0 ? "0" : "4 4"}
+              />
+              <text 
+                x={paddingLeft - 8} 
+                y={lvl.y + 4} 
+                fill="#64748b" 
+                fontSize="11px" 
+                textAnchor="end"
+              >
+                {lvl.val}
+              </text>
+            </g>
+          ))}
+
+          {/* Fills & Paths */}
+          {points.length > 1 && (
+            <>
+              <path d={areaPath} fill="url(#chartGradient)" />
+              <path 
+                d={linePath} 
+                fill="none" 
+                stroke="url(#lineGrad)" 
+                strokeWidth={3} 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+              />
+            </>
+          )}
+
+          {/* Points circles & interactive hover areas */}
+          {points.map((p, idx) => (
+            <g key={idx}>
+              <circle 
+                cx={p.x} 
+                cy={p.y} 
+                r={hoveredPoint?.index === idx ? 6 : 4} 
+                fill={hoveredPoint?.index === idx ? "#4f46e5" : "white"} 
+                stroke={hoveredPoint?.index === idx ? "white" : "#6366f1"} 
+                strokeWidth={2}
+                style={{ transition: 'all 0.15s ease' }}
+              />
+              <circle 
+                cx={p.x} 
+                cy={p.y} 
+                r={14} 
+                fill="transparent" 
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => setHoveredPoint(p)}
+                onMouseLeave={() => setHoveredPoint(null)}
+              />
+            </g>
+          ))}
+
+          {/* X axis labels */}
+          {xLabels.map((p, idx) => (
+            <text 
+              key={idx} 
+              x={p.x} 
+              y={height - 12} 
+              fill="#64748b" 
+              fontSize="11px" 
+              textAnchor="middle"
+            >
+              {p.label.split(' ')[0]}
+            </text>
+          ))}
+        </svg>
+
+        {/* Hover Tooltip Overlay */}
+        {hoveredPoint && (
+          <div style={{
+            position: 'absolute',
+            left: `${(hoveredPoint.x / width) * 100}%`,
+            top: `${(hoveredPoint.y / height) * 100 - 15}%`,
+            transform: 'translate(-50%, -100%)',
+            backgroundColor: '#1e293b',
+            color: 'white',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+            pointerEvents: 'none',
+            zIndex: 10,
+            whiteSpace: 'nowrap',
+            transition: 'left 0.1s ease, top 0.1s ease'
+          }}>
+            <div style={{ fontWeight: 600 }}>{hoveredPoint.count} Kunjungan</div>
+            <div style={{ fontSize: '10px', color: '#cbd5e1', marginTop: '2px' }}>{hoveredPoint.label}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('users'); // users, properties, reviews, tracking
-  const [users, setUsers] = useState([]);
-  const [properties, setProperties] = useState([]);
-  const [reviews, setReviews] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState(null);
-  const [trackingHistory, setTrackingHistory] = useState(null);
-  const [timeRange, setTimeRange] = useState('24h');
+  const [activeTab, setActiveTab] = useState<'users' | 'properties' | 'reviews' | 'tracking'>('users');
+  const [users, setUsers] = useState<User[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [trackingHistory, setTrackingHistory] = useState<TrackingHistory | null>(null);
+  const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('24h');
 
   // Modals
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [showPropModal, setShowPropModal] = useState(false);
-  const [showRevModal, setShowRevModal] = useState(false);
+  const [showUserModal, setShowUserModal] = useState<boolean>(false);
+  const [showPropModal, setShowPropModal] = useState<boolean>(false);
+  const [showRevModal, setShowRevModal] = useState<boolean>(false);
 
   // User Form
-  const [editingUser, setEditingUser] = useState(null);
-  const [userForm, setUserForm] = useState({
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [userForm, setUserForm] = useState<UserFormState>({
     name: '',
     email: '',
     password: '',
@@ -36,8 +243,8 @@ export default function AdminDashboard() {
   });
 
   // Property Form
-  const [editingProperty, setEditingProperty] = useState(null);
-  const [propertyForm, setPropertyForm] = useState({
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [propertyForm, setPropertyForm] = useState<PropertyFormState>({
     name: '',
     district: 'Denpasar',
     address: '',
@@ -60,15 +267,59 @@ export default function AdminDashboard() {
   });
 
   // Review Edit Form
-  const [editingReview, setEditingReview] = useState(null);
-  const [reviewForm, setReviewForm] = useState({
+  const [editingReview, setEditingReview] = useState<Review | null>(null);
+  const [reviewForm, setReviewForm] = useState<ReviewFormState>({
     rating: 5,
     comment: ''
   });
 
+  const fetchStats = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/stats`);
+      const data = (await res.json()) as AdminStats;
+      setStats(data);
+    } catch (err) {
+      console.error('Error loading stats:', err);
+    }
+  }, []);
+
+  const fetchTrackingHistory = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/tracking-history`);
+      const data = (await res.json()) as TrackingHistory;
+      setTrackingHistory(data);
+    } catch (err) {
+      console.error('Error loading tracking history:', err);
+    }
+  }, []);
+
+  const fetchData = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    try {
+      // Fetch users
+      const userRes = await fetch(`${API_BASE}/users`);
+      const userData = (await userRes.json()) as User[];
+      setUsers(Array.isArray(userData) ? userData : []);
+
+      // Fetch properties
+      const propRes = await fetch(`${API_BASE}/properties`);
+      const propData = (await propRes.json()) as Property[];
+      setProperties(Array.isArray(propData) ? propData : []);
+
+      // Fetch reviews
+      const revRes = await fetch(`${API_BASE}/reviews`);
+      const revData = (await revRes.json()) as Review[];
+      setReviews(Array.isArray(revData) ? revData : []);
+    } catch (err) {
+      console.error("Error loading admin dashboard data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    // Check auth
-    const curUser = JSON.parse(localStorage.getItem('user'));
+    const raw = localStorage.getItem('user');
+    const curUser = raw ? (JSON.parse(raw) as User) : null;
     if (!curUser || curUser.role !== 'admin') {
       navigate('/login');
       return;
@@ -76,60 +327,28 @@ export default function AdminDashboard() {
     fetchData();
     fetchStats();
     fetchTrackingHistory();
-  }, [navigate]);
+  }, [navigate, fetchData, fetchStats, fetchTrackingHistory]);
 
-  const fetchStats = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/admin/stats`);
-      const data = await res.json();
-      setStats(data);
-    } catch (err) {
-      console.error('Error loading stats:', err);
-    }
-  };
-
-  const fetchTrackingHistory = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/admin/tracking-history`);
-      const data = await res.json();
-      setTrackingHistory(data);
-    } catch (err) {
-      console.error('Error loading tracking history:', err);
-    }
-  };
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      // Fetch users
-      const userRes = await fetch(`${API_BASE}/users`);
-      const userData = await userRes.json();
-      setUsers(userData);
-
-      // Fetch properties
-      const propRes = await fetch(`${API_BASE}/properties`);
-      const propData = await propRes.json();
-      setProperties(propData);
-
-      // Fetch reviews
-      const revRes = await fetch(`${API_BASE}/reviews`);
-      const revData = await revRes.json();
-      setReviews(revData);
-    } catch (err) {
-      console.error("Error loading admin dashboard data:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
+  const handleLogout = (): void => {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
     navigate('/');
   };
 
+  const resetUserForm = (): void => {
+    setEditingUser(null);
+    setUserForm({
+      name: '',
+      email: '',
+      password: '',
+      role: 'tenant',
+      phone: '',
+      paymentMethod: 'Virtual Account'
+    });
+  };
+
   // User CRUD handlers
-  const handleUserSubmit = async (e) => {
+  const handleUserSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     if (!userForm.name || !userForm.email || (!editingUser && !userForm.password)) {
       alert("Harap lengkapi semua kolom wajib.");
@@ -147,19 +366,20 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(userForm)
       });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       setShowUserModal(false);
       resetUserForm();
       fetchData();
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const handleEditUser = (user) => {
+  const handleEditUser = (user: User): void => {
     setEditingUser(user);
     setUserForm({
       name: user.name,
@@ -172,7 +392,7 @@ export default function AdminDashboard() {
     setShowUserModal(true);
   };
 
-  const handleDeleteUser = async (id) => {
+  const handleDeleteUser = async (id: string): Promise<void> => {
     if (id === 'user-admin') {
       alert("Admin utama tidak dapat dihapus.");
       return;
@@ -181,33 +401,47 @@ export default function AdminDashboard() {
 
     try {
       const res = await fetch(`${API_BASE}/users/${id}`, { method: 'DELETE' });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       fetchData();
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const resetUserForm = () => {
-    setEditingUser(null);
-    setUserForm({
+  const resetPropertyForm = (): void => {
+    setEditingProperty(null);
+    setPropertyForm({
       name: '',
-      email: '',
-      password: '',
-      role: 'tenant',
-      phone: '',
-      paymentMethod: 'Virtual Account'
+      district: 'Denpasar',
+      address: '',
+      description: '',
+      price: '',
+      latitude: '-8.6700',
+      longitude: '115.2166',
+      totalRooms: '5',
+      occupiedRooms: '0',
+      image: '',
+      ownerId: users.find((u) => u.role === 'landlord')?.id || '',
+      facilities: {
+        Listrik: true,
+        Air: true,
+        Wifi: true,
+        Kebersihan: true,
+        Keamanan: false,
+        Parkir: false
+      }
     });
   };
 
   // Property CRUD handlers (moderation)
-  const handlePropertySubmit = async (e) => {
+  const handlePropertySubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     const facilityList = Object.keys(propertyForm.facilities).filter(
-      fac => propertyForm.facilities[fac]
+      (fac) => propertyForm.facilities[fac]
     );
 
     const payload = {
@@ -215,11 +449,11 @@ export default function AdminDashboard() {
       district: propertyForm.district,
       address: propertyForm.address,
       description: propertyForm.description,
-      price: parseInt(propertyForm.price),
+      price: parseInt(propertyForm.price, 10),
       latitude: propertyForm.latitude,
       longitude: propertyForm.longitude,
-      totalRooms: parseInt(propertyForm.totalRooms),
-      occupiedRooms: parseInt(propertyForm.occupiedRooms),
+      totalRooms: parseInt(propertyForm.totalRooms, 10),
+      occupiedRooms: parseInt(propertyForm.occupiedRooms, 10),
       image: propertyForm.image || undefined,
       ownerId: propertyForm.ownerId || undefined,
       facilities: facilityList
@@ -236,23 +470,24 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       setShowPropModal(false);
       resetPropertyForm();
       fetchData();
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const handleEditProperty = (prop) => {
+  const handleEditProperty = (prop: Property): void => {
     setEditingProperty(prop);
 
     // Map facilities array back to checkbox states
-    const facilitiesMap = {
+    const facilitiesMap: FacilityFilterState = {
       Listrik: false,
       Air: false,
       Wifi: false,
@@ -260,7 +495,7 @@ export default function AdminDashboard() {
       Keamanan: false,
       Parkir: false
     };
-    prop.facilities.forEach(fac => {
+    prop.facilities.forEach((fac) => {
       if (facilitiesMap[fac] !== undefined) {
         facilitiesMap[fac] = true;
       }
@@ -283,48 +518,24 @@ export default function AdminDashboard() {
     setShowPropModal(true);
   };
 
-  const handleDeleteProperty = async (id) => {
+  const handleDeleteProperty = async (id: string): Promise<void> => {
     if (!window.confirm("Apakah Anda yakin ingin menghapus properti ini?")) return;
 
     try {
       const res = await fetch(`${API_BASE}/properties/${id}`, { method: 'DELETE' });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       fetchData();
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const resetPropertyForm = () => {
-    setEditingProperty(null);
-    setPropertyForm({
-      name: '',
-      district: 'Denpasar',
-      address: '',
-      description: '',
-      price: '',
-      latitude: '-8.6700',
-      longitude: '115.2166',
-      totalRooms: '5',
-      occupiedRooms: '0',
-      image: '',
-      ownerId: users.find(u => u.role === 'landlord')?.id || '',
-      facilities: {
-        Listrik: true,
-        Air: true,
-        Wifi: true,
-        Kebersihan: true,
-        Keamanan: false,
-        Parkir: false
-      }
-    });
-  };
-
   // Review Edit/Delete handlers
-  const handleEditReview = (rev) => {
+  const handleEditReview = (rev: Review): void => {
     setEditingReview(rev);
     setReviewForm({
       rating: rev.rating,
@@ -333,43 +544,47 @@ export default function AdminDashboard() {
     setShowRevModal(true);
   };
 
-  const handleReviewSubmit = async (e) => {
+  const handleReviewSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
+    if (!editingReview) return;
     try {
       const res = await fetch(`${API_BASE}/reviews/${editingReview.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reviewForm)
       });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       setShowRevModal(false);
       setEditingReview(null);
       fetchData();
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const handleDeleteReview = async (id) => {
+  const handleDeleteReview = async (id: string): Promise<void> => {
     if (!window.confirm("Apakah Anda yakin ingin menghapus review ini?")) return;
 
     try {
       const res = await fetch(`${API_BASE}/reviews/${id}`, { method: 'DELETE' });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       fetchData();
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const formatRupiah = (num) => {
-    return 'Rp ' + parseFloat(num).toLocaleString('id-ID');
+  const formatRupiah = (num: number | string | undefined): string => {
+    if (num === undefined || num === null) return 'Rp 0';
+    return 'Rp ' + parseFloat(String(num)).toLocaleString('id-ID');
   };
 
   return (
@@ -475,7 +690,7 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {users.map(u => (
+                      {users.map((u) => (
                         <tr key={u.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                           <td style={{ padding: '16px' }}>
                             <strong>{u.name}</strong>
@@ -539,7 +754,7 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {properties.map(p => (
+                      {properties.map((p) => (
                         <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                           <td style={{ padding: '16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -586,7 +801,7 @@ export default function AdminDashboard() {
                 <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Pelanggan Secara Global ({reviews.length})</h3>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {reviews.map(r => (
+                  {reviews.map((r) => (
                     <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ flex: 1, marginRight: '24px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
@@ -781,7 +996,7 @@ export default function AdminDashboard() {
                   <select 
                     className="form-select"
                     value={userForm.role}
-                    onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
+                    onChange={(e) => setUserForm({ ...userForm, role: e.target.value as 'tenant' | 'landlord' | 'admin' })}
                   >
                     <option value="tenant">Tenant (Penyewa)</option>
                     <option value="landlord">Landlord (Pemilik Kos)</option>
@@ -886,7 +1101,7 @@ export default function AdminDashboard() {
                   <label className="form-label">Deskripsi Properti</label>
                   <textarea 
                     className="form-textarea" 
-                    rows="3"
+                    rows={3}
                     value={propertyForm.description}
                     onChange={(e) => setPropertyForm({ ...propertyForm, description: e.target.value })}
                   ></textarea>
@@ -951,7 +1166,7 @@ export default function AdminDashboard() {
                     value={propertyForm.ownerId}
                     onChange={(e) => setPropertyForm({ ...propertyForm, ownerId: e.target.value })}
                   >
-                    {users.filter(u => u.role === 'landlord').map(u => (
+                    {users.filter((u) => u.role === 'landlord').map((u) => (
                       <option key={u.id} value={u.id}>{u.name} (ID: {u.id})</option>
                     ))}
                   </select>
@@ -960,8 +1175,8 @@ export default function AdminDashboard() {
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Fasilitas All-Inclusive</label>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '6px' }}>
-                    {Object.keys(propertyForm.facilities).map(fac => (
-                      <label key={fac} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                    {(Object.keys(propertyForm.facilities) as (keyof FacilityFilterState)[]).map((fac) => (
+                      <label key={String(fac)} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
                         <input 
                           type="checkbox" 
                           style={{ width: '16px', height: '16px' }}
@@ -974,7 +1189,7 @@ export default function AdminDashboard() {
                             }
                           })}
                         />
-                        {fac}
+                        {String(fac)}
                       </label>
                     ))}
                   </div>
@@ -1010,7 +1225,7 @@ export default function AdminDashboard() {
                   <select 
                     className="form-select"
                     value={reviewForm.rating}
-                    onChange={(e) => setReviewForm({ ...reviewForm, rating: parseInt(e.target.value) })}
+                    onChange={(e) => setReviewForm({ ...reviewForm, rating: parseInt(e.target.value, 10) })}
                   >
                     <option value={5}>5 Bintang (Sangat Puas)</option>
                     <option value={4}>4 Bintang (Puas)</option>
@@ -1024,7 +1239,7 @@ export default function AdminDashboard() {
                   <label className="form-label">Komentar Ulasan</label>
                   <textarea 
                     className="form-textarea" 
-                    rows="4"
+                    rows={4}
                     value={reviewForm.comment}
                     onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
                     required
@@ -1044,175 +1259,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// Simple local mock components for modal close button
-function X({ size }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18"></line>
-      <line x1="6" y1="6" x2="18" y2="18"></line>
-    </svg>
-  );
-}
-
-function VisitorChart({ data, timeRange }) {
-  const [hoveredPoint, setHoveredPoint] = useState(null);
-  if (!data || data.length === 0) return null;
-
-  const maxVal = Math.max(...data.map(d => d.count), 5);
-  const width = 800;
-  const height = 280;
-  
-  const paddingLeft = 45;
-  const paddingRight = 20;
-  const paddingTop = 20;
-  const paddingBottom = 40;
-  
-  const chartWidth = width - paddingLeft - paddingRight;
-  const chartHeight = height - paddingTop - paddingBottom;
-
-  const points = data.map((item, i) => {
-    const x = paddingLeft + (i / (data.length - 1 || 1)) * chartWidth;
-    const y = height - paddingBottom - (item.count / maxVal) * chartHeight;
-    return { x, y, label: item.label, count: item.count, index: i };
-  });
-
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaPath = points.length > 0 
-    ? `${linePath} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`
-    : '';
-
-  const gridLevels = [];
-  for (let i = 0; i <= 4; i++) {
-    const val = Math.round((maxVal / 4) * i);
-    const y = height - paddingBottom - (val / maxVal) * chartHeight;
-    gridLevels.push({ y, val });
-  }
-
-  const xLabelsCount = timeRange === '24h' ? 6 : timeRange === '7d' ? 7 : 6;
-  const step = Math.max(Math.floor(data.length / xLabelsCount), 1);
-  const xLabels = points.filter((_, idx) => idx % step === 0 || idx === data.length - 1);
-
-  return (
-    <div style={{ position: 'relative', width: '100%', overflowX: 'auto', backgroundColor: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)', marginTop: '24px' }}>
-      <h4 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '16px' }}>Grafik Aktivitas Pengunjung ({timeRange === '24h' ? '24 Jam Terakhir' : timeRange === '7d' ? '1 Minggu Terakhir' : '1 Bulan Terakhir'})</h4>
-      <div style={{ position: 'relative', width: '100%', minWidth: '700px' }}>
-        <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ overflow: 'visible' }}>
-          <defs>
-            <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25"/>
-              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0"/>
-            </linearGradient>
-            <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#6366f1"/>
-              <stop offset="100%" stopColor="#8b5cf6"/>
-            </linearGradient>
-          </defs>
-
-          {/* Grid lines & Y labels */}
-          {gridLevels.map((lvl, idx) => (
-            <g key={idx} opacity={0.6}>
-              <line 
-                x1={paddingLeft} 
-                y1={lvl.y} 
-                x2={width - paddingRight} 
-                y2={lvl.y} 
-                stroke="#e2e8f0" 
-                strokeWidth={1}
-                strokeDasharray={idx === 0 ? "0" : "4 4"}
-              />
-              <text 
-                x={paddingLeft - 8} 
-                y={lvl.y + 4} 
-                fill="#64748b" 
-                fontSize="11px" 
-                textAnchor="end"
-              >
-                {lvl.val}
-              </text>
-            </g>
-          ))}
-
-          {/* Fills & Paths */}
-          {points.length > 1 && (
-            <>
-              <path d={areaPath} fill="url(#chartGradient)" />
-              <path 
-                d={linePath} 
-                fill="none" 
-                stroke="url(#lineGrad)" 
-                strokeWidth={3} 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-              />
-            </>
-          )}
-
-          {/* Points circles & interactive hover areas */}
-          {points.map((p, idx) => (
-            <g key={idx}>
-              <circle 
-                cx={p.x} 
-                cy={p.y} 
-                r={hoveredPoint?.index === idx ? 6 : 4} 
-                fill={hoveredPoint?.index === idx ? "#4f46e5" : "white"} 
-                stroke={hoveredPoint?.index === idx ? "white" : "#6366f1"} 
-                strokeWidth={2}
-                style={{ transition: 'all 0.15s ease' }}
-              />
-              <circle 
-                cx={p.x} 
-                cy={p.y} 
-                r={14} 
-                fill="transparent" 
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setHoveredPoint(p)}
-                onMouseLeave={() => setHoveredPoint(null)}
-              />
-            </g>
-          ))}
-
-          {/* X axis labels */}
-          {xLabels.map((p, idx) => (
-            <text 
-              key={idx} 
-              x={p.x} 
-              y={height - 12} 
-              fill="#64748b" 
-              fontSize="11px" 
-              textAnchor="middle"
-            >
-              {p.label.split(' ')[0]}
-            </text>
-          ))}
-        </svg>
-
-        {/* Hover Tooltip Overlay */}
-        {hoveredPoint && (
-          <div style={{
-            position: 'absolute',
-            left: `${(hoveredPoint.x / width) * 100}%`,
-            top: `${(hoveredPoint.y / height) * 100 - 15}%`,
-            transform: 'translate(-50%, -100%)',
-            backgroundColor: '#1e293b',
-            color: 'white',
-            padding: '8px 12px',
-            borderRadius: '6px',
-            fontSize: '12px',
-            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-            pointerEvents: 'none',
-            zIndex: 10,
-            whiteSpace: 'nowrap',
-            transition: 'left 0.1s ease, top 0.1s ease'
-          }}>
-            <div style={{ fontWeight: 600 }}>{hoveredPoint.count} Kunjungan</div>
-            <div style={{ fontSize: '10px', color: '#cbd5e1', marginTop: '2px' }}>{hoveredPoint.label}</div>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

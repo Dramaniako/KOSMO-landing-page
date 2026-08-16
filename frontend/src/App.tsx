@@ -1,10 +1,9 @@
-import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import LandingPage from './pages/LandingPage';
-import Login from './pages/Login';
-import AdminDashboard from './pages/AdminDashboard';
-import LandlordDashboard from './pages/LandlordDashboard';
-import TenantDashboard from './pages/TenantDashboard';
+import LandingPage from './pages/LandingPage.tsx';
+import Login from './pages/Login.tsx';
+import AdminDashboard from './pages/AdminDashboard.tsx';
+import LandlordDashboard from './pages/LandlordDashboard.tsx';
+import TenantDashboard from './pages/TenantDashboard.tsx';
 
 export default function App() {
   return (

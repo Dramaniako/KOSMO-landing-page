@@ -1,18 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Building, DollarSign, Star, Percent, Trash2, Edit, Plus, LogOut, 
-  ArrowUpRight, Landmark, CreditCard, LayoutDashboard, MessageSquare, ShieldAlert,
-  Download, Users
+  ArrowUpRight, Landmark, CreditCard, LayoutDashboard, MessageSquare,
+  Download, Users, X
 } from 'lucide-react';
+import { User, Property, Review, LandlordStats, FacilityFilterState } from '../types/index.ts';
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
+
+interface WithdrawFormState {
+  amount: string;
+  bankName: string;
+  accountNumber: string;
+}
+
+interface PropertyFormState {
+  name: string;
+  district: string;
+  address: string;
+  description: string;
+  price: string;
+  latitude: string;
+  longitude: string;
+  totalRooms: string;
+  image: string;
+  facilities: FacilityFilterState;
+}
 
 export default function LandlordDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview'); // overview, properties, reviews
-  const [landlordUser, setLandlordUser] = useState(null);
-  const [stats, setStats] = useState({
+  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'reviews'>('overview');
+  
+  const [landlordUser, setLandlordUser] = useState<User | null>(() => {
+    const raw = localStorage.getItem('user');
+    return raw ? (JSON.parse(raw) as User) : null;
+  });
+
+  const [stats, setStats] = useState<LandlordStats>({
     balance: 0,
     totalRevenue: 0,
     totalWithdrawn: 0,
@@ -25,31 +50,30 @@ export default function LandlordDashboard() {
     reviewsCount: 0
   });
 
-  const [properties, setProperties] = useState([]);
-  const [reviews, setReviews] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
   // Modals
-  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const [showPropModal, setShowPropModal] = useState(false);
-  const [showRevModal, setShowRevModal] = useState(false);
+  const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
+  const [showPropModal, setShowPropModal] = useState<boolean>(false);
 
-  // Delete Property Password Modal States (Issue #4)
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deletingPropertyId, setDeletingPropertyId] = useState(null);
-  const [deletePassword, setDeletePassword] = useState('');
-  const [deleteProcessing, setDeleteProcessing] = useState(false);
+  // Delete Property Password Modal States
+  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+  const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
+  const [deletePassword, setDeletePassword] = useState<string>('');
+  const [deleteProcessing, setDeleteProcessing] = useState<boolean>(false);
 
   // Withdrawal form
-  const [withdrawForm, setWithdrawForm] = useState({
+  const [withdrawForm, setWithdrawForm] = useState<WithdrawFormState>(() => ({
     amount: '',
     bankName: 'BCA',
-    accountNumber: ''
-  });
+    accountNumber: landlordUser?.bankAccountNumber || ''
+  }));
 
   // Property form
-  const [editingProperty, setEditingProperty] = useState(null);
-  const [propertyForm, setPropertyForm] = useState({
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [propertyForm, setPropertyForm] = useState<PropertyFormState>({
     name: '',
     district: 'Denpasar',
     address: '',
@@ -69,28 +93,48 @@ export default function LandlordDashboard() {
     }
   });
 
-  // Review Edit Form
-  const [editingReview, setEditingReview] = useState(null);
-  const [reviewForm, setReviewForm] = useState({
-    rating: 5,
-    comment: ''
-  });
+  const [uploadingImage, setUploadingImage] = useState<boolean>(false);
+
+  const fetchDashboardData = useCallback(async (landlordId: string): Promise<void> => {
+    setLoading(true);
+    try {
+      // Fetch stats for specific landlord
+      const statsRes = await fetch(`${API_BASE}/stats?landlordId=${encodeURIComponent(landlordId)}`);
+      const statsData = (await statsRes.json()) as LandlordStats;
+      setStats(statsData);
+
+      // Fetch properties
+      const propRes = await fetch(`${API_BASE}/properties`);
+      const propData = (await propRes.json()) as Property[];
+      const safeProps = Array.isArray(propData) ? propData : [];
+      // Filter landlord's own properties
+      const landlordProps = safeProps.filter((p) => p.ownerId === landlordId);
+      setProperties(landlordProps);
+
+      // Fetch reviews
+      const revRes = await fetch(`${API_BASE}/reviews`);
+      const revData = (await revRes.json()) as Review[];
+      const safeReviews = Array.isArray(revData) ? revData : [];
+      // Filter reviews of landlord's properties
+      const propIds = landlordProps.map((p) => p.id);
+      const landlordReviews = safeReviews.filter((r) => propIds.includes(r.propertyId));
+      setReviews(landlordReviews);
+
+    } catch (err) {
+      console.error("Error loading landlord dashboard data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    // Check auth
-    const user = JSON.parse(localStorage.getItem('user'));
-    if (!user || user.role !== 'landlord') {
+    if (!landlordUser || landlordUser.role !== 'landlord') {
       navigate('/login');
       return;
     }
-    setLandlordUser(user);
-    setWithdrawForm(prev => ({
-      ...prev,
-      accountNumber: user.bankAccountNumber || ''
-    }));
 
-    fetchDashboardData(user.id);
-  }, [navigate]);
+    fetchDashboardData(landlordUser.id);
+  }, [landlordUser, navigate, fetchDashboardData]);
 
   useEffect(() => {
     if (!showPropModal) return;
@@ -101,7 +145,7 @@ export default function LandlordDashboard() {
 
       if (typeof window.L === 'undefined') return;
 
-      const mapContainer = document.getElementById('map-picker');
+      const mapContainer = document.getElementById('map-picker') as (HTMLElement & { _leaflet_id?: number }) | null;
       if (!mapContainer) return;
 
       if (mapContainer._leaflet_id) {
@@ -114,25 +158,28 @@ export default function LandlordDashboard() {
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(map);
 
-      let marker = window.L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
+      const marker = window.L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
 
-      const updateCoords = (lat, lng) => {
-        setPropertyForm(prev => ({
+      const updateCoords = (lat: number, lng: number) => {
+        setPropertyForm((prev) => ({
           ...prev,
           latitude: lat.toFixed(6),
           longitude: lng.toFixed(6)
         }));
       };
 
-      marker.on('dragend', function () {
-        const position = marker.getLatLng();
-        updateCoords(position.lat, position.lng);
+      marker.on('dragend', () => {
+        const markerWithLatLng = marker as unknown as { getLatLng: () => { lat: number; lng: number } };
+        if (markerWithLatLng.getLatLng) {
+          const position = markerWithLatLng.getLatLng();
+          updateCoords(position.lat, position.lng);
+        }
       });
 
-      map.on('click', function (e) {
+      map.on('click', (e: { latlng: { lat: number; lng: number } }) => {
         const lat = e.latlng.lat;
         const lng = e.latlng.lng;
-        marker.setLatLng([lat, lng]);
+        marker.setLatLng([lat, lng] as unknown as [number, number]);
         updateCoords(lat, lng);
       });
 
@@ -140,47 +187,18 @@ export default function LandlordDashboard() {
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [showPropModal]);
+  }, [showPropModal, propertyForm.latitude, propertyForm.longitude]);
 
-  const fetchDashboardData = async (landlordId) => {
-    setLoading(true);
-    try {
-      // Fetch stats for specific landlord
-      const statsRes = await fetch(`${API_BASE}/stats?landlordId=${landlordId}`);
-      const statsData = await statsRes.json();
-      setStats(statsData);
-
-      // Fetch properties
-      const propRes = await fetch(`${API_BASE}/properties`);
-      const propData = await propRes.json();
-      // Filter landlord's own properties
-      const landlordProps = propData.filter(p => p.ownerId === landlordId);
-      setProperties(landlordProps);
-
-      // Fetch reviews
-      const revRes = await fetch(`${API_BASE}/reviews`);
-      const revData = await revRes.json();
-      // Filter reviews of landlord's properties
-      const propIds = landlordProps.map(p => p.id);
-      const landlordReviews = revData.filter(r => propIds.includes(r.propertyId));
-      setReviews(landlordReviews);
-
-    } catch (err) {
-      console.error("Error loading landlord dashboard data:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
+  const handleLogout = (): void => {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
     navigate('/');
   };
 
   // Withdraw money submit
-  const handleWithdrawSubmit = async (e) => {
+  const handleWithdrawSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
+    if (!landlordUser) return;
     if (!withdrawForm.amount || parseFloat(withdrawForm.amount) <= 0) {
       alert("Masukkan jumlah penarikan yang valid.");
       return;
@@ -194,15 +212,15 @@ export default function LandlordDashboard() {
           userId: landlordUser.id
         })
       });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string; balance: number; totalWithdrawn: number };
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
       setShowWithdrawModal(false);
-      setWithdrawForm(prev => ({ ...prev, amount: '' }));
+      setWithdrawForm((prev) => ({ ...prev, amount: '' }));
       
       // Update local storage user balance
-      const updatedUser = {
+      const updatedUser: User = {
         ...landlordUser,
         balance: data.balance,
         totalWithdrawn: data.totalWithdrawn
@@ -211,21 +229,20 @@ export default function LandlordDashboard() {
       localStorage.setItem('user', JSON.stringify(updatedUser));
 
       fetchDashboardData(landlordUser.id);
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const [uploadingImage, setUploadingImage] = useState(false);
-
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
     setUploadingImage(true);
     const reader = new FileReader();
     reader.onloadend = () => {
-      setPropertyForm(prev => ({ ...prev, image: reader.result }));
+      setPropertyForm((prev) => ({ ...prev, image: reader.result as string }));
       setUploadingImage(false);
     };
     reader.onerror = () => {
@@ -235,91 +252,7 @@ export default function LandlordDashboard() {
     reader.readAsDataURL(file);
   };
 
-  // Property Form Submit (Add / Edit)
-  const handlePropertySubmit = async (e) => {
-    e.preventDefault();
-    const facilityList = Object.keys(propertyForm.facilities).filter(
-      fac => propertyForm.facilities[fac]
-    );
-
-    const payload = {
-      name: propertyForm.name,
-      district: propertyForm.district,
-      address: propertyForm.address,
-      description: propertyForm.description,
-      price: parseInt(propertyForm.price),
-      latitude: propertyForm.latitude,
-      longitude: propertyForm.longitude,
-      totalRooms: parseInt(propertyForm.totalRooms),
-      image: propertyForm.image || undefined,
-      ownerId: landlordUser.id,
-      facilities: facilityList
-    };
-
-    const url = editingProperty 
-      ? `${API_BASE}/properties/${editingProperty.id}`
-      : `${API_BASE}/properties`;
-
-    const method = editingProperty ? 'PUT' : 'POST';
-
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.message);
-
-      alert(data.message);
-      setShowPropModal(false);
-      resetPropertyForm();
-      fetchDashboardData(landlordUser.id);
-    } catch (err) {
-      alert(err.message);
-    }
-  };
-
-  const handleEditProperty = (prop) => {
-    setEditingProperty(prop);
-    
-    // Map facilities array back to checkbox states
-    const facilitiesMap = {
-      Listrik: false,
-      Air: false,
-      Wifi: false,
-      Kebersihan: false,
-      Keamanan: false,
-      Parkir: false
-    };
-    prop.facilities.forEach(fac => {
-      if (facilitiesMap[fac] !== undefined) {
-        facilitiesMap[fac] = true;
-      }
-    });
-
-    setPropertyForm({
-      name: prop.name,
-      district: prop.district,
-      address: prop.address,
-      description: prop.description,
-      price: prop.price.toString(),
-      latitude: prop.latitude,
-      longitude: prop.longitude,
-      totalRooms: prop.totalRooms.toString(),
-      image: prop.image || '',
-      facilities: facilitiesMap
-    });
-    setShowPropModal(true);
-  };
-
-  const handleDeleteProperty = (id) => {
-    setDeletingPropertyId(id);
-    setShowDeleteModal(true);
-  };
-
-  const resetPropertyForm = () => {
+  const resetPropertyForm = (): void => {
     setEditingProperty(null);
     setPropertyForm({
       name: '',
@@ -342,53 +275,94 @@ export default function LandlordDashboard() {
     });
   };
 
-  // Review Edit/Delete handlers
-  const handleEditReview = (rev) => {
-    setEditingReview(rev);
-    setReviewForm({
-      rating: rev.rating,
-      comment: rev.comment
-    });
-    setShowRevModal(true);
-  };
-
-  const handleReviewSubmit = async (e) => {
+  // Property Form Submit (Add / Edit)
+  const handlePropertySubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
+    if (!landlordUser) return;
+    const facilityList = Object.keys(propertyForm.facilities).filter(
+      (fac) => propertyForm.facilities[fac]
+    );
+
+    const payload = {
+      name: propertyForm.name,
+      district: propertyForm.district,
+      address: propertyForm.address,
+      description: propertyForm.description,
+      price: parseInt(propertyForm.price, 10),
+      latitude: propertyForm.latitude,
+      longitude: propertyForm.longitude,
+      totalRooms: parseInt(propertyForm.totalRooms, 10),
+      image: propertyForm.image || undefined,
+      ownerId: landlordUser.id,
+      facilities: facilityList
+    };
+
+    const url = editingProperty 
+      ? `${API_BASE}/properties/${editingProperty.id}`
+      : `${API_BASE}/properties`;
+
+    const method = editingProperty ? 'PUT' : 'POST';
+
     try {
-      const res = await fetch(`${API_BASE}/reviews/${editingReview.id}`, {
-        method: 'PUT',
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reviewForm)
+        body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = (await res.json()) as { message: string };
+
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
-      setShowRevModal(false);
-      setEditingReview(null);
+      setShowPropModal(false);
+      resetPropertyForm();
       fetchDashboardData(landlordUser.id);
-    } catch (err) {
-      alert(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
     }
   };
 
-  const handleDeleteReview = async (id) => {
-    if (!window.confirm("Apakah Anda yakin ingin menghapus review ini?")) return;
+  const handleEditProperty = (prop: Property): void => {
+    setEditingProperty(prop);
+    
+    // Map facilities array back to checkbox states
+    const facilitiesMap: FacilityFilterState = {
+      Listrik: false,
+      Air: false,
+      Wifi: false,
+      Kebersihan: false,
+      Keamanan: false,
+      Parkir: false
+    };
+    prop.facilities.forEach((fac) => {
+      if (facilitiesMap[fac] !== undefined) {
+        facilitiesMap[fac] = true;
+      }
+    });
 
-    try {
-      const res = await fetch(`${API_BASE}/reviews/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-
-      alert(data.message);
-      fetchDashboardData(landlordUser.id);
-    } catch (err) {
-      alert(err.message);
-    }
+    setPropertyForm({
+      name: prop.name,
+      district: prop.district,
+      address: prop.address,
+      description: prop.description,
+      price: prop.price.toString(),
+      latitude: prop.latitude,
+      longitude: prop.longitude,
+      totalRooms: prop.totalRooms.toString(),
+      image: prop.image || '',
+      facilities: facilitiesMap
+    });
+    setShowPropModal(true);
   };
 
-  const formatRupiah = (num) => {
-    return 'Rp ' + parseFloat(num).toLocaleString('id-ID');
+  const handleDeleteProperty = (id: string): void => {
+    setDeletingPropertyId(id);
+    setShowDeleteModal(true);
+  };
+
+  const formatRupiah = (num: number | string): string => {
+    return 'Rp ' + parseFloat(String(num)).toLocaleString('id-ID');
   };
 
   return (
@@ -461,7 +435,7 @@ export default function LandlordDashboard() {
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
             <a 
-              href={`${API_BASE}/reports/landlord/excel?landlordId=${landlordUser?.id}`}
+              href={`${API_BASE}/reports/landlord/excel?landlordId=${landlordUser?.id || ''}`}
               className="btn btn-primary"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
             >
@@ -615,7 +589,7 @@ export default function LandlordDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {properties.map(p => (
+                      {properties.map((p) => (
                         <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                           <td style={{ padding: '16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -664,8 +638,8 @@ export default function LandlordDashboard() {
                 <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Properti Saya ({reviews.length})</h3>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {reviews.map(r => (
-                    <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyItems: 'space-between', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  {reviews.map((r) => (
+                    <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ flex: 1, marginRight: '24px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
                           <strong style={{ fontSize: '15px' }}>{r.userName}</strong>
@@ -836,7 +810,7 @@ export default function LandlordDashboard() {
                   <label className="form-label">Deskripsi Properti</label>
                   <textarea 
                     className="form-textarea" 
-                    rows="3"
+                    rows={3}
                     placeholder="Jelaskan fasilitas, konsep, dan lingkungan kos..."
                     value={propertyForm.description}
                     onChange={(e) => setPropertyForm({ ...propertyForm, description: e.target.value })}
@@ -883,7 +857,7 @@ export default function LandlordDashboard() {
                       />
                       <button
                         type="button"
-                        onClick={() => setPropertyForm(prev => ({ ...prev, image: '' }))}
+                        onClick={() => setPropertyForm((prev) => ({ ...prev, image: '' }))}
                         style={{
                           position: 'absolute', top: '-6px', right: '-6px', 
                           background: 'red', color: 'white', border: 'none', 
@@ -901,8 +875,8 @@ export default function LandlordDashboard() {
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Fasilitas Termasuk (All-Inclusive)</label>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '6px' }}>
-                    {Object.keys(propertyForm.facilities).map(fac => (
-                      <label key={fac} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                    {(Object.keys(propertyForm.facilities) as (keyof FacilityFilterState)[]).map((fac) => (
+                      <label key={String(fac)} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
                         <input 
                           type="checkbox" 
                           style={{ width: '16px', height: '16px' }}
@@ -915,7 +889,7 @@ export default function LandlordDashboard() {
                             }
                           })}
                         />
-                        {fac}
+                        {String(fac)}
                       </label>
                     ))}
                   </div>
@@ -935,8 +909,8 @@ export default function LandlordDashboard() {
         </div>
       )}
 
-      {/* Delete Property Password Modal (Issue #4) */}
-      {showDeleteModal && (
+      {/* Delete Property Password Modal */}
+      {showDeleteModal && deletingPropertyId && (
         <div className="modal-overlay">
           <div className="modal-container" style={{ maxWidth: '400px' }}>
             <button className="modal-close" onClick={() => { setShowDeleteModal(false); setDeletePassword(''); }}>
@@ -950,6 +924,7 @@ export default function LandlordDashboard() {
               
               <form onSubmit={async (e) => {
                 e.preventDefault();
+                if (!landlordUser) return;
                 setDeleteProcessing(true);
                 try {
                   const res = await fetch(`${API_BASE}/properties/${deletingPropertyId}`, {
@@ -957,7 +932,7 @@ export default function LandlordDashboard() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ password: deletePassword, landlordId: landlordUser.id })
                   });
-                  const data = await res.json();
+                  const data = (await res.json()) as { message: string };
                   if (!res.ok) throw new Error(data.message);
 
                   alert(data.message);
@@ -965,8 +940,9 @@ export default function LandlordDashboard() {
                   setDeletePassword('');
                   setDeletingPropertyId(null);
                   fetchDashboardData(landlordUser.id);
-                } catch (err) {
-                  alert(err.message);
+                } catch (err: unknown) {
+                  const errorMsg = err instanceof Error ? err.message : String(err);
+                  alert(errorMsg);
                 } finally {
                   setDeleteProcessing(false);
                 }
@@ -998,15 +974,5 @@ export default function LandlordDashboard() {
         </div>
       )}
     </div>
-  );
-}
-
-// Simple local mock components for modal close button
-function X({ size }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18"></line>
-      <line x1="6" y1="6" x2="18" y2="18"></line>
-    </svg>
   );
 }

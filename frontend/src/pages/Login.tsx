@@ -1,20 +1,27 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Mail, Lock, User, Phone, ArrowLeft } from 'lucide-react';
+import { ShieldCheck, Mail, Lock, User as UserIcon, Phone, ArrowLeft } from 'lucide-react';
+import { User, UserRole } from '../types/index.ts';
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
+
+interface AuthResponse {
+  message: string;
+  user: User;
+  token: string;
+}
 
 export default function Login() {
   const navigate = useNavigate();
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isLogin, setIsLogin] = useState<boolean>(true);
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [name, setName] = useState<string>('');
+  const [phone, setPhone] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -30,7 +37,7 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = (await res.json()) as AuthResponse;
 
       if (!res.ok) {
         throw new Error(data.message || 'Terjadi kesalahan');
@@ -48,27 +55,11 @@ export default function Login() {
       } else {
         navigate('/tenant');
       }
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setError(errorMsg);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleAutofill = (role) => {
-    setError('');
-    if (role === 'admin') {
-      setEmail('admin@kosmo.com');
-      setPassword('admin');
-      setIsLogin(true);
-    } else if (role === 'landlord') {
-      setEmail('landlord@kosmo.com');
-      setPassword('landlord');
-      setIsLogin(true);
-    } else {
-      setEmail('tenant@kosmo.com');
-      setPassword('tenant');
-      setIsLogin(true);
     }
   };
 
@@ -80,8 +71,8 @@ export default function Login() {
         <button
           onClick={() => navigate('/')}
           style={{ display: 'flex', alignItems: 'center', gap: '6px', border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: '13px', cursor: 'pointer', marginBottom: '24px', transition: 'var(--transition)' }}
-          onMouseEnter={(e) => e.target.style.color = 'var(--primary)'}
-          onMouseLeave={(e) => e.target.style.color = 'var(--text-muted)'}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--primary)')}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--text-muted)')}
         >
           <ArrowLeft size={16} />
           Kembali ke Beranda
@@ -110,7 +101,7 @@ export default function Login() {
               <div className="form-group">
                 <label className="form-label">Nama Lengkap</label>
                 <div style={{ position: 'relative' }}>
-                  <User size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
+                  <UserIcon size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
                   <input
                     type="text"
                     className="form-input"
@@ -181,8 +172,6 @@ export default function Login() {
             {loading ? 'Memproses...' : isLogin ? 'Masuk Sekarang' : 'Daftar Akun'}
           </button>
         </form>
-
-
 
         <div style={{ marginTop: '24px', textAlign: 'center', fontSize: '13px' }}>
           <span style={{ color: 'var(--text-muted)' }}>
