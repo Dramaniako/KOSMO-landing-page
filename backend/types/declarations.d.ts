@@ -85,3 +85,60 @@ declare module 'bcryptjs' {
   export function compare(s: string, hash: string): Promise<boolean>;
   export function getRounds(encrypted: string): number;
 }
+
+declare module 'midtrans-client' {
+  export interface SnapOptions {
+    isProduction?: boolean;
+    serverKey?: string;
+    clientKey?: string;
+  }
+
+  export interface SnapTransactionDetails {
+    order_id: string;
+    gross_amount: number;
+  }
+
+  export interface SnapCustomerDetails {
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+    phone?: string;
+  }
+
+  export interface SnapItemDetails {
+    id?: string;
+    price: number;
+    quantity: number;
+    name: string;
+  }
+
+  export interface SnapTransactionParameter {
+    transaction_details: SnapTransactionDetails;
+    customer_details?: SnapCustomerDetails;
+    item_details?: SnapItemDetails[];
+  }
+
+  export interface SnapTransactionResult {
+    token: string;
+    redirect_url: string;
+  }
+
+  export class Snap {
+    constructor(options?: SnapOptions);
+    createTransaction(parameter: SnapTransactionParameter): Promise<SnapTransactionResult>;
+    createTransactionToken(parameter: SnapTransactionParameter): Promise<string>;
+    createTransactionRedirectUrl(parameter: SnapTransactionParameter): Promise<string>;
+  }
+
+  export class CoreApi {
+    constructor(options?: SnapOptions);
+    charge(parameter: Record<string, unknown>): Promise<Record<string, unknown>>;
+  }
+
+  const midtransClient: {
+    Snap: typeof Snap;
+    CoreApi: typeof CoreApi;
+  };
+
+  export default midtransClient;
+}

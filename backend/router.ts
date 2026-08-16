@@ -6,6 +6,8 @@ import multer from 'multer';
 import type { File as MulterFile } from 'multer';
 import path from 'path';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import midtransClient from 'midtrans-client';
 import fs from 'fs';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import type {
@@ -1258,6 +1260,202 @@ router.post('/rentals/:id/terminate', async (req: Request<{ id: string }, unknow
   } finally {
     connection.release();
   }
+});
+
+// ==========================================
+// Midtrans Snap Sandbox Payment Gateway
+// ==========================================
+export const snap = new midtransClient.Snap({
+  isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
+  serverKey: process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder',
+  clientKey: process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-placeholder'
+});
+
+export function verifyMidtransSignature(
+  orderId: string,
+  statusCode: string,
+  grossAmount: string,
+  serverKey: string,
+  signatureKey: string
+): boolean {
+  if (!orderId || !statusCode || !grossAmount || !serverKey || !signatureKey) {
+    return false;
+  }
+  const payload = `${orderId}${statusCode}${grossAmount}${serverKey}`;
+  const calculatedHash = crypto.createHash('sha512').update(payload).digest('hex');
+  return calculatedHash.toLowerCase() === signatureKey.toLowerCase();
+}
+
+interface PaymentTokenBody {
+  propertyId?: string;
+  tenantId?: string;
+  durationMonths?: number;
+}
+
+router.post('/payment/token', async (req: Request<Record<string, never>, unknown, PaymentTokenBody>, res: Response) => {
+  const { propertyId, tenantId, durationMonths } = req.body;
+  if (!propertyId || !tenantId) {
+    return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
+  }
+
+  const duration = durationMonths && durationMonths > 0 ? durationMonths : 1;
+
+  try {
+    const [propRows] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [propertyId]);
+    const property = propRows[0];
+    if (!property) {
+      return res.status(404).json({ message: "Properti tidak ditemukan." });
+    }
+
+    if (property.occupiedRooms >= property.totalRooms) {
+      return res.status(400).json({ message: "Kamar kos sudah penuh." });
+    }
+
+    const [userRows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [tenantId]);
+    const tenant = userRows[0];
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant tidak ditemukan." });
+    }
+
+    const rentalId = generateId("rent");
+    const startDate = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+    const totalPrice = property.price * duration;
+
+    // Insert pending rental record (do NOT increment occupiedRooms yet)
+    await pool.query(
+      `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status) 
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+      [rentalId, tenantId, propertyId, property.name, totalPrice, startDate]
+    );
+
+    // Create Snap transaction parameters
+    const parameter = {
+      transaction_details: {
+        order_id: rentalId,
+        gross_amount: totalPrice
+      },
+      customer_details: {
+        first_name: tenant.name,
+        email: tenant.email,
+        phone: tenant.phone || ''
+      },
+      item_details: [
+        {
+          id: property.id,
+          price: property.price,
+          quantity: duration,
+          name: property.name.substring(0, 50)
+        }
+      ]
+    };
+
+    const transaction = await snap.createTransaction(parameter);
+
+    res.json({
+      message: "Token pembayaran berhasil dibuat.",
+      token: transaction.token,
+      redirect_url: transaction.redirect_url,
+      rentalId
+    });
+  } catch (err: unknown) {
+    console.error("Create payment token error:", err);
+    res.status(500).json({ message: "Gagal membuat token pembayaran Midtrans." });
+  }
+});
+
+interface MidtransWebhookBody {
+  order_id?: string;
+  status_code?: string;
+  gross_amount?: string;
+  signature_key?: string;
+  transaction_status?: string;
+  fraud_status?: string;
+  payment_type?: string;
+}
+
+router.post('/payment/webhook', async (req: Request<Record<string, never>, unknown, MidtransWebhookBody>, res: Response) => {
+  const {
+    order_id,
+    status_code,
+    gross_amount,
+    signature_key,
+    transaction_status,
+    fraud_status
+  } = req.body;
+
+  if (!order_id || !status_code || !gross_amount || !signature_key) {
+    return res.status(400).json({ message: "Data notifikasi tidak lengkap." });
+  }
+
+  const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder';
+  const isValidSignature = verifyMidtransSignature(
+    order_id,
+    status_code,
+    gross_amount,
+    serverKey,
+    signature_key
+  );
+
+  if (!isValidSignature) {
+    return res.status(403).json({ message: "Signature Midtrans tidak valid." });
+  }
+
+  // Handle settlement or accepted capture
+  const isSettlement = transaction_status === 'settlement';
+  const isCaptureSuccess = transaction_status === 'capture' && fraud_status === 'accept';
+
+  if (isSettlement || isCaptureSuccess) {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [rentalRows] = await connection.query<RentalRow[]>(
+        'SELECT * FROM rentals WHERE id = ? FOR UPDATE',
+        [order_id]
+      );
+      const rental = rentalRows[0];
+
+      if (!rental) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Data sewa tidak ditemukan." });
+      }
+
+      // Check if already processed to prevent duplicate room increments or balance credits
+      if (rental.status !== 'active') {
+        await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [order_id]);
+
+        await connection.query(
+          'UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?',
+          [rental.propertyId]
+        );
+
+        const [propRows] = await connection.query<PropertyRow[]>(
+          'SELECT ownerId FROM properties WHERE id = ?',
+          [rental.propertyId]
+        );
+        const property = propRows[0];
+
+        if (property && property.ownerId) {
+          const rentalPrice = rental.price || 0;
+          await connection.query(
+            'UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?',
+            [rentalPrice, rentalPrice, property.ownerId]
+          );
+        }
+      }
+
+      await connection.commit();
+      return res.json({ message: "Pembayaran berhasil diproses dan status rental diaktifkan." });
+    } catch (err: unknown) {
+      await connection.rollback();
+      console.error("Midtrans webhook processing error:", err);
+      return res.status(500).json({ message: "Gagal memproses transaksi sewa." });
+    } finally {
+      connection.release();
+    }
+  }
+
+  res.json({ message: "Status notifikasi diterima." });
 });
 
 export default router;

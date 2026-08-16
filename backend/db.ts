@@ -233,7 +233,7 @@ export async function initDb(): Promise<void> {
           propertyName VARCHAR(100),
           price INT,
           startDate VARCHAR(50),
-          status ENUM('active','terminated') DEFAULT 'active',
+          status ENUM('pending','active','terminated') DEFAULT 'pending',
           FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
           FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
