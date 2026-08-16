@@ -54,13 +54,7 @@ export const authLimiter = rateLimit({
 
 const router: Router = express.Router();
 
-// Cloudinary CDN Configuration
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || '',
-  api_key: process.env.CLOUDINARY_API_KEY || '',
-  api_secret: process.env.CLOUDINARY_API_SECRET || '',
-  secure: true
-});
+import { uploadImageStream } from './services/cloudinary.ts';
 
 export const ALLOWED_IMAGE_MIMETYPES = [
   'image/jpeg',
@@ -73,39 +67,6 @@ export const ALLOWED_IMAGE_MIMETYPES = [
 export function validateImageMimeType(mimetype: string): boolean {
   if (!mimetype) return false;
   return ALLOWED_IMAGE_MIMETYPES.includes(mimetype.toLowerCase() as typeof ALLOWED_IMAGE_MIMETYPES[number]);
-}
-
-export function uploadStreamToCloudinary(
-  buffer: Buffer,
-  folder = 'kosmo_uploads'
-): Promise<{ url: string; publicId: string }> {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: 'image',
-        format: 'webp'
-      },
-      (error, result) => {
-        if (error || !result) {
-          return reject(error || new Error('Upload to Cloudinary failed'));
-        }
-        resolve({
-          url: result.secure_url || result.url,
-          publicId: result.public_id
-        });
-      }
-    );
-
-    const readableStream = new Readable({
-      read() {
-        this.push(buffer);
-        this.push(null);
-      }
-    });
-
-    readableStream.pipe(uploadStream);
-  });
 }
 
 // Multer in-memory file upload configuration
@@ -130,20 +91,11 @@ router.post('/upload', upload.single('image'), async (req: MulterRequest, res: R
     });
   }
 
-  // Fallback for offline/testing when credentials are not configured
-  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-    return res.json({
-      url: base64Image,
-      publicId: `local-mock-${Date.now()}`
-    });
-  }
-
   try {
-    const result = await uploadStreamToCloudinary(req.file.buffer, 'kosmo_uploads');
+    const result = await uploadImageStream(req.file.buffer, 'kosmo_properties');
     res.json({
-      url: result.url,
-      publicId: result.publicId
+      url: result.secure_url,
+      publicId: result.public_id
     });
   } catch (err: unknown) {
     console.error('Cloudinary upload error:', err);

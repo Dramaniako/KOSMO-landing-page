@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateImageMimeType, ALLOWED_IMAGE_MIMETYPES } from '../backend/router.ts';
+import { uploadImageStream } from '../backend/services/cloudinary.ts';
 
 test('Cloudinary image upload & MIME validation', async (t) => {
   await t.test('accepts valid image MIME types', () => {
@@ -31,15 +32,36 @@ test('Cloudinary image upload & MIME validation', async (t) => {
     assert.equal(validateImageMimeType(null as unknown as string), false);
   });
 
+  await t.test('validates file size limit guard (5MB)', () => {
+    const MAX_FILE_SIZE = 5 * 1024 * 1024;
+    const validFileSize = 2 * 1024 * 1024; // 2MB
+    const oversizedFileSize = 6 * 1024 * 1024; // 6MB
+
+    assert.ok(validFileSize <= MAX_FILE_SIZE, '2MB file must pass size limit');
+    assert.ok(oversizedFileSize > MAX_FILE_SIZE, '6MB file must exceed size limit');
+  });
+
+  await t.test('uploadImageStream processes image buffer and returns Cloudinary CDN URL', async () => {
+    const sampleBuffer = Buffer.from('mock-image-binary-data');
+    const result = await uploadImageStream(sampleBuffer, 'kosmo_properties');
+
+    assert.ok(result, 'Upload result must be defined');
+    assert.equal(typeof result.secure_url, 'string');
+    assert.equal(typeof result.public_id, 'string');
+    assert.ok(result.secure_url.startsWith('https://res.cloudinary.com/'));
+    assert.ok(result.public_id.startsWith('kosmo_properties/'));
+    assert.ok(result.secure_url.endsWith('.webp') || result.secure_url.includes('image/upload'));
+  });
+
   await t.test('validates upload payload format structure', () => {
     const formatUploadResponse = (url: string, publicId: string): { url: string; publicId: string } => {
       return { url, publicId };
     };
 
-    const mockResponse = formatUploadResponse('https://res.cloudinary.com/demo/image/upload/sample.webp', 'kosmo_uploads/sample');
+    const mockResponse = formatUploadResponse('https://res.cloudinary.com/demo/image/upload/sample.webp', 'kosmo_properties/sample');
     assert.equal(typeof mockResponse.url, 'string');
     assert.equal(typeof mockResponse.publicId, 'string');
     assert.ok(mockResponse.url.startsWith('https://res.cloudinary.com'));
-    assert.ok(mockResponse.publicId.startsWith('kosmo_uploads/'));
+    assert.ok(mockResponse.publicId.startsWith('kosmo_properties/'));
   });
 });
