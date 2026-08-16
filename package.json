@@ -15,5 +15,11 @@
     "multer": "^2.2.0",
     "mysql2": "^3.22.5",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.2.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^7.0.2"
   }
 }
