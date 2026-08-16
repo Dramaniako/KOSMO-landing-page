@@ -17,21 +17,33 @@ export default function KosCard({ property, onOpenDetail, renderFacilityIcon }: 
     }).format(val);
   };
 
-  const isFull = property.occupiedRooms >= property.totalRooms;
-  const availableRooms = Math.max(0, property.totalRooms - property.occupiedRooms);
+  const price = Number(property.price) || 0;
+  const rating = Number(property.rating) || 0;
+  const totalRooms = Number(property.totalRooms) || 0;
+  const occupiedRooms = Number(property.occupiedRooms) || 0;
+  const facilities = Array.isArray(property.facilities) ? property.facilities : [];
+  const image = property.image && property.image.trim() !== ''
+    ? property.image
+    : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
+
+  const isFull = totalRooms > 0 && occupiedRooms >= totalRooms;
+  const availableRooms = Math.max(0, totalRooms - occupiedRooms);
 
   return (
     <div className="card property-card" onClick={() => onOpenDetail(property)}>
       <div className="property-img-wrapper">
         <img
-          src={property.image}
-          alt={property.name}
+          src={image}
+          alt={property.name || 'Kosmo Property'}
           className="property-img"
           loading="lazy"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
+          }}
         />
         <div className="property-badge flex-center">
           <Star size={12} fill="currentColor" />
-          <span>{property.rating > 0 ? property.rating.toFixed(1) : 'Baru'}</span>
+          <span>{rating > 0 ? rating.toFixed(1) : 'Baru'}</span>
         </div>
         <div
           style={{
@@ -55,29 +67,29 @@ export default function KosCard({ property, onOpenDetail, renderFacilityIcon }: 
       <div className="property-body">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
           <div>
-            <h3 className="property-title">{property.name}</h3>
+            <h3 className="property-title">{property.name || 'Properti KOSMO'}</h3>
             <div className="property-location">
               <MapPin size={14} style={{ flexShrink: 0 }} />
-              <span>{property.district}, Bali</span>
+              <span>{property.district || 'Bali'}, Bali</span>
             </div>
           </div>
         </div>
 
         <div className="property-facilities">
-          {property.facilities.slice(0, 4).map((fac, idx) => (
+          {facilities.slice(0, 4).map((fac, idx) => (
             <span key={idx} className="facility-pill">
               {renderFacilityIcon(fac)}
               {fac}
             </span>
           ))}
-          {property.facilities.length > 4 && (
-            <span className="facility-pill">+{property.facilities.length - 4}</span>
+          {facilities.length > 4 && (
+            <span className="facility-pill">+{facilities.length - 4}</span>
           )}
         </div>
 
         <div className="property-footer">
           <div>
-            <span className="property-price">{formatRupiah(property.price)}</span>
+            <span className="property-price">{formatRupiah(price)}</span>
             <span className="property-period">/bulan</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--primary)', fontSize: '11px', fontWeight: 600, marginTop: '2px' }}>
               <Sparkles size={11} />

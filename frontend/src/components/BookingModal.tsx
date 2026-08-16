@@ -49,8 +49,16 @@ export default function BookingModal({
     }).format(val);
   };
 
-  const isFull = property.occupiedRooms >= property.totalRooms;
-  const availableRooms = Math.max(0, property.totalRooms - property.occupiedRooms);
+  const price = Number(property.price) || 0;
+  const totalRooms = Number(property.totalRooms) || 0;
+  const occupiedRooms = Number(property.occupiedRooms) || 0;
+  const facilities = Array.isArray(property.facilities) ? property.facilities : [];
+  const image = property.image && property.image.trim() !== ''
+    ? property.image
+    : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
+
+  const isFull = totalRooms > 0 && occupiedRooms >= totalRooms;
+  const availableRooms = Math.max(0, totalRooms - occupiedRooms);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -190,7 +198,7 @@ export default function BookingModal({
                 onClick={handleProcessPayment}
                 disabled={paymentProcessing}
               >
-                {paymentProcessing ? 'Memproses Transaksi...' : `Bayar ${formatRupiah(property.price)}`}
+                {paymentProcessing ? 'Memproses Transaksi...' : `Bayar ${formatRupiah(price)}`}
               </button>
             </div>
           </div>
@@ -198,22 +206,25 @@ export default function BookingModal({
           /* Modal View: Standard Property Detail */
           <div>
             <img
-              src={property.image}
-              alt={property.name}
+              src={image}
+              alt={property.name || 'Kosmo Property'}
               style={{ width: '100%', height: '280px', objectFit: 'cover' }}
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
+              }}
             />
             <div style={{ padding: '28px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
                 <div>
-                  <h2 style={{ fontSize: '24px', fontWeight: 800 }}>{property.name}</h2>
+                  <h2 style={{ fontSize: '24px', fontWeight: 800 }}>{property.name || 'Properti KOSMO'}</h2>
                   <div className="property-location" style={{ fontSize: '14px', marginTop: '4px' }}>
                     <MapPin size={16} />
-                    <span>{property.address}</span>
+                    <span>{property.address || property.district || 'Bali'}</span>
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--primary)' }}>
-                    {formatRupiah(property.price)}
+                    {formatRupiah(price)}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>per bulan</div>
                 </div>
@@ -222,7 +233,7 @@ export default function BookingModal({
               {/* Status & Document info */}
               <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
                 <span style={{ backgroundColor: isFull ? '#fee2e2' : '#ecfdf5', color: isFull ? '#dc2626' : '#059669', padding: '4px 10px', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 700 }}>
-                  {isFull ? 'Kamar Penuh' : `Tersedia: ${availableRooms} dari ${property.totalRooms} Kamar`}
+                  {isFull ? 'Kamar Penuh' : `Tersedia: ${availableRooms} dari ${totalRooms} Kamar`}
                 </span>
                 <span style={{ backgroundColor: 'var(--primary-light)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <ShieldCheck size={14} />
@@ -240,7 +251,7 @@ export default function BookingModal({
               <div style={{ marginBottom: '24px' }}>
                 <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '6px' }}>Deskripsi Co-Living</h4>
                 <p style={{ color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1.6 }}>
-                  {property.description}
+                  {property.description || 'Hunian nyaman dengan fasilitas lengkap di Bali.'}
                 </p>
               </div>
 
@@ -250,7 +261,7 @@ export default function BookingModal({
                   Fasilitas All-Inclusive Termasuk:
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                  {property.facilities.map((fac, idx) => (
+                  {facilities.map((fac, idx) => (
                     <span key={idx} className="facility-pill" style={{ backgroundColor: 'var(--primary-light)', color: 'var(--primary)', borderColor: 'rgba(37, 99, 235, 0.2)', fontWeight: 600 }}>
                       {renderFacilityIcon(fac)}
                       {fac}

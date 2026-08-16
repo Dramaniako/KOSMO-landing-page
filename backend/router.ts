@@ -463,6 +463,20 @@ interface CreatePropertyBody {
   ownerId?: string;
 }
 
+function normalizeProperty(p: PropertyRow): PropertyRow {
+  return {
+    ...p,
+    price: Number(p.price) || 0,
+    totalRooms: Number(p.totalRooms) || 0,
+    occupiedRooms: Number(p.occupiedRooms) || 0,
+    rating: Number(p.rating) || 0,
+    image: p.image && p.image.trim() !== ''
+      ? p.image
+      : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80',
+    facilities: Array.isArray(p.facilities) ? p.facilities : []
+  };
+}
+
 router.get('/properties', async (req: Request, res: Response) => {
   const { district, priceMin, priceMax, facility } = req.query;
 
@@ -500,7 +514,7 @@ router.get('/properties', async (req: Request, res: Response) => {
       );
     }
 
-    res.json(filteredProperties);
+    res.json(filteredProperties.map(normalizeProperty));
   } catch (err: unknown) {
     console.error("Get properties error:", err);
     try {
@@ -521,7 +535,7 @@ router.get('/properties/:id', async (req: Request<{ id: string }>, res: Response
     const [facRows] = await pool.query<FacilityRow[]>('SELECT facility FROM property_facilities WHERE propertyId = ?', [prop.id]);
     prop.facilities = facRows.map(r => r.facility);
 
-    res.json(prop);
+    res.json(normalizeProperty(prop));
   } catch (err) {
     res.status(500).json({ message: "Gagal mengambil detail properti." });
   }
