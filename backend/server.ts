@@ -5,7 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
 import morgan from 'morgan';
-import { initDb } from './db.ts';
+import { initDb, ensureDbReady } from './db.ts';
 import router from './router.ts';
 
 import path from 'path';
@@ -32,38 +32,75 @@ const PORT: number = parseInt(process.env.PORT || '5000', 10);
 app.use(compression());
 
 // Security & Parsing Middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: false
-}));
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "'unsafe-eval'",
+          "https://app.sandbox.midtrans.com",
+          "https://snap-assets.sandbox.midtrans.com",
+          "https://*.midtrans.com",
+          "https://pay.google.com",
+          "https://gwk.gopayapi.com",
+          "https://unpkg.com"
+        ],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: [
+          "'self'",
+          "data:",
+          "blob:",
+          "https://res.cloudinary.com",
+          "https://*.cloudinary.com",
+          "https://*.tile.openstreetmap.org",
+          "https://unpkg.com",
+          "https://images.unsplash.com"
+        ],
+        frameSrc: ["'self'", "https://app.sandbox.midtrans.com", "https://*.midtrans.com"],
+        connectSrc: [
+          "'self'",
+          "https://app.sandbox.midtrans.com",
+          "https://api.sandbox.midtrans.com",
+          "https://*.midtrans.com",
+          "https://api.cloudinary.com",
+          "https://*.tile.openstreetmap.org"
+        ]
+      }
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
+  })
+);
 app.use(cors());
 app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ limit: '5mb', extended: true }));
 app.use(morgan('dev'));
 app.use('/uploads', express.static(uploadsDir));
 
-// Memoized database initialization
-let dbInitPromise: Promise<void> | null = null;
+// Memoized database initialization for standalone/direct runs
 export function ensureDbInitialized(): Promise<void> {
-  if (!dbInitPromise) {
-    dbInitPromise = initDb().catch((err) => {
-      dbInitPromise = null;
-      throw err;
-    });
-  }
-  return dbInitPromise;
+  return ensureDbReady();
 }
 
-// Ensure DB is initialized before handling any requests
-app.use(async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    await ensureDbInitialized();
-    next();
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error("Database initialization failed in middleware:", err);
-    res.status(500).json({ message: "Database initialization failed: " + errorMsg, error: errorMsg });
+// Serverless DB Middleware intercepting /api/*
+app.use(async (req: Request, res: Response, next: NextFunction) => {
+  if (req.path.startsWith('/api') && req.path !== '/api/health') {
+    try {
+      await ensureDbReady();
+    } catch (error: unknown) {
+      const errorMsg = error instanceof Error ? error.message : 'Unable to reach database cluster';
+      console.error("Database readiness check failed in middleware:", error);
+      return res.status(500).json({
+        error: 'Database connection failed',
+        message: errorMsg
+      });
+    }
   }
+  next();
 });
 
 // Mount API router
@@ -78,7 +115,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL && process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server listening on port ${PORT}`);
   });
 }
 

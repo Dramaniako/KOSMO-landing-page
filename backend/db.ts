@@ -35,12 +35,12 @@ const sslOption = isSSLFalse
   ? undefined
   : {
       minVersion: 'TLSv1.2',
-      rejectUnauthorized: process.env.DB_REJECT_UNAUTHORIZED === 'true'
+      rejectUnauthorized: process.env.DB_REJECT_UNAUTHORIZED === 'true' ? true : false
     };
 
-const dbConfig: ConnectionOptions = {
+export const dbConfig: ConnectionOptions = {
   host,
-  port: parseInt(process.env.DB_PORT || '3306', 10),
+  port: parseInt(process.env.DB_PORT || (isTiDB ? '4000' : '3306'), 10),
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'kosmo_db',
@@ -48,7 +48,7 @@ const dbConfig: ConnectionOptions = {
   waitForConnections: true,
   connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '5', 10),
   maxIdle: 5,
-  idleTimeout: 30000,
+  idleTimeout: 60000,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
   queueLimit: 0
@@ -58,17 +58,30 @@ export interface CustomConnection extends Connection {
   release: () => Promise<void>;
 }
 
-export const pool = mysql.createPool({
-  ...dbConfig,
-  waitForConnections: true,
-  connectionLimit: 10,
-  maxIdle: 10,
-  idleTimeout: 60000,
-  queueLimit: 0
-});
+let activePool: mysql.Pool | null = null;
+
+export function getPool(): mysql.Pool {
+  if (!activePool) {
+    activePool = mysql.createPool({
+      ...dbConfig,
+      connectionLimit: 10,
+      maxIdle: 10,
+      idleTimeout: 60000,
+      queueLimit: 0
+    });
+  }
+  return activePool;
+}
+
+export const pool: mysql.Pool = getPool();
 
 let initPromise: Promise<void> | null = null;
 let isInitialized = false;
+
+export async function ensureDbReady(): Promise<void> {
+  if (isInitialized) return;
+  await initDb();
+}
 async function ensureIndexes(): Promise<void> {
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
