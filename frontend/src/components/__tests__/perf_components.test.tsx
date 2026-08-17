@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import KosCard from '../KosCard.tsx';
 import SearchFilterBar from '../SearchFilterBar.tsx';
-import { Property, FilterState } from '../../types/index.ts';
+import { Property, FacilityFilterState } from '../../types/index.ts';
 
 describe('Frontend Component Render Performance', () => {
   const mockProperty: Property = {

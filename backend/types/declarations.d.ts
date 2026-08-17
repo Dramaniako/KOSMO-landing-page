@@ -88,3 +88,25 @@ declare module 'midtrans-client' {
 
   export default midtransClient;
 }
+
+declare namespace NodeJS {
+  interface ProcessEnv {
+    readonly NODE_ENV?: 'development' | 'production' | 'test';
+    readonly PORT?: string;
+    readonly DB_HOST?: string;
+    readonly DB_PORT?: string;
+    readonly DB_USER?: string;
+    readonly DB_PASSWORD?: string;
+    readonly DB_NAME?: string;
+    readonly DB_SSL?: string;
+    readonly DB_CONNECTION_LIMIT?: string;
+    readonly JWT_SECRET?: string;
+    readonly CLOUDINARY_CLOUD_NAME?: string;
+    readonly CLOUDINARY_API_KEY?: string;
+    readonly CLOUDINARY_API_SECRET?: string;
+    readonly MIDTRANS_SERVER_KEY?: string;
+    readonly MIDTRANS_CLIENT_KEY?: string;
+    readonly MIDTRANS_IS_PRODUCTION?: string;
+  }
+}
+

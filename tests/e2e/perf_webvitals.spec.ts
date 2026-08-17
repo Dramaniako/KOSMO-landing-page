@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Core Web Vitals & Navigation Timings', () => {
   test('landing page meets Core Web Vitals and DOMContentLoaded SLAs', async ({ page }) => {
     // Initial load allows Vite dev server to compile modules
-    await page.goto('/', { waitUntil: 'load' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
 
     // Verify brand heading renders promptly
     const brand = page.locator('.nav-brand, h1');

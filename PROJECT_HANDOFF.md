@@ -137,9 +137,9 @@ KOSMO-landing-page/
 │   ├── perf_api.test.ts            # Response time SLAs & payload size benchmarks
 │   ├── perf_db.test.ts             # Raw SQL JOIN & pool query benchmarks
 │   ├── rentals.test.ts             # Rental transactions, single tenancy, & payment schedule tests
-│   ├── router.test.js              # REST API endpoint registration tests
+│   ├── router.test.ts              # REST API endpoint registration tests
 │   ├── search.test.ts              # Search & multi-parameter filter logic tests
-│   ├── types.test.js               # Domain schema boundary & data validation tests
+│   ├── types.test.ts               # Domain schema boundary & data validation tests
 │   ├── upload.test.ts              # Cloudinary upload & MIME type validation tests
 │   └── withdrawals.test.ts         # Landlord withdrawal state machine & refund rollback tests
 ├── package.json                    # Workspace root scripts & dependencies

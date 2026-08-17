@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import router from '../backend/router.ts';
 
+interface RouterLayer {
+  route?: {
+    path: string;
+    methods: Record<string, boolean>;
+  };
+}
+
 test('Express router endpoints registration', async (t) => {
   await t.test('router is defined and has registered route stack', () => {
     assert.ok(router, 'Router must be defined');
@@ -10,8 +17,8 @@ test('Express router endpoints registration', async (t) => {
   });
 
   await t.test('contains all expected core API endpoints and methods', () => {
-    const routePaths = router.stack
-      .filter((layer) => layer.route)
+    const routePaths = (router.stack as RouterLayer[])
+      .filter((layer): layer is RouterLayer & { route: { path: string; methods: Record<string, boolean> } } => Boolean(layer.route))
       .map((layer) => ({
         path: layer.route.path,
         methods: Object.keys(layer.route.methods)

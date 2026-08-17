@@ -5,11 +5,7 @@ import {
   validateBooking,
   validateUser,
   validateProperty,
-  validateReview,
-  VALID_ROOM_TYPES,
-  VALID_BOOKING_STATUSES,
-  VALID_USER_ROLES,
-  VALID_AMENITIES
+  validateReview
 } from '../backend/types/index.ts';
 
 test('KosRoom schema validation & boundary conditions', async (t) => {

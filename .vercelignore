@@ -1,0 +1,28 @@
+# Tests & Test Artifacts
+tests/
+test-results/
+playwright-report/
+playwright.config.ts
+
+# CI/CD & Agents
+.github/
+.agents/
+
+# IDE & Editor files
+.vscode/
+.idea/
+
+# Logs & Error Dumps
+*.log
+npm-debug.log*
+yarn-debug.log*
+db_error.log
+
+# Reports & Spreadsheets
+*.xlsx
+backend/*.xlsx
+
+# Documentation & Scratch files
+*.md
+PROJECT_HANDOFF.md
+scratch/
