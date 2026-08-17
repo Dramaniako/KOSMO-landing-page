@@ -7,8 +7,8 @@
     "type-check": "npm --prefix frontend run type-check && npx tsc --noEmit --project backend/tsconfig.json",
     "type-check:frontend": "npm --prefix frontend run type-check",
     "type-check:backend": "npx tsc --noEmit --project backend/tsconfig.json",
-    "dev:backend": "tsx watch backend/server.ts",
-    "start": "tsx backend/server.ts",
+    "dev:backend": "node --experimental-strip-types --watch backend/server.ts",
+    "start": "node --experimental-strip-types backend/server.ts",
     "test": "node --experimental-strip-types --test tests/auth.test.ts tests/contract.test.ts tests/jwt.test.ts tests/payment.test.ts tests/rentals.test.ts tests/router.test.ts tests/search.test.ts tests/types.test.ts tests/upload.test.ts tests/withdrawals.test.ts",
     "test:integration": "node --experimental-strip-types --test tests/db_integration.test.ts tests/perf_api.test.ts tests/perf_db.test.ts",
     "test:e2e": "playwright test"

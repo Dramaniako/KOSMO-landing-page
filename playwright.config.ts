@@ -24,7 +24,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'npx tsx backend/server.ts',
+      command: 'node --experimental-strip-types backend/server.ts',
       port: 5000,
       reuseExistingServer: true,
       timeout: 60 * 1000
