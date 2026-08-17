@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import {
-  MapPin, Star, X, ArrowRight, ShieldCheck, Download, CreditCard, Sparkles, Check
+  MapPin, Star, X, ArrowRight, ShieldCheck, Download, CreditCard, Sparkles, Check, AlertCircle
 } from 'lucide-react';
 import { Property, User } from '../types/index.ts';
 
@@ -36,6 +36,7 @@ export interface Props {
   currentUser: User | null;
   onNavigateToLogin: () => void;
   renderFacilityIcon: (fac: string) => React.ReactNode;
+  hasActiveRental?: boolean;
 }
 
 export default function BookingModal({
@@ -53,7 +54,8 @@ export default function BookingModal({
   onClose,
   currentUser,
   onNavigateToLogin,
-  renderFacilityIcon
+  renderFacilityIcon,
+  hasActiveRental = false
 }: Props) {
   useEffect(() => {
     const snapScriptUrl = 'https://app.sandbox.midtrans.com/snap/snap.js';
@@ -318,6 +320,14 @@ export default function BookingModal({
                 )}
               </div>
 
+              {/* Active Rental Warning Banner */}
+              {hasActiveRental && (
+                <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: '16px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <AlertCircle size={16} style={{ color: '#d97706', flexShrink: 0 }} />
+                  <span>Anda sudah memiliki hunian aktif. Kelola sewa Anda di Dashboard Tenant.</span>
+                </div>
+              )}
+
               {/* Action buttons */}
               <div style={{ display: 'flex', gap: '12px' }}>
                 <button
@@ -331,10 +341,10 @@ export default function BookingModal({
                   <button
                     className="btn btn-primary"
                     style={{ flex: 2 }}
-                    disabled={isFull}
+                    disabled={isFull || hasActiveRental}
                     onClick={() => setShowContract(true)}
                   >
-                    {isFull ? 'Kamar Tidak Tersedia' : 'Sewa Sekarang (All-Inclusive)'}
+                    {hasActiveRental ? 'Hunian Aktif Ditemukan' : isFull ? 'Kamar Tidak Tersedia' : 'Sewa Sekarang (All-Inclusive)'}
                     <ArrowRight size={16} />
                   </button>
                 ) : (

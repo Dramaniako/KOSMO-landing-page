@@ -12,22 +12,31 @@ interface RentalSimulationState {
 function processNewRental(
   property: { totalRooms: number; occupiedRooms: number; price: number; ownerId: string },
   tenantId: string,
-  durationMonths = 1
-): { success: boolean; message?: string; updatedOccupiedRooms?: number; addedRevenue?: number; totalPrice?: number } {
+  durationMonths = 1,
+  hasActiveRental = false
+): { success: boolean; statusCode?: number; message?: string; updatedOccupiedRooms?: number; addedRevenue?: number; totalPrice?: number } {
   if (!tenantId) {
-    return { success: false, message: 'tenantId wajib diisi.' };
+    return { success: false, statusCode: 400, message: 'tenantId wajib diisi.' };
+  }
+  if (hasActiveRental) {
+    return {
+      success: false,
+      statusCode: 409,
+      message: 'Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru.'
+    };
   }
   if (durationMonths <= 0 || !Number.isInteger(durationMonths)) {
-    return { success: false, message: 'Durasi sewa minimal 1 bulan.' };
+    return { success: false, statusCode: 400, message: 'Durasi sewa minimal 1 bulan.' };
   }
   if (property.occupiedRooms >= property.totalRooms) {
-    return { success: false, message: 'Kamar kos sudah penuh.' };
+    return { success: false, statusCode: 400, message: 'Kamar kos sudah penuh.' };
   }
 
   const totalPrice = property.price * durationMonths;
 
   return {
     success: true,
+    statusCode: 201,
     updatedOccupiedRooms: property.occupiedRooms + 1,
     addedRevenue: totalPrice,
     totalPrice
@@ -125,5 +134,23 @@ test('Rental booking and occupancy state transitions', async (t) => {
 
     assert.equal(result.success, false);
     assert.equal(result.message, 'Password salah.');
+  });
+
+  await t.test('rejects booking with 409 Conflict when tenant already has an active rental', () => {
+    const property = { totalRooms: 10, occupiedRooms: 2, price: 3500000, ownerId: 'landlord-1' };
+    const result = processNewRental(property, 'tenant-active-1', 1, true);
+
+    assert.equal(result.success, false);
+    assert.equal(result.statusCode, 409);
+    assert.equal(result.message, 'Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru.');
+  });
+
+  await t.test('allows booking when tenant previous rental is terminated or cancelled (no active rental)', () => {
+    const property = { totalRooms: 10, occupiedRooms: 2, price: 3500000, ownerId: 'landlord-1' };
+    const result = processNewRental(property, 'tenant-terminated-1', 1, false);
+
+    assert.equal(result.success, true);
+    assert.equal(result.statusCode, 201);
+    assert.equal(result.updatedOccupiedRooms, 3);
   });
 });

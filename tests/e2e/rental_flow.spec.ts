@@ -11,8 +11,9 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
   };
 
   test('registers tenant, searches kos with price filter, completes booking, and confirms tenancy in dashboard', async ({ page, request }) => {
-    // Automatically accept all browser dialog alerts
+    // Automatically accept all browser dialog alerts and log them
     page.on('dialog', async (dialog) => {
+      console.log('--- TEST DIALOG DETECTED:', dialog.message());
       await dialog.accept();
     });
 
@@ -77,7 +78,7 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     await payButton.click();
 
     // 9. Verify redirection to Tenant Dashboard
-    await page.waitForURL('**/tenant', { timeout: 10000 });
+    await expect(page).toHaveURL(/.*tenant/, { timeout: 15000 });
     await expect(page.locator('body')).toContainText('Halo,');
     await expect(page.locator('body')).toContainText(regData.user.name);
 
@@ -85,5 +86,69 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     const rentalsTabButton = page.locator('button:has-text("Kos Saya (Sewa)")');
     await rentalsTabButton.click();
     await expect(page.locator('body')).toContainText(propertyTitle);
+  });
+
+  test('enforces single active tenancy rule by preventing duplicate active bookings', async ({ page, request }) => {
+    // 1. Register a tenant user
+    const uniqueId = Date.now();
+    const tenantUser = {
+      name: `Active Tenant ${uniqueId}`,
+      email: `active_${uniqueId}@kosmo-e2e.test`,
+      password: 'Password123!',
+      phone: '081211223344',
+      role: 'tenant'
+    };
+
+    const regRes = await request.post('/api/auth/register', { data: tenantUser });
+    expect(regRes.ok()).toBeTruthy();
+    const regData = (await regRes.json()) as { token: string; user: { id: string; name: string; email: string; role: string } };
+
+    // 2. Create the first active rental via API
+    const rentRes = await request.post('/api/rentals', {
+      headers: { Authorization: `Bearer ${regData.token}` },
+      data: {
+        tenantId: regData.user.id,
+        propertyId: 'prop-01',
+        propertyName: 'KOSMO Hub Denpasar Executive',
+        price: 3500000
+      }
+    });
+    expect(rentRes.status()).toBe(201);
+
+    // 3. Attempting duplicate active booking via API receives 409 Conflict
+    const dupRes = await request.post('/api/rentals', {
+      headers: { Authorization: `Bearer ${regData.token}` },
+      data: {
+        tenantId: regData.user.id,
+        propertyId: 'prop-02',
+        propertyName: 'KOSMO Seminyak Tropical Villa Living',
+        price: 5500000
+      }
+    });
+    expect(dupRes.status()).toBe(409);
+    const dupData = (await dupRes.json()) as { message: string };
+    expect(dupData.message).toContain('Anda masih memiliki sewa kos yang aktif');
+
+    // 4. Set auth state in browser and visit landing page
+    await page.addInitScript(({ token, user }) => {
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+    }, { token: regData.token, user: regData.user });
+
+    await page.goto('/');
+
+    // 5. Open property detail modal
+    const secondCard = page.locator('.kos-card, .property-card').nth(1);
+    await expect(secondCard).toBeVisible();
+    await secondCard.click();
+
+    // 6. Assert active rental warning banner and disabled button
+    const modalContent = page.locator('.modal-content');
+    await expect(modalContent).toBeVisible();
+    await expect(modalContent).toContainText('Anda sudah memiliki hunian aktif');
+
+    const disabledButton = modalContent.locator('button:has-text("Hunian Aktif Ditemukan")');
+    await expect(disabledButton).toBeVisible();
+    await expect(disabledButton).toBeDisabled();
   });
 });

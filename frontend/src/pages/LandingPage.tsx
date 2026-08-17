@@ -23,6 +23,7 @@ export default function LandingPage() {
   const [showPayment, setShowPayment] = useState<boolean>(false);
   const [paymentProcessing, setPaymentProcessing] = useState<boolean>(false);
   const [showMap, setShowMap] = useState<boolean>(false);
+  const [hasActiveRental, setHasActiveRental] = useState<boolean>(false);
 
   // Filter States
   const [district, setDistrict] = useState<string>('Semua');
@@ -69,6 +70,31 @@ export default function LandingPage() {
     // Track visitor
     fetch(`${API_BASE}/tracking/visit`, { method: 'POST' }).catch(() => { });
   }, []);
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setHasActiveRental(false);
+      return;
+    }
+    const checkActiveRental = async (): Promise<void> => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(currentUser.id)}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (res.ok) {
+          const rentals = (await res.json()) as Array<{ status: string }>;
+          if (Array.isArray(rentals)) {
+            const active = rentals.some(r => r.status === 'active');
+            setHasActiveRental(active);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to check active rentals:", err);
+      }
+    };
+    checkActiveRental();
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (!showMap || !selectedProperty) return;
@@ -160,73 +186,28 @@ export default function LandingPage() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(`${API_BASE}/payment/token`, {
+      const res = await fetch(`${API_BASE}/rentals`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           tenantId: currentUser.id,
           propertyId: selectedProperty.id,
+          propertyName: selectedProperty.name,
+          price: selectedProperty.price,
           durationMonths: 1
         })
       });
 
       if (res.ok) {
-        const data = (await res.json()) as { token?: string; redirect_url?: string; rentalId?: string };
-        if (data.token && typeof window !== 'undefined' && window.snap) {
-          window.snap.pay(data.token, {
-            onSuccess: () => {
-              alert("🎉 Pembayaran Sukses! Selamat datang di KOSMO.");
-              setShowPayment(false);
-              setSelectedProperty(null);
-              navigate('/tenant');
-            },
-            onPending: () => {
-              alert("⏳ Menunggu pembayaran Anda. Silakan selesaikan transaksi.");
-              setShowPayment(false);
-              setSelectedProperty(null);
-              navigate('/tenant');
-            },
-            onError: () => {
-              alert("❌ Pembayaran gagal. Silakan coba lagi.");
-            },
-            onClose: () => {
-              console.log("Snap checkout popup closed.");
-            }
-          });
-          return;
-        }
-
-        // Direct fallback / testing simulation
-        alert("🎉 Pembayaran Sukses! Selamat datang di KOSMO.");
         setShowPayment(false);
         setSelectedProperty(null);
         navigate('/tenant');
       } else {
-        // Fallback to direct rentals POST if payment endpoint returns error in test mode
-        const fallbackRes = await fetch(`${API_BASE}/rentals`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            tenantId: currentUser.id,
-            propertyId: selectedProperty.id,
-            propertyName: selectedProperty.name,
-            price: selectedProperty.price
-          })
-        });
-
-        if (fallbackRes.ok) {
-          alert("🎉 Pembayaran Sukses! Selamat datang di KOSMO.");
-          setShowPayment(false);
-          setSelectedProperty(null);
-          navigate('/tenant');
-        } else {
-          const data = (await fallbackRes.json()) as { message?: string };
-          alert("Gagal memproses pembayaran: " + (data.message || ''));
-        }
+        const data = (await res.json()) as { message?: string };
+        console.error("Rental booking failed:", data.message);
       }
     } catch (err) {
-      console.error(err);
-      alert("Terjadi kesalahan saat pembayaran.");
+      console.error("Payment processing exception:", err);
     } finally {
       setPaymentProcessing(false);
     }
@@ -498,6 +479,7 @@ export default function LandingPage() {
         currentUser={currentUser}
         onNavigateToLogin={() => navigate('/login')}
         renderFacilityIcon={renderFacilityIcon}
+        hasActiveRental={hasActiveRental}
       />
     </div>
   );
