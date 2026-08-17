@@ -430,6 +430,15 @@ function normalizeProperty(p: PropertyRow): PropertyRow {
   };
 }
 
+function normalizePropertySummary(p: PropertyRow): PropertyRow {
+  const norm = normalizeProperty(p);
+  // Sanitize heavy inline Base64 strings in list responses so catalog payloads stay under 50 KB
+  if (norm.image && norm.image.startsWith('data:image') && norm.image.length > 2048) {
+    norm.image = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
+  }
+  return norm;
+}
+
 router.get('/properties', async (req: Request, res: Response) => {
   const { district, priceMin, priceMax, facility } = req.query;
   const cacheKey = `properties:${district || 'all'}:${priceMin || 0}:${priceMax || 0}:${facility || 'all'}`;
@@ -480,7 +489,7 @@ router.get('/properties', async (req: Request, res: Response) => {
       );
     }
 
-    const normalized = filteredProperties.map(normalizeProperty);
+    const normalized = filteredProperties.map(normalizePropertySummary);
     apiCache.set(cacheKey, normalized, 60);
 
     res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');

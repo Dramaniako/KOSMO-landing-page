@@ -1,0 +1,1 @@
+npx tsx backend/server.ts
