@@ -5,7 +5,7 @@ import {
   ArrowUpRight, Landmark, CreditCard, LayoutDashboard, MessageSquare,
   Download, Users, X
 } from 'lucide-react';
-import { User, Property, Review, LandlordStats, FacilityFilterState } from '../types/index.ts';
+import { User, Property, Review, Rental, LandlordStats, FacilityFilterState } from '../types/index.ts';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -28,9 +28,16 @@ interface PropertyFormState {
   facilities: FacilityFilterState;
 }
 
+const shimmerStyle: React.CSSProperties = {
+  background: 'linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%)',
+  backgroundSize: '200% 100%',
+  animation: 'kosmoShimmer 1.5s infinite',
+  borderRadius: '8px'
+};
+
 export default function LandlordDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'reviews'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'reviews' | 'tenants'>('overview');
   
   const [landlordUser, setLandlordUser] = useState<User | null>(() => {
     const raw = localStorage.getItem('user');
@@ -52,6 +59,7 @@ export default function LandlordDashboard() {
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [rentals, setRentals] = useState<Rental[]>([]);
   const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ overview: true });
   const loadedTabs = useRef<Set<string>>(new Set());
 
@@ -147,6 +155,23 @@ export default function LandlordDashboard() {
     }
   }, []);
 
+  const fetchLandlordRentals = useCallback(async (landlordId: string): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, tenants: true }));
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE}/landlord/rentals?landlordId=${encodeURIComponent(landlordId)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      const data = (await res.json()) as Rental[];
+      setRentals(Array.isArray(data) ? data : []);
+      loadedTabs.current.add('tenants');
+    } catch (err) {
+      console.error("Error loading landlord rentals:", err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, tenants: false }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!landlordUser || landlordUser.role !== 'landlord') {
       navigate('/login');
@@ -159,8 +184,10 @@ export default function LandlordDashboard() {
       fetchLandlordProperties(landlordUser.id);
     } else if (activeTab === 'reviews' && !loadedTabs.current.has('reviews')) {
       fetchLandlordReviews(landlordUser.id);
+    } else if (activeTab === 'tenants' && !loadedTabs.current.has('tenants')) {
+      fetchLandlordRentals(landlordUser.id);
     }
-  }, [landlordUser, navigate, activeTab, fetchOverviewStats, fetchLandlordProperties, fetchLandlordReviews]);
+  }, [landlordUser, navigate, activeTab, fetchOverviewStats, fetchLandlordProperties, fetchLandlordReviews, fetchLandlordRentals]);
 
   useEffect(() => {
     if (!showPropModal) return;
@@ -433,9 +460,8 @@ export default function LandlordDashboard() {
             </li>
             <li>
               <button 
-                className="sidebar-link"
-                style={{ color: 'var(--primary)' }}
-                onClick={() => navigate('/tenant')}
+                className={`sidebar-link ${activeTab === 'tenants' ? 'active' : ''}`}
+                onClick={() => setActiveTab('tenants')}
               >
                 <Users size={18} />
                 Sesi Penyewa
@@ -454,6 +480,13 @@ export default function LandlordDashboard() {
 
       {/* Main Content Area */}
       <main className="dashboard-content">
+        <style>{`
+          @keyframes kosmoShimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+          }
+        `}</style>
+
         <header style={{ marginBottom: '32px' }} className="flex-between">
           <div>
             <h1 style={{ fontSize: '28px' }}>Selamat Datang, {landlordUser?.name || 'Landlord'}</h1>
@@ -479,9 +512,20 @@ export default function LandlordDashboard() {
         {activeTab === 'overview' && (
           <div>
             {tabLoading.overview && !loadedTabs.current.has('overview') ? (
-              <div className="flex-center" style={{ height: '260px', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ width: '36px', height: '36px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data keuangan landlord...</p>
+              <div>
+                <div className="stats-grid">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} style={{ height: '110px', ...shimmerStyle }} />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '16px', marginBottom: '40px' }}>
+                  <div style={{ width: '180px', height: '42px', ...shimmerStyle }} />
+                  <div style={{ width: '180px', height: '42px', ...shimmerStyle }} />
+                </div>
+                <div className="grid-2">
+                  <div className="card" style={{ height: '240px', ...shimmerStyle }} />
+                  <div className="card" style={{ height: '240px', ...shimmerStyle }} />
+                </div>
               </div>
             ) : (
               <>
@@ -625,9 +669,10 @@ export default function LandlordDashboard() {
             </div>
 
             {tabLoading.properties && !loadedTabs.current.has('properties') ? (
-              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ width: '36px', height: '36px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat daftar properti Anda...</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} style={{ height: '72px', ...shimmerStyle }} />
+                ))}
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -693,9 +738,10 @@ export default function LandlordDashboard() {
             <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Properti Saya ({reviews.length})</h3>
 
             {tabLoading.reviews && !loadedTabs.current.has('reviews') ? (
-              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ width: '36px', height: '36px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat ulasan properti...</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {[1, 2, 3].map((i) => (
+                  <div key={i} style={{ height: '96px', ...shimmerStyle }} />
+                ))}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -730,6 +776,80 @@ export default function LandlordDashboard() {
 
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tenants / Rentals Management Tab */}
+        {activeTab === 'tenants' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <div className="flex-between" style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px' }}>Sesi Kontrak Penyewa Aktif ({rentals.length})</h3>
+            </div>
+
+            {tabLoading.tenants && !loadedTabs.current.has('tenants') ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} style={{ height: '68px', ...shimmerStyle }} />
+                ))}
+              </div>
+            ) : rentals.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                <p style={{ fontStyle: 'italic', fontSize: '14px' }}>Belum ada sesi penyewaan aktif pada properti Anda.</p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                      <th style={{ padding: '12px 16px' }}>Properti Kos</th>
+                      <th style={{ padding: '12px 16px' }}>ID Penyewa</th>
+                      <th style={{ padding: '12px 16px' }}>Mulai Sewa</th>
+                      <th style={{ padding: '12px 16px' }}>Biaya / Bln</th>
+                      <th style={{ padding: '12px 16px' }}>Status</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Dokumen Kontrak</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rentals.map((r) => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '16px' }}>
+                          <strong style={{ fontSize: '15px', color: 'var(--dark)' }}>{r.propertyName}</strong>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>ID Sewa: {r.id}</p>
+                        </td>
+                        <td style={{ padding: '16px' }}>
+                          <span style={{ fontSize: '13px', fontFamily: 'monospace', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                            {r.tenantId}
+                          </span>
+                        </td>
+                        <td style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                          {r.startDate}
+                        </td>
+                        <td style={{ padding: '16px', fontWeight: 600, color: 'var(--primary)' }}>
+                          {formatRupiah(r.price)}
+                        </td>
+                        <td style={{ padding: '16px' }}>
+                          <span className={`badge ${r.status === 'active' ? 'badge-success' : 'badge-secondary'}`} style={{ fontSize: '10px' }}>
+                            {r.status === 'active' ? 'Sewa Aktif' : r.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '16px', textAlign: 'right' }}>
+                          <a
+                            href={`${API_BASE}/rentals/${r.id}/contract`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-outline"
+                            style={{ padding: '4px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                          >
+                            <Download size={13} />
+                            Unduh PDF
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

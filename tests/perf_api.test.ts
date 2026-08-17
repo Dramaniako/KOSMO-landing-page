@@ -50,5 +50,35 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
     assert.ok(duration < 350, `Expected latency < 350ms, got ${duration.toFixed(2)}ms`);
   });
 
+  const landlordToken = generateJwtToken({ id: 'user-landlord', email: 'landlord@kosmo.local', role: 'landlord' });
+
+  await t.test('GET /api/landlord/stats responds within 350ms with SQL aggregations', async () => {
+    const start = performance.now();
+    const res = await fetch(`http://localhost:${PORT}/api/landlord/stats?landlordId=user-landlord`, {
+      headers: { Authorization: `Bearer ${landlordToken}` }
+    });
+    const duration = performance.now() - start;
+
+    assert.equal(res.status, 200);
+    assert.ok(duration < 350, `Expected latency < 350ms, got ${duration.toFixed(2)}ms`);
+    const data = await res.json() as Record<string, unknown>;
+    assert.ok(typeof data.totalProperti === 'number');
+    assert.ok(typeof data.balance === 'number');
+  });
+
+  await t.test('GET /api/landlord/financials responds within 350ms with SQL aggregations', async () => {
+    const start = performance.now();
+    const res = await fetch(`http://localhost:${PORT}/api/landlord/financials?landlordId=user-landlord`, {
+      headers: { Authorization: `Bearer ${landlordToken}` }
+    });
+    const duration = performance.now() - start;
+
+    assert.equal(res.status, 200);
+    assert.ok(duration < 350, `Expected latency < 350ms, got ${duration.toFixed(2)}ms`);
+    const data = await res.json() as Record<string, unknown>;
+    assert.ok(Array.isArray(data.monthlyRevenue));
+    assert.ok(Array.isArray(data.withdrawals));
+  });
+
   server.close();
 });

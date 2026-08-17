@@ -83,6 +83,25 @@ export const pool = mysql.createPool({
 
 let initPromise: Promise<void> | null = null;
 let isInitialized = false;
+async function ensureIndexes(): Promise<void> {
+  const indexStatements = [
+    "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
+    "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
+    "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
+    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
+    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)"
+  ];
+
+  for (const sql of indexStatements) {
+    try {
+      await pool.query(sql);
+    } catch {
+      // Ignore if index already exists
+    }
+  }
+}
 
 export async function initDb(): Promise<void> {
   if (isInitialized) return;
@@ -107,8 +126,9 @@ export async function initDb(): Promise<void> {
       const missingTables = requiredTables.filter(t => !existingTables.includes(t));
       
       if (missingTables.length === 0) {
+        await ensureIndexes();
         isInitialized = true;
-        console.log("MySQL Database Kosmo tables already initialized. Skipping schema creation and seeding.");
+        console.log("MySQL Database Kosmo tables and indexes already initialized.");
         return;
       }
       
@@ -248,21 +268,8 @@ export async function initDb(): Promise<void> {
       try {
         await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''");
       } catch (e) {}
-      try {
-        await pool.query("ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)");
-      } catch (e) {}
-      try {
-        await pool.query("ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)");
-      } catch (e) {}
-      try {
-        await pool.query("ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)");
-      } catch (e) {}
-      try {
-        await pool.query("ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)");
-      } catch (e) {}
-      try {
-        await pool.query("ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)");
-      } catch (e) {}
+
+      await ensureIndexes();
 
       // Seed Users if empty
       const [userRows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM users');

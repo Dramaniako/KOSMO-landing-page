@@ -874,20 +874,45 @@ interface WithdrawalRow extends RowDataPacket {
   userPhone?: string;
 }
 
+interface PropertyStatsAgg extends RowDataPacket {
+  totalProperti: number;
+  totalRooms: number;
+  occupiedRooms: number;
+}
+
+interface ReviewCountAgg extends RowDataPacket {
+  reviewsCount: number;
+}
+
+interface MonthlyRevenueAgg extends RowDataPacket {
+  month: string;
+  revenue: number;
+  transactions: number;
+}
+
 const handleLandlordStats = async (req: Request, res: Response) => {
   const landlordId = String(req.query.landlordId || 'user-landlord');
 
   try {
     const [
       [userRows],
-      [properties],
-      [reviews],
+      [propAggRows],
+      [reviewCountRows],
       [withdrawals]
     ] = await Promise.all([
-      pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlordId]),
-      pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ?', [landlordId]),
-      pool.query<ReviewRow[]>(
-        `SELECT r.* FROM reviews r 
+      pool.query<UserRow[]>('SELECT id, balance, totalRevenue, totalWithdrawn FROM users WHERE id = ?', [landlordId]),
+      pool.query<PropertyStatsAgg[]>(
+        `SELECT 
+           COUNT(id) as totalProperti,
+           COALESCE(SUM(totalRooms), 0) as totalRooms,
+           COALESCE(SUM(occupiedRooms), 0) as occupiedRooms
+         FROM properties
+         WHERE ownerId = ?`,
+        [landlordId]
+      ),
+      pool.query<ReviewCountAgg[]>(
+        `SELECT COUNT(r.id) as reviewsCount
+         FROM reviews r 
          JOIN properties p ON r.propertyId = p.id 
          WHERE p.ownerId = ?`, 
         [landlordId]
@@ -903,27 +928,23 @@ const handleLandlordStats = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Landlord tidak ditemukan." });
     }
 
-    let totalRooms = 0;
-    let occupiedRooms = 0;
-
-    properties.forEach(p => {
-      totalRooms += p.totalRooms || 0;
-      occupiedRooms += p.occupiedRooms || 0;
-    });
-
+    const totalProperti = Number(propAggRows[0]?.totalProperti || 0);
+    const totalRooms = Number(propAggRows[0]?.totalRooms || 0);
+    const occupiedRooms = Number(propAggRows[0]?.occupiedRooms || 0);
     const occupancyRate = totalRooms > 0 ? parseFloat(((occupiedRooms / totalRooms) * 100).toFixed(1)) : 0;
+    const reviewsCount = Number(reviewCountRows[0]?.reviewsCount || 0);
 
     res.json({
       balance: parseFloat(String(landlord.balance || 0)),
       totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
       totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
-      totalProperti: properties.length,
+      totalProperti,
       totalRooms,
       occupiedRooms,
       occupancyRate,
       activeTenants: occupiedRooms,
       withdrawals,
-      reviewsCount: reviews.length
+      reviewsCount
     });
   } catch (err) {
     console.error("Get stats error:", err);
@@ -933,6 +954,76 @@ const handleLandlordStats = async (req: Request, res: Response) => {
 
 router.get('/stats', handleLandlordStats);
 router.get('/landlord/stats', handleLandlordStats);
+
+router.get('/landlord/financials', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
+  const landlordId = String(req.query.landlordId || req.user?.id || 'user-landlord');
+
+  try {
+    const [
+      [userRows],
+      [propAggRows],
+      [monthlyRevenueRows],
+      [withdrawals]
+    ] = await Promise.all([
+      pool.query<UserRow[]>('SELECT id, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder FROM users WHERE id = ?', [landlordId]),
+      pool.query<PropertyStatsAgg[]>(
+        `SELECT 
+           COUNT(id) as totalProperti,
+           COALESCE(SUM(totalRooms), 0) as totalRooms,
+           COALESCE(SUM(occupiedRooms), 0) as occupiedRooms
+         FROM properties
+         WHERE ownerId = ?`,
+        [landlordId]
+      ),
+      pool.query<MonthlyRevenueAgg[]>(
+        `SELECT 
+           DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m') as month,
+           COALESCE(SUM(r.price), 0) as revenue,
+           COUNT(r.id) as transactions
+         FROM rentals r
+         JOIN properties p ON r.propertyId = p.id
+         WHERE p.ownerId = ? AND r.status IN ('active', 'completed')
+         GROUP BY DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m')
+         ORDER BY month DESC
+         LIMIT 12`,
+        [landlordId]
+      ),
+      pool.query<WithdrawalRow[]>(
+        'SELECT * FROM withdrawals WHERE userId = ? ORDER BY id DESC LIMIT 50',
+        [landlordId]
+      )
+    ]);
+
+    const landlord = userRows[0];
+    if (!landlord) {
+      return res.status(404).json({ message: "Landlord tidak ditemukan." });
+    }
+
+    const totalProperti = Number(propAggRows[0]?.totalProperti || 0);
+    const totalRooms = Number(propAggRows[0]?.totalRooms || 0);
+    const occupiedRooms = Number(propAggRows[0]?.occupiedRooms || 0);
+    const occupancyRate = totalRooms > 0 ? parseFloat(((occupiedRooms / totalRooms) * 100).toFixed(1)) : 0;
+
+    res.json({
+      balance: parseFloat(String(landlord.balance || 0)),
+      totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
+      totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
+      bankName: landlord.bankName || '',
+      bankAccountNumber: landlord.bankAccountNumber || '',
+      bankAccountHolder: landlord.bankAccountHolder || '',
+      totalProperti,
+      totalRooms,
+      occupiedRooms,
+      occupancyRate,
+      activeTenants: occupiedRooms,
+      monthlyRevenue: monthlyRevenueRows,
+      withdrawals
+    });
+  } catch (err) {
+    console.error("Get landlord financials error:", err);
+    res.status(500).json({ message: "Gagal memuat data keuangan landlord." });
+  }
+});
 
 router.get('/withdrawals', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const userId = String(req.query.userId || req.user?.id || '');
