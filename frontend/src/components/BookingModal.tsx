@@ -37,7 +37,35 @@ export interface Props {
   onNavigateToLogin: () => void;
   renderFacilityIcon: (fac: string) => React.ReactNode;
   hasActiveRental?: boolean;
+  activeRentalError?: string | null;
 }
+
+export const loadSnapScript = (clientKey: string): Promise<void> => {
+  return new Promise((resolve) => {
+    if (typeof window !== 'undefined' && window.snap) {
+      resolve();
+      return;
+    }
+    const snapScriptUrl = 'https://app.sandbox.midtrans.com/snap/snap.js';
+    let script = document.querySelector(`script[src="${snapScriptUrl}"]`) as HTMLScriptElement | null;
+    if (!script) {
+      script = document.createElement('script');
+      script.src = snapScriptUrl;
+      script.setAttribute('data-client-key', clientKey);
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => resolve();
+      document.body.appendChild(script);
+    } else {
+      if (typeof window !== 'undefined' && window.snap) {
+        resolve();
+      } else {
+        script.addEventListener('load', () => resolve());
+        script.addEventListener('error', () => resolve());
+      }
+    }
+  });
+};
 
 export default function BookingModal({
   property,
@@ -55,18 +83,12 @@ export default function BookingModal({
   currentUser,
   onNavigateToLogin,
   renderFacilityIcon,
-  hasActiveRental = false
+  hasActiveRental = false,
+  activeRentalError = null
 }: Props) {
   useEffect(() => {
-    const snapScriptUrl = 'https://app.sandbox.midtrans.com/snap/snap.js';
-    const clientKey = 'SB-Mid-client-placeholder';
-    if (!document.querySelector(`script[src="${snapScriptUrl}"]`)) {
-      const script = document.createElement('script');
-      script.src = snapScriptUrl;
-      script.setAttribute('data-client-key', clientKey);
-      script.async = true;
-      document.body.appendChild(script);
-    }
+    const clientKey = (import.meta.env.VITE_MIDTRANS_CLIENT_KEY as string) || 'Mid-client-79XoSgAAmI4wnKaG';
+    loadSnapScript(clientKey);
   }, []);
 
   if (!property) return null;
@@ -214,6 +236,14 @@ export default function BookingModal({
               </div>
             </div>
 
+            {/* Active Rental Warning Banner on Payment Step */}
+            {(activeRentalError || hasActiveRental) && (
+              <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: '16px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle size={16} style={{ color: '#d97706', flexShrink: 0 }} />
+                <span>{activeRentalError || "Anda sudah memiliki hunian aktif. Kelola sewa Anda di Dashboard Tenant."}</span>
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: '12px' }}>
               <button
                 className="btn btn-secondary"
@@ -226,9 +256,9 @@ export default function BookingModal({
                 className="btn btn-primary"
                 style={{ flex: 2 }}
                 onClick={handleProcessPayment}
-                disabled={paymentProcessing}
+                disabled={paymentProcessing || hasActiveRental || Boolean(activeRentalError)}
               >
-                {paymentProcessing ? 'Memproses Transaksi...' : `Bayar ${formatRupiah(price)}`}
+                {paymentProcessing ? 'Memproses Transaksi...' : (hasActiveRental || activeRentalError) ? 'Hunian Aktif Ditemukan' : `Bayar ${formatRupiah(price)}`}
               </button>
             </div>
           </div>
@@ -321,10 +351,10 @@ export default function BookingModal({
               </div>
 
               {/* Active Rental Warning Banner */}
-              {hasActiveRental && (
+              {(hasActiveRental || activeRentalError) && (
                 <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: '16px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <AlertCircle size={16} style={{ color: '#d97706', flexShrink: 0 }} />
-                  <span>Anda sudah memiliki hunian aktif. Kelola sewa Anda di Dashboard Tenant.</span>
+                  <span>{activeRentalError || "Anda sudah memiliki hunian aktif. Kelola sewa Anda di Dashboard Tenant."}</span>
                 </div>
               )}
 
@@ -341,10 +371,10 @@ export default function BookingModal({
                   <button
                     className="btn btn-primary"
                     style={{ flex: 2 }}
-                    disabled={isFull || hasActiveRental}
+                    disabled={isFull || hasActiveRental || Boolean(activeRentalError)}
                     onClick={() => setShowContract(true)}
                   >
-                    {hasActiveRental ? 'Hunian Aktif Ditemukan' : isFull ? 'Kamar Tidak Tersedia' : 'Sewa Sekarang (All-Inclusive)'}
+                    {(hasActiveRental || activeRentalError) ? 'Hunian Aktif Ditemukan' : isFull ? 'Kamar Tidak Tersedia' : 'Sewa Sekarang (All-Inclusive)'}
                     <ArrowRight size={16} />
                   </button>
                 ) : (

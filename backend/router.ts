@@ -1515,7 +1515,7 @@ interface RentalRow extends RowDataPacket {
   propertyName?: string;
   price?: number;
   startDate?: string;
-  status: 'active' | 'terminated';
+  status: 'active' | 'terminated' | 'pending' | 'cancelled';
 }
 
 router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: Request, res: Response) => {
@@ -1621,6 +1621,7 @@ router.get('/rentals', authenticateToken, async (req: Request, res: Response) =>
 });
 
 interface CreateRentalBody {
+  rentalId?: string;
   tenantId?: string;
   propertyId?: string;
   propertyName?: string;
@@ -1665,7 +1666,9 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
       });
     }
 
-    const rentalId = generateId("rent");
+    const rentalId = (req.body.rentalId && typeof req.body.rentalId === 'string' && req.body.rentalId.trim() !== '')
+      ? req.body.rentalId
+      : generateId("rent");
     const startDate = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
     const rentalPrice = price || property.price;
     const rentalName = propertyName || property.name;
@@ -1689,11 +1692,25 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
       console.warn("PDF contract generation warning:", contractErr);
     }
 
-    await connection.query(
-      `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document) 
-       VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
-      [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath]
+    const [existingRentals] = await connection.query<RentalRow[]>(
+      'SELECT id, status FROM rentals WHERE id = ?',
+      [rentalId]
     );
+
+    if (existingRentals.length > 0 && existingRentals[0].status === 'pending') {
+      await connection.query(
+        `UPDATE rentals 
+         SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ? 
+         WHERE id = ?`,
+        [documentPath, rentalName, rentalPrice, startDate, rentalId]
+      );
+    } else {
+      await connection.query(
+        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document) 
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
+        [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath]
+      );
+    }
 
     await connection.query(
       'UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?',

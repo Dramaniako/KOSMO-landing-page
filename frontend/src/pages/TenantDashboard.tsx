@@ -136,11 +136,24 @@ export default function TenantDashboard() {
     e.preventDefault();
     if (!currentUser) return;
     try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      if (!token) {
+        navigate('/login');
+        return;
+      }
       const res = await fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(profileForm)
       });
+      if (res.status === 401) {
+        alert("Sesi Anda telah berakhir. Silakan masuk kembali.");
+        handleLogout();
+        return;
+      }
       const data = (await res.json()) as { message: string; user: User };
       if (!res.ok) throw new Error(data.message);
 
@@ -192,11 +205,24 @@ export default function TenantDashboard() {
     const method = editingReview ? 'PUT' : 'POST';
 
     try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      if (!token) {
+        navigate('/login');
+        return;
+      }
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(payload)
       });
+      if (res.status === 401) {
+        alert("Sesi Anda telah berakhir. Silakan masuk kembali.");
+        handleLogout();
+        return;
+      }
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
@@ -228,7 +254,22 @@ export default function TenantDashboard() {
     if (!window.confirm("Apakah Anda yakin ingin menghapus review ini?")) return;
 
     try {
-      const res = await fetch(`${API_BASE}/reviews/${id}`, { method: 'DELETE' });
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      if (!token) {
+        navigate('/login');
+        return;
+      }
+      const res = await fetch(`${API_BASE}/reviews/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.status === 401) {
+        alert("Sesi Anda telah berakhir. Silakan masuk kembali.");
+        handleLogout();
+        return;
+      }
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
@@ -754,11 +795,25 @@ export default function TenantDashboard() {
                 e.preventDefault();
                 setTerminateProcessing(true);
                 try {
+                  const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+                  if (!token) {
+                    alert("Sesi Anda telah berakhir. Silakan masuk kembali.");
+                    handleLogout();
+                    return;
+                  }
                   const res = await fetch(`${API_BASE}/rentals/${terminateRental.id}/terminate`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${token}`
+                    },
                     body: JSON.stringify({ password: terminatePassword })
                   });
+                  if (res.status === 401) {
+                    alert("Sesi Anda telah berakhir. Silakan masuk kembali.");
+                    handleLogout();
+                    return;
+                  }
                   const data = (await res.json()) as { message: string };
                   if (!res.ok) throw new Error(data.message);
 

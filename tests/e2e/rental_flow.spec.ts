@@ -151,4 +151,65 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     await expect(disabledButton).toBeVisible();
     await expect(disabledButton).toBeDisabled();
   });
+
+  test('allows tenant to terminate active rental with password confirmation and Authorization header', async ({ page, request }) => {
+    // 1. Register a tenant user
+    const uniqueId = Date.now();
+    const password = 'Password123!';
+    const tenantUser = {
+      name: `Terminate Tenant ${uniqueId}`,
+      email: `terminate_${uniqueId}@kosmo-e2e.test`,
+      password,
+      phone: '081299881122',
+      role: 'tenant'
+    };
+
+    const regRes = await request.post('/api/auth/register', { data: tenantUser });
+    expect(regRes.ok()).toBeTruthy();
+    const regData = (await regRes.json()) as { token: string; user: { id: string; name: string; email: string; role: string } };
+
+    // 2. Create active rental via API
+    const rentRes = await request.post('/api/rentals', {
+      headers: { Authorization: `Bearer ${regData.token}` },
+      data: {
+        tenantId: regData.user.id,
+        propertyId: 'prop-03',
+        propertyName: 'KOSMO Canggu Nomad Sanctuary',
+        price: 6500000
+      }
+    });
+    expect(rentRes.status()).toBe(201);
+
+    // 3. Set auth state in browser and visit tenant dashboard
+    await page.addInitScript(({ token, user }) => {
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+    }, { token: regData.token, user: regData.user });
+
+    await page.goto('/tenant');
+    await expect(page.locator('body')).toContainText('Halo,');
+    await expect(page.locator('body')).toContainText(regData.user.name);
+
+    // 4. Switch to 'Kos Saya (Sewa)' tab
+    const rentalsTab = page.locator('button:has-text("Kos Saya (Sewa)")');
+    await rentalsTab.click();
+    await expect(page.locator('body')).toContainText('KOSMO Canggu Nomad Sanctuary');
+
+    // 5. Click 'Berhenti Menyewa' to open password confirmation modal
+    const terminateBtn = page.locator('button:has-text("Berhenti Menyewa")').first();
+    await expect(terminateBtn).toBeVisible();
+    await terminateBtn.click();
+
+    // 6. Fill password and confirm termination
+    const modalContainer = page.locator('.modal-container');
+    await expect(modalContainer).toContainText('Konfirmasi Penghentian Sewa');
+    const pwdInput = modalContainer.locator('input[type="password"]');
+    await pwdInput.fill(password);
+
+    const confirmBtn = modalContainer.locator('button:has-text("Konfirmasi Berhenti")');
+    await confirmBtn.click();
+
+    // 7. Verify modal closes and status updates / terminates cleanly
+    await expect(modalContainer).not.toBeVisible({ timeout: 10000 });
+  });
 });
