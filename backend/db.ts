@@ -95,19 +95,21 @@ export async function initDb(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      // Auto-create database if possible (graceful fallback)
-      try {
-        const baseConnection = await mysql.createConnection({
-          host: dbConfig.host,
-          port: dbConfig.port,
-          user: dbConfig.user,
-          password: dbConfig.password,
-          ...(sslOption ? { ssl: sslOption } : {})
-        });
-        await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database || 'kosmo_db'}\`;`);
-        await baseConnection.end();
-      } catch {
-        // Safe fallback for cloud MySQL where CREATE DATABASE is not permitted
+      // Auto-create database if possible (in local development only)
+      if (!process.env.VERCEL && process.env.NODE_ENV !== 'production') {
+        try {
+          const baseConnection = await mysql.createConnection({
+            host: dbConfig.host,
+            port: dbConfig.port,
+            user: dbConfig.user,
+            password: dbConfig.password,
+            ...(sslOption ? { ssl: sslOption } : {})
+          });
+          await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database || 'kosmo_db'}\`;`);
+          await baseConnection.end();
+        } catch {
+          // Safe fallback for cloud MySQL where CREATE DATABASE is not permitted
+        }
       }
 
       // Optimasi serverless: Cek apakah semua tabel wajib sudah ada
@@ -127,9 +129,8 @@ export async function initDb(): Promise<void> {
       const missingTables = requiredTables.filter(t => !existingTables.includes(t));
       
       if (missingTables.length === 0) {
-        await ensureIndexes();
         isInitialized = true;
-        console.log("MySQL Database Kosmo tables and indexes already initialized.");
+        console.log("MySQL Database Kosmo tables already initialized.");
         return;
       }
       

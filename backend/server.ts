@@ -76,14 +76,9 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ message: errorMsg, error: errorMsg });
 });
 
-const isDirectRun = process.argv[1] && (
-  process.argv[1].endsWith('server.ts') || 
-  process.argv[1].endsWith('server.js')
-);
-
-if (isDirectRun && process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL && process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
