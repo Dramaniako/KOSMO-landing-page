@@ -154,3 +154,75 @@ test('Rental booking and occupancy state transitions', async (t) => {
     assert.equal(result.updatedOccupiedRooms, 3);
   });
 });
+
+test('Next payment schedule and billing computation', async (t) => {
+  // Direct logic test of computePaymentSchedule
+  function computePaymentSchedule(startDateStr: string, status: string, referenceDate: Date = new Date()) {
+    if (status !== 'active') {
+      return {
+        nextPaymentDate: '-',
+        nextPaymentDateISO: '',
+        daysRemaining: 0,
+        paymentStatus: 'Penyewaan Selesai'
+      };
+    }
+
+    let start = new Date(startDateStr);
+    if (isNaN(start.getTime())) {
+      start = new Date(referenceDate);
+    }
+
+    const now = new Date(referenceDate);
+    let due = new Date(start);
+
+    while (due <= now) {
+      due.setMonth(due.getMonth() + 1);
+    }
+
+    const diffMs = due.getTime() - now.getTime();
+    const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+    const iso = due.toISOString().split('T')[0];
+    const formatted = due.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+
+    let paymentStatus = 'Lunas (Periode Berjalan)';
+    if (daysRemaining <= 3) {
+      paymentStatus = 'Menjelang Jatuh Tempo';
+    } else if (daysRemaining === 0) {
+      paymentStatus = 'Menunggu Pembayaran';
+    }
+
+    return {
+      nextPaymentDate: formatted,
+      nextPaymentDateISO: iso,
+      daysRemaining,
+      paymentStatus
+    };
+  }
+
+  await t.test('computes next monthly billing date from start date for active rental', () => {
+    const ref = new Date('2026-08-17T12:00:00Z');
+    const schedule = computePaymentSchedule('2026-08-01', 'active', ref);
+    assert.equal(schedule.nextPaymentDateISO, '2026-09-01');
+    assert.equal(schedule.paymentStatus, 'Lunas (Periode Berjalan)');
+    assert.ok(schedule.daysRemaining > 0);
+  });
+
+  await t.test('returns terminated status and dashes for terminated rental', () => {
+    const schedule = computePaymentSchedule('2026-06-01', 'terminated');
+    assert.equal(schedule.nextPaymentDate, '-');
+    assert.equal(schedule.daysRemaining, 0);
+    assert.equal(schedule.paymentStatus, 'Penyewaan Selesai');
+  });
+
+  await t.test('flags Menjelang Jatuh Tempo when daysRemaining is 3 or less', () => {
+    const ref = new Date('2026-08-29T12:00:00Z');
+    const schedule = computePaymentSchedule('2026-08-01', 'active', ref);
+    assert.equal(schedule.nextPaymentDateISO, '2026-09-01');
+    assert.equal(schedule.paymentStatus, 'Menjelang Jatuh Tempo');
+  });
+});

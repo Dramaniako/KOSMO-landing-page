@@ -2,6 +2,7 @@ process.env.NO_LISTEN = 'true';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import app from '../backend/server.ts';
+import { pool } from '../backend/db.ts';
 import { generateJwtToken } from '../backend/middleware/auth.ts';
 
 test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
@@ -81,4 +82,5 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
   });
 
   server.close();
+  await pool.end();
 });

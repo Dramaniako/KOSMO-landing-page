@@ -6,6 +6,8 @@ import {
   Download, Users, X
 } from 'lucide-react';
 import { User, Property, Review, Rental, LandlordStats, FacilityFilterState } from '../types/index.ts';
+import ThemeLanguageToggle from '../components/ThemeLanguageToggle.tsx';
+import { useTranslation } from '../context/LanguageContext.tsx';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -37,6 +39,7 @@ const shimmerStyle: React.CSSProperties = {
 
 export default function LandlordDashboard() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'reviews' | 'tenants'>('overview');
   
   const [landlordUser, setLandlordUser] = useState<User | null>(() => {
@@ -487,14 +490,15 @@ export default function LandlordDashboard() {
           }
         `}</style>
 
-        <header style={{ marginBottom: '32px' }} className="flex-between">
+        <header style={{ marginBottom: '32px' }} className="flex-between flex-wrap gap-4">
           <div>
-            <h1 style={{ fontSize: '28px' }}>Selamat Datang, {landlordUser?.name || 'Landlord'}</h1>
+            <h1 style={{ fontSize: '28px' }}>{t('landlord.title')} &bull; {landlordUser?.name || 'Landlord'}</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '2px' }}>
               Pantau laporan transaksi dan properti aktif Anda di sini.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <ThemeLanguageToggle />
             <a 
               href={`${API_BASE}/reports/landlord/excel?landlordId=${landlordUser?.id || ''}`}
               className="btn btn-primary"

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Mail, Lock, User as UserIcon, Phone, ArrowLeft } from 'lucide-react';
 import { User, UserRole } from '../types/index.ts';
+import ThemeLanguageToggle from '../components/ThemeLanguageToggle.tsx';
+import { useTranslation } from '../context/LanguageContext.tsx';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -13,6 +15,7 @@ interface AuthResponse {
 
 export default function Login() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [isLogin, setIsLogin] = useState<boolean>(true);
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -65,18 +68,21 @@ export default function Login() {
 
   return (
     <div className="flex-center" style={{ minHeight: '100vh', padding: '24px', background: 'radial-gradient(circle at bottom left, rgba(37, 99, 235, 0.05), transparent 70%)' }}>
-      <div className="card glass-panel" style={{ maxWidth: '440px', width: '100%', padding: '40px' }}>
+      <div className="card glass-panel dark:bg-slate-900 dark:border-slate-800" style={{ maxWidth: '440px', width: '100%', padding: '40px' }}>
 
-        {/* Back Link */}
-        <button
-          onClick={() => navigate('/')}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: '13px', cursor: 'pointer', marginBottom: '24px', transition: 'var(--transition)' }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--primary)')}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--text-muted)')}
-        >
-          <ArrowLeft size={16} />
-          Kembali ke Beranda
-        </button>
+        {/* Top Controls: Back Link & Theme/Language Toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+          <button
+            onClick={() => navigate('/')}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: '13px', cursor: 'pointer', transition: 'var(--transition)' }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--primary)')}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--text-muted)')}
+          >
+            <ArrowLeft size={16} />
+            {t('nav.home')}
+          </button>
+          <ThemeLanguageToggle />
+        </div>
 
         {/* Logo */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '32px' }}>
@@ -85,7 +91,7 @@ export default function Login() {
           </div>
           <h2 style={{ fontSize: '24px', fontWeight: 800 }}>KOSMO Portal</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '4px', textAlign: 'center' }}>
-            {isLogin ? 'Masuk ke akun Anda' : 'Buat akun tenant baru Anda'}
+            {isLogin ? t('auth.loginTitle') : t('auth.registerTitle')}
           </p>
         </div>
 
@@ -99,7 +105,7 @@ export default function Login() {
           {!isLogin && (
             <>
               <div className="form-group">
-                <label className="form-label">Nama Lengkap</label>
+                <label className="form-label">{t('auth.name')}</label>
                 <div style={{ position: 'relative' }}>
                   <UserIcon size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
                   <input
@@ -115,7 +121,7 @@ export default function Login() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Nomor Telepon</label>
+                <label className="form-label">{t('auth.phone')}</label>
                 <div style={{ position: 'relative' }}>
                   <Phone size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
                   <input
@@ -132,7 +138,7 @@ export default function Login() {
           )}
 
           <div className="form-group">
-            <label className="form-label">Alamat Email</label>
+            <label className="form-label">{t('auth.email')}</label>
             <div style={{ position: 'relative' }}>
               <Mail size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
               <input
@@ -148,7 +154,7 @@ export default function Login() {
           </div>
 
           <div className="form-group" style={{ marginBottom: '24px' }}>
-            <label className="form-label">Password</label>
+            <label className="form-label">{t('auth.password')}</label>
             <div style={{ position: 'relative' }}>
               <Lock size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
               <input
@@ -165,23 +171,23 @@ export default function Login() {
 
           <button
             type="submit"
-            className="btn btn-primary"
+            className="btn btn-primary min-h-[44px]"
             style={{ width: '100%', padding: '12px', fontSize: '15px' }}
             disabled={loading}
           >
-            {loading ? 'Memproses...' : isLogin ? 'Masuk Sekarang' : 'Daftar Akun'}
+            {loading ? t('modal.processing') : isLogin ? t('auth.loginSubmit') : t('auth.registerSubmit')}
           </button>
         </form>
 
         <div style={{ marginTop: '24px', textAlign: 'center', fontSize: '13px' }}>
           <span style={{ color: 'var(--text-muted)' }}>
-            {isLogin ? 'Belum punya akun?' : 'Sudah punya akun?'}
+            {isLogin ? t('auth.noAccount') : t('auth.hasAccount')}
           </span>{' '}
           <button
             onClick={() => { setIsLogin(!isLogin); setError(''); }}
             style={{ border: 'none', background: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
           >
-            {isLogin ? 'Daftar di sini' : 'Masuk di sini'}
+            {isLogin ? t('auth.registerSubmit') : t('auth.loginSubmit')}
           </button>
         </div>
 

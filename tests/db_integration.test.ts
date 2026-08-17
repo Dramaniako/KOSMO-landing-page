@@ -102,4 +102,6 @@ test('Live MySQL Database Integration & Transaction Safeguards', async (t) => {
     );
     assert.equal(afterRows[0].count, 0, 'Rolled-back record must NOT exist in persistent storage');
   });
+
+  await pool.end();
 });

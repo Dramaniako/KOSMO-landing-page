@@ -93,16 +93,20 @@ KOSMO-landing-page/
 │   │   │   ├── ErrorBoundary.tsx   # React runtime error boundary
 │   │   │   ├── KosCard.tsx         # Property card item with async image decoding
 │   │   │   ├── KosCardSkeleton.tsx # Shimmer pulse loading skeleton
-│   │   │   └── SearchFilterBar.tsx # Dual min/max price filter & district selector
+│   │   │   ├── SearchFilterBar.tsx # Dual min/max price filter & district selector
+│   │   │   └── ThemeLanguageToggle.tsx # Dark mode and ID/EN language toggle
+│   │   ├── context/                # Global React context providers
+│   │   │   ├── LanguageContext.tsx # Bilingual translation engine (ID / EN)
+│   │   │   └── ThemeContext.tsx    # Dark/Light theme manager with system scheme detection
 │   │   ├── pages/                  # Route-level page components
 │   │   │   ├── AdminDashboard.tsx  # Admin moderation, users, and withdrawals
 │   │   │   ├── LandingPage.tsx     # Public catalog, hero search, all-inclusive overview
 │   │   │   ├── LandlordDashboard.tsx# Financial ledger, property CRUD, tenant roster
 │   │   │   ├── Login.tsx           # Authentication page (Login & Registration)
-│   │   │   └── TenantDashboard.tsx # Tenancy contracts, receipts, and user profile
+│   │   │   └── TenantDashboard.tsx # Tenancy contracts, next payment due dates, and profile
 │   │   ├── types/                  # Frontend domain models & Leaflet type definitions
-│   │   ├── App.tsx                 # Lazy routes and suspense shimmer boundaries
-│   │   └── index.css               # Design tokens, keyframes, and utilities
+│   │   ├── App.tsx                 # Root router wrapped in ThemeProvider and LanguageProvider
+│   │   └── index.css               # Design tokens, dark mode variables, and utilities
 │   └── vite.config.ts              # Vite bundler configuration & proxies
 ├── scripts/                        # Operational, verification, and audit helper scripts
 │   ├── audit_performance.ts        # Automated endpoint latency & payload audit
@@ -118,8 +122,8 @@ KOSMO-landing-page/
 │   │   └── search_and_book.spec.ts # Catalog search, price filter, modal tests
 │   ├── perf_api.test.ts            # Response time SLAs & payload size benchmarks
 │   ├── perf_db.test.ts             # Raw SQL JOIN & pool query benchmarks
-│   ├── rental.test.ts              # Rental transaction & room count boundary tests
-│   └── router.test.ts              # Comprehensive REST API integration test suite
+│   ├── rentals.test.ts             # Rental transactions, single tenancy, & payment schedule tests
+│   └── router.test.js              # Comprehensive REST API integration test suite
 ├── package.json                    # Workspace root scripts & dependencies
 ├── playwright.config.ts            # Playwright browser test runner configuration
 └── PROJECT_HANDOFF.md              # Authoritative technical handoff guide (this file)

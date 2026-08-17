@@ -10,6 +10,8 @@ import {
   User, Property, Review, AdminStats, TrackingHistory, 
   TrackingHistoryItem, FacilityFilterState, Withdrawal 
 } from '../types/index.ts';
+import ThemeLanguageToggle from '../components/ThemeLanguageToggle.tsx';
+import { useTranslation } from '../context/LanguageContext.tsx';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -218,6 +220,7 @@ function VisitorChart({ data, timeRange }: VisitorChartProps) {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -751,16 +754,19 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <main className="dashboard-content">
-        <header style={{ marginBottom: '32px' }} className="flex-between">
+        <header style={{ marginBottom: '32px' }} className="flex-between flex-wrap gap-4">
           <div>
-            <h1 style={{ fontSize: '28px' }}>Super Administrator</h1>
+            <h1 style={{ fontSize: '28px' }}>{t('admin.title')}</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '2px' }}>
               Manajemen user, pengaturan role, moderasi properti, dan review secara global.
             </p>
           </div>
-          <button className="btn btn-outline" onClick={() => navigate('/')}>
-            Kembali ke Web
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <ThemeLanguageToggle />
+            <button className="btn btn-outline" onClick={() => navigate('/')}>
+              Kembali ke Web
+            </button>
+          </div>
         </header>
 
         {/* USERS MANAGEMENT TAB */}

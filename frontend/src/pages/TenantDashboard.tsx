@@ -2,9 +2,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   User as UserIcon, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
-  Plus, LogOut, Globe, MessageSquare, Building, X, Download, Home, Compass, History
+  Plus, LogOut, Globe, MessageSquare, Building, X, Download, Home, Compass, History, Calendar
 } from 'lucide-react';
 import { User, Property, Review, Rental } from '../types/index.ts';
+import ThemeLanguageToggle from '../components/ThemeLanguageToggle.tsx';
+import { useTranslation } from '../context/LanguageContext.tsx';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -24,6 +26,7 @@ interface ProfileFormState {
 
 export default function TenantDashboard() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'profile' | 'rentals' | 'bills' | 'reviews'>('profile');
   
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -309,7 +312,7 @@ export default function TenantDashboard() {
                 onClick={() => setActiveTab('profile')}
               >
                 <UserIcon size={18} />
-                Profil Saya
+                {t('tenant.tab.profile')}
               </button>
             </li>
             <li>
@@ -318,7 +321,7 @@ export default function TenantDashboard() {
                 onClick={() => setActiveTab('rentals')}
               >
                 <Building size={18} />
-                Kos Saya (Sewa)
+                {t('tenant.tab.rentals')}
               </button>
             </li>
             <li>
@@ -327,7 +330,7 @@ export default function TenantDashboard() {
                 onClick={() => setActiveTab('bills')}
               >
                 <FileText size={18} />
-                Riwayat Tagihan
+                {t('tenant.tab.bills')}
               </button>
             </li>
             <li>
@@ -336,7 +339,7 @@ export default function TenantDashboard() {
                 onClick={() => setActiveTab('reviews')}
               >
                 <MessageSquare size={18} />
-                Ulasan Saya
+                {t('tenant.tab.reviews')}
               </button>
             </li>
             {currentUser.role === 'landlord' && (
@@ -357,23 +360,26 @@ export default function TenantDashboard() {
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
           <button className="sidebar-link" style={{ width: '100%', border: 'none', background: 'none', color: 'var(--danger)' }} onClick={handleLogout}>
             <LogOut size={18} />
-            Keluar Akun
+            {t('nav.logout')}
           </button>
         </div>
       </aside>
 
       {/* Main Content */}
       <main className="dashboard-content">
-        <header style={{ marginBottom: '32px' }} className="flex-between">
+        <header style={{ marginBottom: '32px' }} className="flex-between flex-wrap gap-4">
           <div>
-            <h1 style={{ fontSize: '28px' }}>Halo, {currentUser.name}</h1>
+            <h1 style={{ fontSize: '28px' }}>{t('tenant.welcome', { name: currentUser.name })}</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '2px' }}>
-              Kendalikan detail akun dan pantau tagihan hunian KOSMO Anda.
+              {t('tenant.title')} &bull; KOSMO Bali Co-Living
             </p>
           </div>
-          <button className="btn btn-outline" onClick={() => navigate('/')}>
-            Jelajahi Kos Baru
-          </button>
+          <div className="flex items-center gap-3">
+            <ThemeLanguageToggle />
+            <button className="btn btn-outline" onClick={() => navigate('/')}>
+              {t('tenant.exploreKos')}
+            </button>
+          </div>
         </header>
 
         {/* PROFILE TAB */}
@@ -381,10 +387,10 @@ export default function TenantDashboard() {
           <div className="grid-2">
             <div className="card" style={{ padding: '32px', backgroundColor: 'white' }}>
               <div className="flex-between" style={{ marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                <h3 style={{ fontSize: '20px' }}>Informasi Akun</h3>
+                <h3 style={{ fontSize: '20px' }}>{t('tenant.accountInfo')}</h3>
                 {!isEditingProfile && (
                   <button className="btn btn-secondary" style={{ padding: '6px 16px' }} onClick={() => setIsEditingProfile(true)}>
-                    Edit Profil
+                    {t('tenant.editProfile')}
                   </button>
                 )}
               </div>
@@ -392,7 +398,7 @@ export default function TenantDashboard() {
               {isEditingProfile ? (
                 <form onSubmit={handleProfileSubmit}>
                   <div className="form-group">
-                    <label className="form-label">Nama Lengkap</label>
+                    <label className="form-label">{t('auth.name')}</label>
                     <input 
                       type="text" 
                       className="form-input"
@@ -403,7 +409,7 @@ export default function TenantDashboard() {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Nomor Telepon</label>
+                    <label className="form-label">{t('auth.phone')}</label>
                     <input 
                       type="text" 
                       className="form-input"
@@ -413,42 +419,48 @@ export default function TenantDashboard() {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Metode Pembayaran Pilihan</label>
-                    <input 
-                      type="text" 
-                      className="form-input"
-                      placeholder="Contoh: Kartu Kredit, GoPay, Mandiri VA"
+                    <label className="form-label">{t('modal.choosePayment')}</label>
+                    <select 
+                      className="form-select"
                       value={profileForm.paymentMethod}
                       onChange={(e) => setProfileForm({ ...profileForm, paymentMethod: e.target.value })}
-                    />
+                    >
+                      <option value="Virtual Account">Virtual Account (BCA/Mandiri)</option>
+                      <option value="Kartu Kredit">Credit Card / Debit Online</option>
+                      <option value="E-Wallet">GoPay / OVO / ShopeePay</option>
+                    </select>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
-                    <button type="button" className="btn btn-outline" onClick={() => setIsEditingProfile(false)}>
-                      Batal
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+                    <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                      {t('tenant.saveProfile')}
                     </button>
-                    <button type="submit" className="btn btn-primary">
-                      Simpan Profil
+                    <button type="button" className="btn btn-secondary" onClick={() => setIsEditingProfile(false)}>
+                      {t('tenant.cancel')}
                     </button>
                   </div>
                 </form>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  <div>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Nama Lengkap</span>
-                    <p style={{ fontWeight: 600, fontSize: '15px' }}>{currentUser.name}</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{t('auth.name')}</span>
+                    <strong>{currentUser.name}</strong>
                   </div>
-                  <div>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Alamat Email</span>
-                    <p style={{ fontWeight: 600, fontSize: '15px' }}>{currentUser.email}</p>
+                  <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{t('auth.email')}</span>
+                    <strong>{currentUser.email}</strong>
                   </div>
-                  <div>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Nomor Telepon</span>
-                    <p style={{ fontWeight: 600, fontSize: '15px' }}>{currentUser.phone || 'Belum diatur'}</p>
+                  <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{t('auth.phone')}</span>
+                    <strong>{currentUser.phone || '-'}</strong>
                   </div>
-                  <div>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Metode Pembayaran</span>
-                    <p style={{ fontWeight: 600, fontSize: '15px' }}>{currentUser.paymentMethod || 'Belum diatur'}</p>
+                  <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{t('auth.role')}</span>
+                    <span className="badge badge-primary">{currentUser.role.toUpperCase()}</span>
+                  </div>
+                  <div className="flex-between">
+                    <span style={{ color: 'var(--text-muted)' }}>Metode Pembayaran Utama</span>
+                    <strong>{currentUser.paymentMethod || 'Virtual Account'}</strong>
                   </div>
                 </div>
               )}
@@ -457,66 +469,46 @@ export default function TenantDashboard() {
             {/* Profile Settings (Notifications / Language) */}
             <div className="card" style={{ padding: '32px', backgroundColor: 'white' }}>
               <h3 style={{ fontSize: '20px', marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                Pengaturan Akun
+                {t('tenant.accountSettings')}
               </h3>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <div className="flex-between">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <Bell size={20} style={{ color: 'var(--primary)' }} />
-                    <div>
-                      <p style={{ fontWeight: 600, fontSize: '14px' }}>Notifikasi Tagihan</p>
-                      <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Kirim pengingat sewa ke WA/Email</p>
-                    </div>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '14px' }}>Notifikasi Email & WhatsApp</strong>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Kirimkan pengingat jatuh tempo sewa kos otomatis.</span>
                   </div>
                   <input 
                     type="checkbox" 
-                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                     checked={profileForm.notifications}
                     onChange={(e) => {
-                      const updated = e.target.checked;
-                      setProfileForm((prev) => {
-                        const next = { ...prev, notifications: updated };
-                        // Persist immediately on change
-                        fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(next)
-                        }).then((res) => res.json()).then((data: { user: User }) => {
-                          setCurrentUser(data.user);
-                          localStorage.setItem('user', JSON.stringify(data.user));
-                        }).catch(console.error);
-                        return next;
+                      const newNotif = e.target.checked;
+                      setProfileForm({ ...profileForm, notifications: newNotif });
+                      fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ notifications: newNotif })
                       });
                     }}
                   />
                 </div>
 
                 <div className="flex-between">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <Globe size={20} style={{ color: 'var(--primary)' }} />
-                    <div>
-                      <p style={{ fontWeight: 600, fontSize: '14px' }}>Bahasa Aplikasi</p>
-                      <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Pilih bahasa antarmuka</p>
-                    </div>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '14px' }}>Bahasa Aplikasi (Language)</strong>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pilih bahasa antarmuka aplikasi KOSMO.</span>
                   </div>
                   <select 
                     className="form-select" 
-                    style={{ width: '130px', padding: '6px 12px' }}
+                    style={{ width: '130px' }}
                     value={profileForm.language}
                     onChange={(e) => {
-                      const updated = e.target.value;
-                      setProfileForm((prev) => {
-                        const next = { ...prev, language: updated };
-                        fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(next)
-                        }).then((res) => res.json()).then((data: { user: User }) => {
-                          setCurrentUser(data.user);
-                          localStorage.setItem('user', JSON.stringify(data.user));
-                        }).catch(console.error);
-                        return next;
+                      const newLang = e.target.value;
+                      setProfileForm({ ...profileForm, language: newLang });
+                      fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ language: newLang })
                       });
                     }}
                   >
@@ -552,8 +544,8 @@ export default function TenantDashboard() {
                       <Home size={20} style={{ color: 'var(--primary)' }} />
                     </div>
                     <div>
-                      <h3 style={{ fontSize: '18px', fontWeight: 700 }}>Hunian Aktif Saya</h3>
-                      <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status hunian sewa all-inclusive yang sedang berjalan</p>
+                      <h3 style={{ fontSize: '18px', fontWeight: 700 }}>{t('tenant.activeSection')}</h3>
+                      <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tenant.activeDesc')}</p>
                     </div>
                   </div>
                 </div>
@@ -564,21 +556,52 @@ export default function TenantDashboard() {
                     <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data sewa kos...</p>
                   </div>
                 ) : activeRental ? (
-                  <div className="flex-between" style={{ padding: '20px', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md)', background: '#f0fdf4' }}>
-                    <div>
-                      <span className="badge badge-success" style={{ marginBottom: '8px', fontSize: '11px', display: 'inline-block' }}>
-                        Sewa Aktif
-                      </span>
+                  <div className="flex-between flex-wrap gap-4" style={{ padding: '20px', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md)', background: '#f0fdf4' }}>
+                    <div style={{ flex: 1, minWidth: '280px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                        <span className="badge badge-success" style={{ fontSize: '11px', display: 'inline-block' }}>
+                          {t('tenant.active')}
+                        </span>
+                        {activeRental.paymentStatus && (
+                          <span
+                            className="badge"
+                            style={{
+                              fontSize: '11px',
+                              backgroundColor: activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '#fef3c7' : '#dcfce7',
+                              color: activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '#92400e' : '#166534',
+                              border: activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '1px solid #fde68a' : '1px solid #bbf7d0'
+                            }}
+                          >
+                            {activeRental.paymentStatus}
+                          </span>
+                        )}
+                      </div>
                       <h4 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--dark)' }}>{activeRental.propertyName}</h4>
                       <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        Mulai Sewa: <strong>{activeRental.startDate}</strong> &bull; All-Inclusive
+                        {t('tenant.startDate')}: <strong>{activeRental.startDate}</strong> &bull; All-Inclusive
                       </p>
+
+                      {/* Next Payment Due Date & Countdown */}
+                      {activeRental.nextPaymentDate && (
+                        <div style={{ marginTop: '12px', padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.85)', border: '1px solid #86efac', borderRadius: 'var(--radius-sm)', display: 'inline-flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: '12px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Calendar size={14} className="text-blue-600" />
+                            <span style={{ color: '#64748b', fontWeight: 500 }}>{t('tenant.nextDue')}:</span>{' '}
+                            <strong style={{ color: '#0f172a' }}>{activeRental.nextPaymentDate}</strong>
+                          </div>
+                          {activeRental.daysRemaining !== undefined && (
+                            <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '12px', backgroundColor: activeRental.daysRemaining <= 3 ? '#fee2e2' : '#dbeafe', color: activeRental.daysRemaining <= 3 ? '#b91c1c' : '#1d4ed8' }}>
+                              {t('tenant.daysLeft', { days: activeRental.daysRemaining })}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <strong style={{ fontSize: '20px', color: 'var(--primary)', display: 'block' }}>
                         Rp {activeRental.price ? activeRental.price.toLocaleString('id-ID') : '0'}/bln
                       </strong>
-                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' }}>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px', flexWrap: 'wrap' }}>
                         <a
                           href={`${API_BASE}/rentals/${activeRental.id}/contract`}
                           target="_blank"
@@ -587,7 +610,7 @@ export default function TenantDashboard() {
                           style={{ padding: '6px 14px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                         >
                           <Download size={14} />
-                          Unduh Kontrak Sewa (PDF)
+                          {t('tenant.downloadPdf')}
                         </a>
                         <button 
                           className="btn btn-outline btn-danger" 
@@ -597,7 +620,7 @@ export default function TenantDashboard() {
                             setShowTerminateModal(true);
                           }}
                         >
-                          Berhenti Menyewa
+                          {t('tenant.terminateBtn')}
                         </button>
                       </div>
                     </div>
@@ -607,13 +630,13 @@ export default function TenantDashboard() {
                     <div style={{ width: '48px', height: '48px', margin: '0 auto 12px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Home size={24} style={{ color: '#94a3b8' }} />
                     </div>
-                    <p style={{ fontWeight: 600, fontSize: '15px', color: 'var(--dark)' }}>Anda belum memiliki sewa kos aktif saat ini.</p>
+                    <p style={{ fontWeight: 600, fontSize: '15px', color: 'var(--dark)' }}>{t('tenant.noActive')}</p>
                     <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: '18px' }}>
-                      Temukan kamar kos impian Anda di Bali dengan fasilitas lengkap all-inclusive.
+                      {t('tenant.noActiveDesc')}
                     </p>
                     <button className="btn btn-primary" onClick={() => navigate('/')} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                       <Compass size={16} />
-                      Jelajahi Kos
+                      {t('tenant.exploreKos')}
                     </button>
                   </div>
                 )}
@@ -628,8 +651,8 @@ export default function TenantDashboard() {
                         <History size={20} style={{ color: 'var(--text-muted)' }} />
                       </div>
                       <div>
-                        <h3 style={{ fontSize: '18px', fontWeight: 700 }}>Riwayat Sewa Masa Lalu</h3>
-                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Daftar sewa kos yang telah selesai atau diberhentikan ({pastRentals.length})</p>
+                        <h3 style={{ fontSize: '18px', fontWeight: 700 }}>{t('tenant.pastSection')}</h3>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tenant.pastDesc', { count: pastRentals.length })}</p>
                       </div>
                     </div>
                   </div>
@@ -639,10 +662,10 @@ export default function TenantDashboard() {
                       <div key={rent.id} className="flex-between" style={{ padding: '16px 20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#f8fafc' }}>
                         <div>
                           <span className="badge badge-secondary" style={{ marginBottom: '6px', fontSize: '10px', display: 'inline-block', backgroundColor: '#e2e8f0', color: '#475569' }}>
-                            Penyewaan Selesai
+                            {t('tenant.completed')}
                           </span>
                           <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#334155' }}>{rent.propertyName}</h4>
-                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Mulai Sewa: {rent.startDate}</p>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>{t('tenant.startDate')}: {rent.startDate}</p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           <strong style={{ fontSize: '16px', color: '#64748b', display: 'block' }}>

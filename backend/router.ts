@@ -293,6 +293,37 @@ router.put('/users/profile/:id', authenticateToken, async (req: Request<{ id: st
   }
 });
 
+// User Profile Update (Authenticated User alias)
+router.put('/auth/profile', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ message: "Otentikasi diperlukan." });
+  const { name, phone, paymentMethod, notifications, language } = req.body as UserProfileBody;
+
+  try {
+    const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : 1;
+
+    await pool.query(
+      `UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), 
+       paymentMethod = COALESCE(?, paymentMethod), notifications = ?, language = COALESCE(?, language) 
+       WHERE id = ?`,
+      [name, phone, paymentMethod, notifVal, language, userId]
+    );
+
+    const [updatedUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [userId]);
+    const updatedUser = updatedUsers[0];
+    if (!updatedUser) return res.status(404).json({ message: "User tidak ditemukan." });
+    const safeUser: Partial<UserRow> = { ...updatedUser };
+    delete safeUser.password;
+    res.json({
+      message: "Profil berhasil diperbarui!",
+      user: safeUser
+    });
+  } catch (err) {
+    console.error("Auth profile update error:", err);
+    res.status(500).json({ message: "Gagal memperbarui profil." });
+  }
+});
+
 // Admin Route: Get all users
 router.get('/users', async (_req: Request, res: Response) => {
   try {
@@ -1590,8 +1621,62 @@ router.post('/auth/verify-password', async (req: Request<Record<string, never>, 
 });
 
 // ==========================================
-// Rentals / Booking Endpoints
+// Rentals / Booking Endpoints & Payment Schedule
 // ==========================================
+export interface PaymentSchedule {
+  nextPaymentDate: string;
+  nextPaymentDateISO: string;
+  daysRemaining: number;
+  paymentStatus: 'Lunas (Periode Berjalan)' | 'Menjelang Jatuh Tempo' | 'Menunggu Pembayaran' | 'Penyewaan Selesai';
+}
+
+export function computePaymentSchedule(startDateStr: string, status: string, referenceDate: Date = new Date()): PaymentSchedule {
+  if (status !== 'active') {
+    return {
+      nextPaymentDate: '-',
+      nextPaymentDateISO: '',
+      daysRemaining: 0,
+      paymentStatus: 'Penyewaan Selesai'
+    };
+  }
+
+  let start = new Date(startDateStr);
+  if (isNaN(start.getTime())) {
+    start = new Date(referenceDate);
+  }
+
+  const now = new Date(referenceDate);
+  let due = new Date(start);
+
+  while (due <= now) {
+    due.setMonth(due.getMonth() + 1);
+  }
+
+  const diffMs = due.getTime() - now.getTime();
+  const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+  const iso = due.toISOString().split('T')[0];
+  const formatted = due.toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+
+  let paymentStatus: PaymentSchedule['paymentStatus'] = 'Lunas (Periode Berjalan)';
+  if (daysRemaining <= 3) {
+    paymentStatus = 'Menjelang Jatuh Tempo';
+  } else if (daysRemaining === 0) {
+    paymentStatus = 'Menunggu Pembayaran';
+  }
+
+  return {
+    nextPaymentDate: formatted,
+    nextPaymentDateISO: iso,
+    daysRemaining,
+    paymentStatus
+  };
+}
+
 router.get('/rentals', authenticateToken, async (req: Request, res: Response) => {
   const { tenantId } = req.query;
   const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
@@ -1613,10 +1698,48 @@ router.get('/rentals', authenticateToken, async (req: Request, res: Response) =>
     }
 
     const [rows] = await pool.query<RentalRow[]>(sql, params);
-    res.json(rows);
+    const enrichedRows = rows.map((r) => {
+      const schedule = computePaymentSchedule(r.startDate || new Date().toISOString(), r.status);
+      return {
+        ...r,
+        nextPaymentDate: schedule.nextPaymentDate,
+        nextPaymentDateISO: schedule.nextPaymentDateISO,
+        daysRemaining: schedule.daysRemaining,
+        paymentStatus: schedule.paymentStatus
+      };
+    });
+    res.json(enrichedRows);
   } catch (err) {
     console.error("Get rentals error:", err);
     res.status(500).json({ message: "Gagal mengambil data sewa." });
+  }
+});
+
+router.get('/tenant/rentals', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = (req.query.tenantId as string) || req.user?.id;
+  if (!tenantId) {
+    return res.status(400).json({ message: "tenantId diperlukan." });
+  }
+
+  try {
+    const [rows] = await pool.query<RentalRow[]>(
+      'SELECT * FROM rentals WHERE tenantId = ? ORDER BY id DESC',
+      [tenantId]
+    );
+    const enrichedRows = rows.map((r) => {
+      const schedule = computePaymentSchedule(r.startDate || new Date().toISOString(), r.status);
+      return {
+        ...r,
+        nextPaymentDate: schedule.nextPaymentDate,
+        nextPaymentDateISO: schedule.nextPaymentDateISO,
+        daysRemaining: schedule.daysRemaining,
+        paymentStatus: schedule.paymentStatus
+      };
+    });
+    res.json(enrichedRows);
+  } catch (err) {
+    console.error("Get tenant rentals error:", err);
+    res.status(500).json({ message: "Gagal mengambil data sewa tenant." });
   }
 });
 

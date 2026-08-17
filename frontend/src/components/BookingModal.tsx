@@ -3,6 +3,7 @@ import {
   MapPin, Star, X, ArrowRight, ShieldCheck, Download, CreditCard, Sparkles, Check, AlertCircle
 } from 'lucide-react';
 import { Property, User } from '../types/index.ts';
+import { useTranslation } from '../context/LanguageContext.tsx';
 
 declare global {
   interface Window {
@@ -86,6 +87,8 @@ export default function BookingModal({
   hasActiveRental = false,
   activeRentalError = null
 }: Props) {
+  const { t } = useTranslation();
+
   useEffect(() => {
     const clientKey = (import.meta.env.VITE_MIDTRANS_CLIENT_KEY as string) || 'Mid-client-79XoSgAAmI4wnKaG';
     loadSnapScript(clientKey);
@@ -114,10 +117,11 @@ export default function BookingModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content glass-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content glass-panel dark:bg-slate-900 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
         <button
           onClick={onClose}
-          style={{ position: 'absolute', top: '16px', right: '16px', border: 'none', background: 'white', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', zIndex: 10 }}
+          className="min-w-[44px] min-h-[44px] absolute top-4 right-4 border-none bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-full cursor-pointer flex items-center justify-center shadow-md z-10 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+          aria-label={t('modal.close')}
         >
           <X size={18} />
         </button>
@@ -129,17 +133,17 @@ export default function BookingModal({
               <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', margin: '0 auto 12px auto' }}>
                 <ShieldCheck size={24} />
               </div>
-              <h3 style={{ fontSize: '20px', fontWeight: 800 }}>Tanda Tangan Kontrak Digital</h3>
+              <h3 style={{ fontSize: '20px', fontWeight: 800 }}>{t('modal.contractTitle')}</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '4px' }}>
-                Perjanjian Sewa Menyewa Kamar Kosmo Bali
+                {t('modal.contractDesc')}
               </p>
             </div>
 
             <div style={{ backgroundColor: 'var(--bg-main)', padding: '20px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', maxHeight: '250px', overflowY: 'auto', fontSize: '13px', lineHeight: 1.6, color: 'var(--text-main)', marginBottom: '24px' }}>
-              <p><strong>PIHAK PERTAMA:</strong> Pengelola KOSMO Hub Bali</p>
-              <p><strong>PIHAK KEDUA:</strong> {currentUser ? currentUser.name : 'Calon Penghuni'}</p>
+              <p><strong>PIHAK PERTAMA / FIRST PARTY:</strong> Pengelola KOSMO Hub Bali</p>
+              <p><strong>PIHAK KEDUA / SECOND PARTY:</strong> {currentUser ? currentUser.name : 'Calon Penghuni'}</p>
               <br />
-              <p><strong>Ketentuan Sewa:</strong></p>
+              <p><strong>Ketentuan Sewa / Lease Terms:</strong></p>
               <ol style={{ paddingLeft: '20px' }}>
                 <li>Penyewa setuju menyewa 1 unit kamar di {property.name} ({property.address}).</li>
                 <li>Biaya sewa sebesar {formatRupiah(property.price)}/bulan all-inclusive (Listrik, Air, Wifi, Kebersihan, Keamanan, Parkir).</li>
@@ -168,7 +172,7 @@ export default function BookingModal({
                 style={{ flex: 1 }}
                 onClick={() => setShowContract(false)}
               >
-                Batal
+                {t('tenant.cancel')}
               </button>
               <button
                 className="btn btn-primary"
@@ -184,7 +188,7 @@ export default function BookingModal({
                 ) : (
                   <>
                     <ShieldCheck size={16} />
-                    Setujui & Tanda Tangan
+                    {t('modal.signAndContinue')}
                   </>
                 )}
               </button>
@@ -197,7 +201,7 @@ export default function BookingModal({
               <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#10b981', margin: '0 auto 12px auto' }}>
                 <CreditCard size={24} />
               </div>
-              <h3 style={{ fontSize: '20px', fontWeight: 800 }}>Konfirmasi Pembayaran Sewa</h3>
+              <h3 style={{ fontSize: '20px', fontWeight: 800 }}>{t('modal.paymentTitle')}</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '4px' }}>
                 All-Inclusive Rental Payment
               </p>
@@ -214,16 +218,16 @@ export default function BookingModal({
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '13px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Paket</span>
-                <span style={{ fontWeight: 600, color: 'var(--primary)' }}>1 Bulan (All-Inclusive)</span>
+                <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{t('modal.paymentPackage')}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid var(--border-color)', fontSize: '16px', fontWeight: 800 }}>
-                <span>Total Bayar</span>
+                <span>{t('modal.totalPay')}</span>
                 <span style={{ color: 'var(--primary)' }}>{formatRupiah(property.price)}</span>
               </div>
             </div>
 
             <div style={{ marginBottom: '24px' }}>
-              <label className="form-label">Pilih Metode Pembayaran</label>
+              <label className="form-label">{t('modal.choosePayment')}</label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div style={{ border: '2px solid var(--primary)', borderRadius: 'var(--radius-sm)', padding: '12px', textAlign: 'center', backgroundColor: 'var(--primary-light)', cursor: 'pointer' }}>
                   <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--primary)' }}>Virtual Account</div>
@@ -240,7 +244,7 @@ export default function BookingModal({
             {(activeRentalError || hasActiveRental) && (
               <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: '16px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <AlertCircle size={16} style={{ color: '#d97706', flexShrink: 0 }} />
-                <span>{activeRentalError || "Anda sudah memiliki hunian aktif. Kelola sewa Anda di Dashboard Tenant."}</span>
+                <span>{activeRentalError || t('modal.activeRentalAlert')}</span>
               </div>
             )}
 
@@ -250,7 +254,7 @@ export default function BookingModal({
                 style={{ flex: 1 }}
                 onClick={() => setShowPayment(false)}
               >
-                Kembali
+                {t('tenant.cancel')}
               </button>
               <button
                 className="btn btn-primary"
@@ -258,7 +262,7 @@ export default function BookingModal({
                 onClick={handleProcessPayment}
                 disabled={paymentProcessing || hasActiveRental || Boolean(activeRentalError)}
               >
-                {paymentProcessing ? 'Memproses Transaksi...' : (hasActiveRental || activeRentalError) ? 'Hunian Aktif Ditemukan' : `Bayar ${formatRupiah(price)}`}
+                {paymentProcessing ? t('modal.processing') : (hasActiveRental || activeRentalError) ? t('modal.activeRentalFound') : `Bayar ${formatRupiah(price)}`}
               </button>
             </div>
           </div>
@@ -286,18 +290,18 @@ export default function BookingModal({
                   <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--primary)' }}>
                     {formatRupiah(price)}
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>per bulan</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('prop.perMonth')}</div>
                 </div>
               </div>
 
               {/* Status & Document info */}
               <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
                 <span style={{ backgroundColor: isFull ? '#fee2e2' : '#ecfdf5', color: isFull ? '#dc2626' : '#059669', padding: '4px 10px', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 700 }}>
-                  {isFull ? 'Kamar Penuh' : `Tersedia: ${availableRooms} dari ${totalRooms} Kamar`}
+                  {isFull ? t('prop.full') : `Tersedia: ${availableRooms} dari ${totalRooms} Kamar`}
                 </span>
                 <span style={{ backgroundColor: 'var(--primary-light)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <ShieldCheck size={14} />
-                  Sertifikat Terverifikasi
+                  {t('prop.verified')}
                 </span>
                 {property.document && (
                   <span style={{ backgroundColor: '#f1f5f9', color: '#475569', padding: '4px 10px', borderRadius: 'var(--radius-sm)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -309,7 +313,7 @@ export default function BookingModal({
 
               {/* Description */}
               <div style={{ marginBottom: '24px' }}>
-                <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '6px' }}>Deskripsi Co-Living</h4>
+                <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '6px' }}>{t('modal.description')}</h4>
                 <p style={{ color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1.6 }}>
                   {property.description || 'Hunian nyaman dengan fasilitas lengkap di Bali.'}
                 </p>
@@ -318,7 +322,7 @@ export default function BookingModal({
               {/* Facilities Included */}
               <div style={{ marginBottom: '24px' }}>
                 <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '10px' }}>
-                  Fasilitas All-Inclusive Termasuk:
+                  {t('modal.includedFacilities')}
                 </h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                   {facilities.map((fac, idx) => (
@@ -333,7 +337,7 @@ export default function BookingModal({
               {/* Interactive Location Map */}
               <div style={{ marginBottom: '28px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <h4 style={{ fontSize: '14px', fontWeight: 700 }}>Lokasi Interaktif (Leaflet OSM)</h4>
+                  <h4 style={{ fontSize: '14px', fontWeight: 700 }}>{t('modal.interactiveMap')}</h4>
                   <button
                     className="btn btn-secondary"
                     style={{ padding: '4px 10px', fontSize: '12px' }}
@@ -354,7 +358,7 @@ export default function BookingModal({
               {(hasActiveRental || activeRentalError) && (
                 <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: '16px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <AlertCircle size={16} style={{ color: '#d97706', flexShrink: 0 }} />
-                  <span>{activeRentalError || "Anda sudah memiliki hunian aktif. Kelola sewa Anda di Dashboard Tenant."}</span>
+                  <span>{activeRentalError || t('modal.activeRentalAlert')}</span>
                 </div>
               )}
 
@@ -365,7 +369,7 @@ export default function BookingModal({
                   style={{ flex: 1 }}
                   onClick={onClose}
                 >
-                  Tutup
+                  {t('modal.close')}
                 </button>
                 {currentUser ? (
                   <button
@@ -374,7 +378,7 @@ export default function BookingModal({
                     disabled={isFull || hasActiveRental || Boolean(activeRentalError)}
                     onClick={() => setShowContract(true)}
                   >
-                    {(hasActiveRental || activeRentalError) ? 'Hunian Aktif Ditemukan' : isFull ? 'Kamar Tidak Tersedia' : 'Sewa Sekarang (All-Inclusive)'}
+                    {(hasActiveRental || activeRentalError) ? t('modal.activeRentalFound') : isFull ? t('modal.roomFull') : t('modal.bookNow')}
                     <ArrowRight size={16} />
                   </button>
                 ) : (
@@ -383,7 +387,7 @@ export default function BookingModal({
                     style={{ flex: 2 }}
                     onClick={onNavigateToLogin}
                   >
-                    Masuk untuk Menyewa
+                    {t('modal.loginToBook')}
                     <ArrowRight size={16} />
                   </button>
                 )}

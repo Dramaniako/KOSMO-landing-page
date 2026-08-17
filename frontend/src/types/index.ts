@@ -54,7 +54,11 @@ export interface Rental {
   propertyName: string;
   price: number;
   startDate: string;
-  status: 'active' | 'terminated';
+  status: 'active' | 'terminated' | 'pending' | 'cancelled';
+  nextPaymentDate?: string;
+  nextPaymentDateISO?: string;
+  daysRemaining?: number;
+  paymentStatus?: string;
 }
 
 export interface Withdrawal {

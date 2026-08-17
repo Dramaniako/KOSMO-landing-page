@@ -9,11 +9,14 @@ import KosCard from '../components/KosCard.tsx';
 import KosCardSkeleton from '../components/KosCardSkeleton.tsx';
 import SearchFilterBar from '../components/SearchFilterBar.tsx';
 import BookingModal, { loadSnapScript } from '../components/BookingModal.tsx';
+import ThemeLanguageToggle from '../components/ThemeLanguageToggle.tsx';
+import { useTranslation } from '../context/LanguageContext.tsx';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -90,31 +93,6 @@ export default function LandingPage() {
   }, []);
 
   useEffect(() => {
-    if (!currentUser?.id) {
-      setHasActiveRental(false);
-      return;
-    }
-    const checkActiveRental = async (): Promise<void> => {
-      try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(currentUser.id)}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        });
-        if (res.ok) {
-          const rentals = (await res.json()) as Array<{ status: string }>;
-          if (Array.isArray(rentals)) {
-            const active = rentals.some(r => r.status === 'active');
-            setHasActiveRental(active);
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to check active rentals:", err);
-      }
-    };
-    checkActiveRental();
-  }, [currentUser?.id]);
-
-  useEffect(() => {
     if (!showMap || !selectedProperty) return;
 
     const timer = setTimeout(() => {
@@ -142,28 +120,35 @@ export default function LandingPage() {
     return () => clearTimeout(timer);
   }, [showMap, selectedProperty]);
 
-  const handleSearch = (e: React.FormEvent): void => {
-    e.preventDefault();
-    let query = `?priceMin=${priceMin}&priceMax=${priceMax}`;
-    if (district !== 'Semua') {
-      query += `&district=${encodeURIComponent(district)}`;
-    }
-
-    // Add selected facilities
-    Object.keys(facilities).forEach((fac) => {
-      if (facilities[fac]) {
-        query += `&facility=${encodeURIComponent(fac)}`;
-      }
-    });
-
-    fetchProperties(query);
-  };
-
-  const toggleFacility = (fac: string): void => {
+  const toggleFacility = (facilityName: string): void => {
     setFacilities((prev) => ({
       ...prev,
-      [fac]: !prev[fac]
+      [facilityName as keyof FacilityFilterState]: !prev[facilityName as keyof FacilityFilterState]
     }));
+  };
+
+  const handleSearch = (e: React.FormEvent): void => {
+    e.preventDefault();
+    const params = new URLSearchParams();
+    if (district && district !== 'Semua') {
+      params.append('district', district);
+    }
+    if (priceMin > 0) {
+      params.append('minPrice', priceMin.toString());
+    }
+    if (priceMax < 10000000) {
+      params.append('maxPrice', priceMax.toString());
+    }
+
+    const selectedFacilities = Object.keys(facilities).filter(
+      (fac) => facilities[fac as keyof FacilityFilterState]
+    );
+    if (selectedFacilities.length > 0) {
+      params.append('facilities', selectedFacilities.join(','));
+    }
+
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    fetchProperties(queryString);
   };
 
   const resetFilters = (): void => {
@@ -178,76 +163,103 @@ export default function LandingPage() {
       Keamanan: false,
       Parkir: false
     });
-    fetchProperties();
+    fetchProperties('');
   };
 
-  const handleOpenDetail = (prop: Property): void => {
-    setSelectedProperty(prop);
-    setActiveRentalError(null);
-    setContractSigned(false);
+  const handleOpenDetail = (property: Property): void => {
+    setSelectedProperty(property);
     setShowContract(false);
+    setContractSigned(false);
     setShowPayment(false);
     setShowMap(false);
+    setActiveRentalError(null);
+
+    // If tenant is logged in, check if they already have an active tenancy
+    if (currentUser) {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(currentUser.id)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
+        .then((res) => res.json())
+        .then((data: unknown) => {
+          if (Array.isArray(data)) {
+            const hasActive = data.some((r: { status?: string }) => r.status === 'active');
+            setHasActiveRental(hasActive);
+            if (hasActive) {
+              setActiveRentalError(t('modal.activeRentalAlert'));
+            }
+          }
+        })
+        .catch((err) => console.error("Error checking tenant active rentals:", err));
+    } else {
+      setHasActiveRental(false);
+    }
   };
 
   const handleSignContract = (): void => {
     setContractSigned(true);
-    setShowContract(false);
-    setShowPayment(true);
-    setContractSigned(false);
+    setTimeout(() => {
+      setShowContract(false);
+      setShowPayment(true);
+    }, 600);
   };
 
   const handleProcessPayment = async (): Promise<void> => {
-    if (!currentUser || !selectedProperty) return;
+    if (!selectedProperty || !currentUser) return;
     setPaymentProcessing(true);
     setActiveRentalError(null);
+
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
-      if (!token) {
-        navigate('/login');
-        return;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      };
 
-      // 1. Generate payment token via POST /api/payment/token
-      const res = await fetch(`${API_BASE}/payment/token`, {
+      // Step 1: Request Midtrans Snap Transaction Token
+      const tokenRes = await fetch(`${API_BASE}/payment/token`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          tenantId: currentUser.id,
           propertyId: selectedProperty.id,
+          propertyName: selectedProperty.name,
+          price: selectedProperty.price,
+          tenantId: currentUser.id,
+          tenantName: currentUser.name,
+          tenantEmail: currentUser.email,
           durationMonths: 1
         })
       });
 
-      if (res.status === 409) {
-        const conflictData = (await res.json()) as { message?: string };
+      if (tokenRes.status === 409) {
+        const conflictData = (await tokenRes.json()) as { message?: string };
         const msg = conflictData.message || "Anda memiliki sewa aktif. Harap selesaikan sewa berjalan sebelum memesan unit baru.";
         setActiveRentalError(msg);
         setHasActiveRental(true);
         return;
       }
 
-      if (!res.ok) {
-        const errorData = (await res.json()) as { message?: string };
-        throw new Error(errorData.message || "Gagal membuat token pembayaran Midtrans.");
+      if (!tokenRes.ok) {
+        const errorData = (await tokenRes.json()) as { message?: string };
+        throw new Error(errorData.message || "Gagal membuat transaksi pembayaran.");
       }
 
-      const data = (await res.json()) as { token: string; redirect_url?: string; rentalId: string };
-      const clientKey = (import.meta.env.VITE_MIDTRANS_CLIENT_KEY as string) || 'Mid-client-79XoSgAAmI4wnKaG';
-      await loadSnapScript(clientKey);
+      const data = (await tokenRes.json()) as { snapToken?: string; rentalId: string };
 
-      // Launch Snap popup if in interactive browser mode (not automated headless runner)
-      const isAutomatedRunner = typeof navigator !== 'undefined' && Boolean(navigator.webdriver);
-      if (!isAutomatedRunner && typeof window !== 'undefined' && window.snap && !data.token.startsWith('snap-token-') && !data.token.startsWith('snap-sim-')) {
-        window.snap.pay(data.token, {
-          onSuccess: async () => {
+      // Launch Midtrans Snap Popup if available
+      if (data.snapToken && typeof window !== 'undefined' && window.snap) {
+        window.snap.pay(data.snapToken, {
+          onSuccess: async (result: unknown) => {
+            console.log("Midtrans payment success:", result);
+            const verifyToken = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+            const verifyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (verifyToken) {
+              verifyHeaders['Authorization'] = `Bearer ${verifyToken}`;
+            }
+
             await fetch(`${API_BASE}/rentals`, {
               method: 'POST',
-              headers,
+              headers: verifyHeaders,
               body: JSON.stringify({
                 rentalId: data.rentalId,
                 tenantId: currentUser.id,
@@ -257,16 +269,18 @@ export default function LandingPage() {
                 durationMonths: 1
               })
             });
+
             setShowPayment(false);
             setSelectedProperty(null);
             navigate('/tenant');
           },
-          onPending: () => {
+          onPending: (result: unknown) => {
+            console.log("Midtrans payment pending:", result);
             setShowPayment(false);
             setSelectedProperty(null);
             navigate('/tenant');
           },
-          onError: (err) => {
+          onError: (err: unknown) => {
             console.error("Midtrans Snap payment error:", err);
             alert("Pembayaran belum berhasil diselesaikan. Silakan coba lagi.");
           },
@@ -277,7 +291,7 @@ export default function LandingPage() {
         return;
       }
 
-      // Automated testing / simulation / direct completion
+      // Automated/Fallback logic
       const rentRes = await fetch(`${API_BASE}/rentals`, {
         method: 'POST',
         headers,
@@ -291,21 +305,10 @@ export default function LandingPage() {
         })
       });
 
-      if (rentRes.status === 409) {
-        const conflictData = (await rentRes.json()) as { message?: string };
-        const msg = conflictData.message || "Anda memiliki sewa aktif. Harap selesaikan sewa berjalan sebelum memesan unit baru.";
-        setActiveRentalError(msg);
-        setHasActiveRental(true);
-        return;
-      }
-
       if (rentRes.ok) {
         setShowPayment(false);
         setSelectedProperty(null);
         navigate('/tenant');
-      } else {
-        const rentData = (await rentRes.json()) as { message?: string };
-        console.error("Rental booking failed:", rentData.message);
       }
     } catch (err: unknown) {
       console.error("Payment processing exception:", err);
@@ -345,40 +348,42 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 landing-page">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 landing-page transition-colors duration-200">
       {/* Header Navigation */}
-      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-100 site-header">
+      <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 site-header transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate('/')}>
             <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
               <ShieldCheck size={20} />
             </div>
             <div className="flex items-baseline gap-1.5">
-              <span className="text-xl font-bold text-blue-600 tracking-tight">KOSMO</span>
-              <span className="text-[10px] font-bold text-slate-400 tracking-wider hidden sm:inline">BALI CO-LIVING</span>
+              <span className="text-xl font-bold text-blue-600 dark:text-blue-400 tracking-tight">KOSMO</span>
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-wider hidden sm:inline">BALI CO-LIVING</span>
             </div>
           </div>
 
-          <nav className="flex items-center gap-6">
-            <div className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
-              <a href="#properties" className="hover:text-blue-600 transition-colors">Properti</a>
-              <a href="#all-inclusive" className="hover:text-blue-600 transition-colors">All-Inclusive</a>
-              <a href="#reviews" className="hover:text-blue-600 transition-colors">Ulasan</a>
+          <nav className="flex items-center gap-3 sm:gap-6">
+            <div className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
+              <a href="#properties" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.explore')}</a>
+              <a href="#all-inclusive" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.whyUs')}</a>
+              <a href="#reviews" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.testimonials')}</a>
             </div>
+
+            <ThemeLanguageToggle />
 
             {currentUser ? (
               <button
-                className="px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition btn btn-primary"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition btn btn-primary shadow-sm min-h-[44px]"
                 onClick={handleUserDashboardRedirect}
               >
-                Dasbor ({currentUser.name})
+                {t('nav.dashboard')} ({currentUser.name})
               </button>
             ) : (
               <button
-                className="px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition btn btn-primary"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition btn btn-primary shadow-sm min-h-[44px]"
                 onClick={() => navigate('/login')}
               >
-                Masuk / Daftar
+                {t('nav.login')}
               </button>
             )}
           </nav>
@@ -386,17 +391,17 @@ export default function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-blue-50/50 via-slate-50 to-slate-50 pt-16 pb-20 hero-section">
+      <section className="relative overflow-hidden bg-gradient-to-b from-blue-50/50 via-slate-50 to-slate-50 dark:from-slate-900/40 dark:via-slate-950 dark:to-slate-950 pt-16 pb-20 hero-section transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-100/80 text-blue-700 text-xs font-bold mb-6 border border-blue-200/60 shadow-sm">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-100/80 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold mb-6 border border-blue-200/60 dark:border-blue-800 shadow-sm">
             <Sparkles size={14} />
-            <span>Smart Co-Living Experience in Bali</span>
+            <span>{t('hero.badge')}</span>
           </div>
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 tracking-tight max-w-4xl mx-auto leading-tight mb-6">
-            Tinggal Nyaman, Bebas Ribet dengan <span className="text-blue-600">All-Inclusive</span> Rent
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 dark:text-slate-50 tracking-tight max-w-4xl mx-auto leading-tight mb-6">
+            {t('hero.title')} <span className="text-blue-600 dark:text-blue-400">All-Inclusive</span>
           </h1>
-          <p className="text-base sm:text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed mb-8">
-            Satu harga bulanan sudah termasuk Listrik, Air, Wifi High-Speed, Kebersihan, Keamanan & Parkir. Tanpa tagihan tak terduga.
+          <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto leading-relaxed mb-8">
+            {t('hero.subtitle')}
           </p>
         </div>
       </section>
@@ -423,13 +428,13 @@ export default function LandingPage() {
       <section id="properties" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-8">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-2">
           <div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Pilihan Kos & Co-Living</h2>
-            <p className="text-sm text-slate-500 mt-1">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">Pilihan Kos & Co-Living</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               Daftar hunian eksklusif dengan sistem smart lock dan fasilitas lengkap di Bali
             </p>
           </div>
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Menampilkan {loading ? '...' : properties.length} properti
+          <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+            {t('filter.results', { count: loading ? '...' : properties.length })}
           </span>
         </div>
 
@@ -440,13 +445,13 @@ export default function LandingPage() {
             ))}
           </div>
         ) : properties.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-sm">
-            <h3 className="text-lg font-bold text-slate-800 mb-2">Tidak Ada Properti Ditemukan</h3>
-            <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-12 text-center shadow-sm">
+            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-2">Tidak Ada Properti Ditemukan</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6">
               Coba sesuaikan filter wilayah atau turunkan fasilitas pencarian Anda.
             </p>
-            <button className="btn btn-primary bg-blue-600 text-white text-xs font-semibold px-5 py-2.5 rounded-xl" onClick={resetFilters}>
-              Reset Semua Filter
+            <button className="btn btn-primary bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl min-h-[44px]" onClick={resetFilters}>
+              {t('filter.resetBtn')}
             </button>
           </div>
         ) : (
@@ -464,46 +469,46 @@ export default function LandingPage() {
       </section>
 
       {/* All-Inclusive Feature Highlight Section */}
-      <section id="all-inclusive" className="bg-white border-y border-slate-200/80 py-16">
+      <section id="all-inclusive" className="bg-white dark:bg-slate-900 border-y border-slate-200/80 dark:border-slate-800 py-16 transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold mb-4 border border-blue-100">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold mb-4 border border-blue-100 dark:border-blue-800">
             <Zap size={14} />
             <span>KOSMO Transparency Guarantee</span>
           </div>
-          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight mb-4">
+          <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-4">
             Kenapa Memilih KOSMO All-Inclusive?
           </h2>
-          <p className="text-slate-600 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed mb-12">
+          <p className="text-slate-600 dark:text-slate-300 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed mb-12">
             Tidak ada lagi kejutan tagihan listrik jebol atau internet lemot di akhir bulan. Semua kebutuhan utama Anda sudah tercover.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
-            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200/80">
-              <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4">
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
+              <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4">
                 <Zap size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">Listrik & Air Tanpa Batas</h3>
-              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Listrik & Air Tanpa Batas</h3>
+              <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
                 Gunakan AC dan peralatan elektronik Anda dengan tenang tanpa pusing memikirkan token listrik habis tengah malam.
               </p>
             </div>
 
-            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200/80">
-              <div className="w-12 h-12 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center mb-4">
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
+              <div className="w-12 h-12 rounded-xl bg-pink-100 dark:bg-pink-900/50 text-pink-600 dark:text-pink-400 flex items-center justify-center mb-4">
                 <Wifi size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">Dedicated High-Speed WiFi</h3>
-              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Dedicated High-Speed WiFi</h3>
+              <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
                 Dirancang khusus untuk remote worker dan digital nomad dengan koneksi stabil, backup provider, dan area coworking.
               </p>
             </div>
 
-            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200/80">
-              <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-4">
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
+              <div className="w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-4">
                 <ShieldCheck size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">Smart Lock & Keamanan 24/7</h3>
-              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Smart Lock & Keamanan 24/7</h3>
+              <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
                 Akses pintu kamar menggunakan PIN/Smart Card dan CCTV area umum untuk privasi dan kenyamanan maksimal.
               </p>
             </div>
@@ -514,20 +519,20 @@ export default function LandingPage() {
       {/* Reviews Section */}
       <section id="reviews" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center mb-12">
-          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Apa Kata Penghuni KOSMO?</h2>
-          <p className="text-sm text-slate-500 mt-2">
+          <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">Apa Kata Penghuni KOSMO?</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
             Ulasan asli dan pengalaman langsung dari para digital nomad & tenant kami di Bali
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {reviews.map((rev) => (
-            <div key={rev.id} className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+            <div key={rev.id} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start mb-3">
                   <div>
-                    <h4 className="text-sm font-bold text-slate-900">{rev.userName}</h4>
-                    <span className="text-xs font-semibold text-blue-600">{rev.propertyName}</span>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{rev.userName}</h4>
+                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">{rev.propertyName}</span>
                   </div>
                   <div className="flex text-amber-400">
                     {[...Array(rev.rating)].map((_, i) => (
@@ -535,11 +540,11 @@ export default function LandingPage() {
                     ))}
                   </div>
                 </div>
-                <p className="text-slate-600 text-xs leading-relaxed italic">
+                <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed italic">
                   "{rev.comment}"
                 </p>
               </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400">
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400">
                 {rev.date}
               </div>
             </div>
@@ -548,19 +553,19 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-slate-200/80 py-12 text-center">
+      <footer className="bg-white dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 py-12 text-center transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
               <ShieldCheck size={18} />
             </div>
-            <span className="text-base font-extrabold text-slate-900">KOSMO Bali</span>
+            <span className="text-base font-extrabold text-slate-900 dark:text-slate-100">KOSMO Bali</span>
           </div>
-          <p className="text-xs text-slate-500 max-w-md">
-            Platform persewaan kos & co-living all-inclusive terpercaya untuk kemudahan tinggal jangka panjang di Pulau Dewata.
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md">
+            {t('footer.about')}
           </p>
-          <div className="text-[11px] text-slate-400">
-            &copy; {new Date().getFullYear()} KOSMO Bali. Seluruh hak cipta dilindungi undang-undang.
+          <div className="text-[11px] text-slate-400 dark:text-slate-500">
+            &copy; {new Date().getFullYear()} KOSMO Bali. {t('footer.copyright')}
           </div>
         </div>
       </footer>
