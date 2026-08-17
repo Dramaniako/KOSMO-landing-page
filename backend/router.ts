@@ -1136,20 +1136,25 @@ interface SumRow extends RowDataPacket {
 
 router.get('/admin/stats', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
   try {
-    const [visitorRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking');
-    const totalVisitors = visitorRows[0].count;
+    const [
+      [visitorRows],
+      [userRows],
+      [landlordRows],
+      [propertyRows],
+      [roomsRows]
+    ] = await Promise.all([
+      pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking'),
+      pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users'),
+      pool.query<CountRow[]>("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
+      pool.query<CountRow[]>('SELECT COUNT(*) as count FROM properties'),
+      pool.query<SumRow[]>('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties')
+    ]);
 
-    const [userRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users');
-    const totalUsers = userRows[0].count;
-
-    const [landlordRows] = await pool.query<CountRow[]>("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
-    const totalLandlords = landlordRows[0].count;
-
-    const [propertyRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM properties');
-    const totalProperties = propertyRows[0].count;
-
-    const [roomsRows] = await pool.query<SumRow[]>('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
-    const totalRooms = roomsRows[0].sum || 0;
+    const totalVisitors = visitorRows[0]?.count || 0;
+    const totalUsers = userRows[0]?.count || 0;
+    const totalLandlords = landlordRows[0]?.count || 0;
+    const totalProperties = propertyRows[0]?.count || 0;
+    const totalRooms = roomsRows[0]?.sum || 0;
 
     res.json({
       totalVisitors,

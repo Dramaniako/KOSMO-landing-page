@@ -72,43 +72,14 @@ export interface CustomConnection extends Connection {
   release: () => Promise<void>;
 }
 
-export const pool = {
-  query: async <T extends QueryResult = RowDataPacket[]>(
-    sql: string,
-    values?: unknown[]
-  ): Promise<[T, FieldPacket[]]> => {
-    const conn = await mysql.createConnection(dbConfig);
-    try {
-      const [rows, fields] = values !== undefined
-        ? await conn.query<T>(sql, values as (string | number | boolean | null)[])
-        : await conn.query<T>(sql);
-      return [rows, fields];
-    } finally {
-      await conn.end();
-    }
-  },
-  execute: async <T extends QueryResult = RowDataPacket[]>(
-    sql: string,
-    values?: unknown[]
-  ): Promise<[T, FieldPacket[]]> => {
-    const conn = await mysql.createConnection(dbConfig);
-    try {
-      const [rows, fields] = values !== undefined
-        ? await conn.execute<T>(sql, values as (string | number | boolean | null)[])
-        : await conn.execute<T>(sql);
-      return [rows, fields];
-    } finally {
-      await conn.end();
-    }
-  },
-  getConnection: async (): Promise<CustomConnection> => {
-    const conn = (await mysql.createConnection(dbConfig)) as CustomConnection;
-    conn.release = async () => {
-      await conn.end();
-    };
-    return conn;
-  }
-};
+export const pool = mysql.createPool({
+  ...dbConfig,
+  waitForConnections: true,
+  connectionLimit: 10,
+  maxIdle: 10,
+  idleTimeout: 60000,
+  queueLimit: 0
+});
 
 let initPromise: Promise<void> | null = null;
 let isInitialized = false;
@@ -276,6 +247,21 @@ export async function initDb(): Promise<void> {
       } catch (e) {}
       try {
         await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)");
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)");
       } catch (e) {}
 
       // Seed Users if empty
