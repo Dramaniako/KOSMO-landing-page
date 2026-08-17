@@ -1,5 +1,4 @@
-process.env.NO_LISTEN = 'true';
-import app from '../backend/server.ts';
+import app from '../backend/server';
 
 async function main() {
   const PORT = 5055;

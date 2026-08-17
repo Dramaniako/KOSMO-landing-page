@@ -4,13 +4,13 @@ import {
   Wifi, Tv, Wind, Shield, Droplet, Check, ShieldCheck, Heart,
   Zap, Sparkles, Car, Star, MapPin
 } from 'lucide-react';
-import { Property, Review, User, FacilityFilterState } from '../types/index.ts';
-import KosCard from '../components/KosCard.tsx';
-import KosCardSkeleton from '../components/KosCardSkeleton.tsx';
-import SearchFilterBar from '../components/SearchFilterBar.tsx';
-import BookingModal, { loadSnapScript } from '../components/BookingModal.tsx';
-import ThemeLanguageToggle from '../components/ThemeLanguageToggle.tsx';
-import { useTranslation } from '../context/LanguageContext.tsx';
+import { Property, Review, User, FacilityFilterState } from '../types/index';
+import KosCard from '../components/KosCard';
+import KosCardSkeleton from '../components/KosCardSkeleton';
+import SearchFilterBar from '../components/SearchFilterBar';
+import BookingModal, { loadSnapScript } from '../components/BookingModal';
+import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
+import { useTranslation } from '../context/LanguageContext';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 

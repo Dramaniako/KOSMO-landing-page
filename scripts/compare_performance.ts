@@ -1,5 +1,5 @@
-import app from '../backend/server.ts';
-import { generateJwtToken } from '../backend/middleware/auth.ts';
+import app from '../backend/server';
+import { generateJwtToken } from '../backend/middleware/auth';
 
 async function main() {
   const PORT = 5092;

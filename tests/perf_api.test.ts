@@ -1,9 +1,9 @@
 process.env.NO_LISTEN = 'true';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import app from '../backend/server.ts';
-import { pool } from '../backend/db.ts';
-import { generateJwtToken } from '../backend/middleware/auth.ts';
+import app from '../backend/server';
+import { pool } from '../backend/db';
+import { generateJwtToken } from '../backend/middleware/auth';
 
 test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
   const PORT = 5088;

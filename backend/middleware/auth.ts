@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import type { SignOptions } from 'jsonwebtoken';
-import type { UserRole } from '../types/index.ts';
+import type { UserRole } from '../types/index';
 
 export interface JWTPayload {
   id: string;

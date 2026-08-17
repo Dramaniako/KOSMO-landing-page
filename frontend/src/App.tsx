@@ -1,13 +1,13 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider } from './context/ThemeContext.tsx';
-import { LanguageProvider } from './context/LanguageContext.tsx';
+import { ThemeProvider } from './context/ThemeContext';
+import { LanguageProvider } from './context/LanguageContext';
 
-const LandingPage = lazy(() => import('./pages/LandingPage.tsx'));
-const Login = lazy(() => import('./pages/Login.tsx'));
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard.tsx'));
-const LandlordDashboard = lazy(() => import('./pages/LandlordDashboard.tsx'));
-const TenantDashboard = lazy(() => import('./pages/TenantDashboard.tsx'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const Login = lazy(() => import('./pages/Login'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const LandlordDashboard = lazy(() => import('./pages/LandlordDashboard'));
+const TenantDashboard = lazy(() => import('./pages/TenantDashboard'));
 
 function RouteLoadingFallback() {
   return (

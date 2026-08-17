@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { initDb, pool } from '../backend/db.ts';
+import { initDb, pool } from '../backend/db';
 import type { RowDataPacket } from 'mysql2/promise';
 
 const sourceConfig = {

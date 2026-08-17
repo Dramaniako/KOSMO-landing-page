@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateImageMimeType, ALLOWED_IMAGE_MIMETYPES } from '../backend/router.ts';
-import { uploadImageStream } from '../backend/services/cloudinary.ts';
+import { validateImageMimeType, ALLOWED_IMAGE_MIMETYPES } from '../backend/router';
+import { uploadImageStream } from '../backend/services/cloudinary';
 
 test('Cloudinary image upload & MIME validation', async (t) => {
   await t.test('accepts valid image MIME types', () => {

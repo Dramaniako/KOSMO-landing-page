@@ -5,8 +5,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
 import morgan from 'morgan';
-import { initDb, ensureDbReady } from './db.ts';
-import router from './router.ts';
+import { initDb, ensureDbReady } from './db';
+import router from './router';
 
 import path from 'path';
 import fs from 'fs';

@@ -6,7 +6,7 @@ import {
   validateUser,
   validateProperty,
   validateReview
-} from '../backend/types/index.ts';
+} from '../backend/types/index';
 
 test('KosRoom schema validation & boundary conditions', async (t) => {
   await t.test('valid KosRoom passes validation', () => {

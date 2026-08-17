@@ -1,4 +1,4 @@
-import { pool } from '../backend/db.ts';
+import { pool } from '../backend/db';
 
 async function main() {
   console.log('=== Inspecting Connected Database ===');

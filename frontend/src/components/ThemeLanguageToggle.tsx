@@ -1,7 +1,7 @@
 import React from 'react';
 import { Sun, Moon, Globe } from 'lucide-react';
-import { useTheme } from '../context/ThemeContext.tsx';
-import { useTranslation } from '../context/LanguageContext.tsx';
+import { useTheme } from '../context/ThemeContext';
+import { useTranslation } from '../context/LanguageContext';
 
 interface Props {
   className?: string;

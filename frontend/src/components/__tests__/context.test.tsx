@@ -1,8 +1,8 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ThemeProvider, useTheme } from '../../context/ThemeContext.tsx';
-import { LanguageProvider, useTranslation } from '../../context/LanguageContext.tsx';
+import { ThemeProvider, useTheme } from '../../context/ThemeContext';
+import { LanguageProvider, useTranslation } from '../../context/LanguageContext';
 
 function ThemeConsumer() {
   const { theme, toggleTheme } = useTheme();

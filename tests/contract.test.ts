@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
-import { generateRentalContractPdf } from '../backend/services/contract.ts';
-import type { RentalContractData } from '../backend/services/contract.ts';
+import { generateRentalContractPdf } from '../backend/services/contract';
+import type { RentalContractData } from '../backend/services/contract';
 
 test('PDF Rental Contract Generator', async (t) => {
   const testOutputDir = path.join(process.cwd(), 'tests', 'temp_contracts');

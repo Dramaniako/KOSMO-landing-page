@@ -1,7 +1,7 @@
 import React from 'react';
 import { Search, RotateCcw, SlidersHorizontal, MapPin, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
-import { FacilityFilterState } from '../types/index.ts';
-import { useTranslation } from '../context/LanguageContext.tsx';
+import { FacilityFilterState } from '../types/index';
+import { useTranslation } from '../context/LanguageContext';
 
 export interface Props {
   district: string;

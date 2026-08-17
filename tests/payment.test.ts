@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
-import { verifyMidtransSignature } from '../backend/router.ts';
+import { verifyMidtransSignature } from '../backend/router';
 
 test('Midtrans Snap payment & webhook signature verification', async (t) => {
   const orderId = 'rent-abc-123';

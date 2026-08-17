@@ -6,13 +6,13 @@ import {
   verifyJwtToken,
   authenticateToken,
   requireRole
-} from '../backend/middleware/auth.ts';
-import type { JWTPayload, AuthenticatedRequest } from '../backend/middleware/auth.ts';
+} from '../backend/middleware/auth';
+import type { JWTPayload, AuthenticatedRequest } from '../backend/middleware/auth';
 import {
   loginSchema,
   registerSchema,
   propertySchema
-} from '../backend/middleware/validation.ts';
+} from '../backend/middleware/validation';
 import type { Request, Response, NextFunction } from 'express';
 
 test('Authentication logic, password security gates & JWT', async (t) => {

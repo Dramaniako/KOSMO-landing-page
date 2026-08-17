@@ -5,9 +5,9 @@ import {
   ArrowUpRight, Landmark, CreditCard, LayoutDashboard, MessageSquare,
   Download, Users, X
 } from 'lucide-react';
-import { User, Property, Review, Rental, LandlordStats, FacilityFilterState } from '../types/index.ts';
-import ThemeLanguageToggle from '../components/ThemeLanguageToggle.tsx';
-import { useTranslation } from '../context/LanguageContext.tsx';
+import { User, Property, Review, Rental, LandlordStats, FacilityFilterState } from '../types/index';
+import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
+import { useTranslation } from '../context/LanguageContext';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 

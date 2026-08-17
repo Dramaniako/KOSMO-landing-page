@@ -2,8 +2,8 @@ import React, { useEffect } from 'react';
 import {
   MapPin, Star, X, ArrowRight, ShieldCheck, Download, CreditCard, Sparkles, Check, AlertCircle
 } from 'lucide-react';
-import { Property, User } from '../types/index.ts';
-import { useTranslation } from '../context/LanguageContext.tsx';
+import { Property, User } from '../types/index';
+import { useTranslation } from '../context/LanguageContext';
 
 declare global {
   interface Window {

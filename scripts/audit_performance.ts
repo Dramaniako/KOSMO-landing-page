@@ -1,6 +1,5 @@
-process.env.NO_LISTEN = 'true';
-import app from '../backend/server.ts';
-import { generateJwtToken } from '../backend/middleware/auth.ts';
+import app from '../backend/server';
+import { generateJwtToken } from '../backend/middleware/auth';
 
 interface AuditResult {
   endpoint: string;

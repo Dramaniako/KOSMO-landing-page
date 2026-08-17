@@ -1,9 +1,9 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
-import KosCard from '../KosCard.tsx';
-import SearchFilterBar from '../SearchFilterBar.tsx';
-import { Property, FacilityFilterState } from '../../types/index.ts';
+import KosCard from '../KosCard';
+import SearchFilterBar from '../SearchFilterBar';
+import { Property, FacilityFilterState } from '../../types/index';
 
 describe('Frontend Component Render Performance', () => {
   const mockProperty: Property = {

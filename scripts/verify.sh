@@ -4,9 +4,7 @@ set -euo pipefail
 echo "=========================================="
 echo " 1. Checking Backend TypeScript (Strict)  "
 echo "=========================================="
-if [ -f "backend/tsconfig.json" ]; then
-  npx tsc --noEmit --project backend/tsconfig.json
-fi
+npx tsc --noEmit
 
 echo "=========================================="
 echo " 2. Testing Frontend Production Build     "

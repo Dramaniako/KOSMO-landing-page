@@ -1,6 +1,6 @@
 import React from 'react';
 import { MapPin, Star, Sparkles } from 'lucide-react';
-import { Property } from '../types/index.ts';
+import { Property } from '../types/index';
 
 export interface Props {
   property: Property;

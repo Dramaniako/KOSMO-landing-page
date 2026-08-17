@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateJwtToken, verifyJwtToken, authenticateToken } from '../backend/router.ts';
-import type { JWTPayload } from '../backend/router.ts';
+import { generateJwtToken, verifyJwtToken, authenticateToken } from '../backend/router';
+import type { JWTPayload } from '../backend/router';
 import type { Request, Response, NextFunction } from 'express';
 
 test('Signed JWT Authentication & Middleware', async (t) => {

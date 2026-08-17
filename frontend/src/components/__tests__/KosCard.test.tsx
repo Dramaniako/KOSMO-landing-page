@@ -1,8 +1,8 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import KosCard from '../KosCard.tsx';
-import { Property } from '../../types/index.ts';
+import KosCard from '../KosCard';
+import { Property } from '../../types/index';
 
 describe('KosCard Component', () => {
   const mockPropertyAvailable: Property = {

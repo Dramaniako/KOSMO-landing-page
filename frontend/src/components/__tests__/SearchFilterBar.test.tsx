@@ -1,8 +1,8 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import SearchFilterBar from '../SearchFilterBar.tsx';
-import { FacilityFilterState } from '../../types/index.ts';
+import SearchFilterBar from '../SearchFilterBar';
+import { FacilityFilterState } from '../../types/index';
 
 describe('SearchFilterBar Component', () => {
   const initialFacilities: FacilityFilterState = {

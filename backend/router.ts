@@ -1,6 +1,6 @@
 import express from 'express';
 import type { Request, Response, Router, NextFunction } from 'express';
-import { pool } from './db.ts';
+import { pool } from './db';
 import XLSX from 'xlsx';
 import multer from 'multer';
 import path from 'path';
@@ -12,21 +12,21 @@ import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
 import fs from 'fs';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
-import { generateRentalContractPdf } from './services/contract.ts';
-import { apiCache } from './services/cache.ts';
+import { generateRentalContractPdf } from './services/contract';
+import { apiCache } from './services/cache';
 import {
   generateJwtToken,
   verifyJwtToken,
   authenticateToken,
   requireRole
-} from './middleware/auth.ts';
-import type { JWTPayload, AuthenticatedRequest } from './middleware/auth.ts';
+} from './middleware/auth';
+import type { JWTPayload, AuthenticatedRequest } from './middleware/auth';
 import {
   loginSchema,
   registerSchema,
   propertySchema,
   validateBody
-} from './middleware/validation.ts';
+} from './middleware/validation';
 import type {
   KosRoom,
   Booking,
@@ -34,7 +34,7 @@ import type {
   UserRole,
   Amenity,
   BookingStatus
-} from './types/index.ts';
+} from './types/index';
 
 export {
   generateJwtToken,
@@ -55,7 +55,7 @@ export const authLimiter = rateLimit({
 
 const router: Router = express.Router();
 
-import { uploadImageStream } from './services/cloudinary.ts';
+import { uploadImageStream } from './services/cloudinary';
 
 export const ALLOWED_IMAGE_MIMETYPES = [
   'image/jpeg',

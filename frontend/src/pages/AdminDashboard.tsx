@@ -9,9 +9,9 @@ import {
 import { 
   User, Property, Review, AdminStats, TrackingHistory, 
   TrackingHistoryItem, FacilityFilterState, Withdrawal 
-} from '../types/index.ts';
-import ThemeLanguageToggle from '../components/ThemeLanguageToggle.tsx';
-import { useTranslation } from '../context/LanguageContext.tsx';
+} from '../types/index';
+import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
+import { useTranslation } from '../context/LanguageContext';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 

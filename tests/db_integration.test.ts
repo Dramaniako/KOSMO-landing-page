@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pool } from '../backend/db.ts';
+import { pool } from '../backend/db';
 import type { RowDataPacket } from 'mysql2/promise';
 
 interface UserRow extends RowDataPacket {
