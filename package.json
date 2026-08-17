@@ -6,7 +6,8 @@
     "frontend"
   ],
   "scripts": {
-    "build": "npm --prefix frontend run build",
+    "build": "npm --prefix frontend run build && npm run build:backend",
+    "build:backend": "esbuild api/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --packages=external",
     "type-check": "npm --prefix frontend run type-check && npx tsc --noEmit",
     "type-check:frontend": "npm --prefix frontend run type-check",
     "type-check:backend": "npx tsc --noEmit",
@@ -42,6 +43,7 @@
     "@playwright/test": "^1.62.1",
     "@types/express": "^5.0.6",
     "@types/node": "^20.17.19",
+    "esbuild": "^0.25.0",
     "tsx": "^4.23.12",
     "typescript": "^5.3.3"
   }
