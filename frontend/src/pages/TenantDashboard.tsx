@@ -74,12 +74,17 @@ export default function TenantDashboard() {
       const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
+      if (!rentRes.ok) {
+        setMyRentals([]);
+        return;
+      }
       const rentData = (await rentRes.json()) as Rental[];
       setMyRentals(Array.isArray(rentData) ? rentData : []);
       loadedTabs.current.add('rentals');
       loadedTabs.current.add('bills');
     } catch (err) {
       console.error("Error loading rentals:", err);
+      setMyRentals([]);
     } finally {
       setTabLoading(prev => ({ ...prev, rentals: false, bills: false }));
     }
@@ -88,6 +93,10 @@ export default function TenantDashboard() {
   const fetchProperties = useCallback(async (): Promise<void> => {
     try {
       const propRes = await fetch(`${API_BASE}/properties`);
+      if (!propRes.ok) {
+        setProperties([]);
+        return;
+      }
       const propData = (await propRes.json()) as Property[];
       const safeProps = Array.isArray(propData) ? propData : [];
       setProperties(safeProps);
@@ -96,6 +105,7 @@ export default function TenantDashboard() {
       }
     } catch (err) {
       console.error("Error loading properties:", err);
+      setProperties([]);
     }
   }, []);
 
@@ -106,11 +116,16 @@ export default function TenantDashboard() {
         fetch(`${API_BASE}/reviews?userId=${encodeURIComponent(userId)}`),
         fetchProperties()
       ]);
+      if (!revRes.ok) {
+        setMyReviews([]);
+        return;
+      }
       const revData = (await revRes.json()) as Review[];
       setMyReviews(Array.isArray(revData) ? revData : []);
       loadedTabs.current.add('reviews');
     } catch (err) {
       console.error("Error loading reviews:", err);
+      setMyReviews([]);
     } finally {
       setTabLoading(prev => ({ ...prev, reviews: false }));
     }

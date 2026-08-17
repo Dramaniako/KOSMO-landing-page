@@ -10,6 +10,29 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     role: 'tenant'
   };
 
+  test.beforeAll(async ({ request }) => {
+    // Reset occupiedRooms on test properties to ensure rooms are available
+    try {
+      const loginRes = await request.post('/api/auth/login', {
+        data: { email: 'admin@kosmo.com', password: 'admin' }
+      });
+      if (loginRes.ok()) {
+        const loginData = (await loginRes.json()) as { token: string };
+        const token = loginData.token;
+        await request.put('/api/properties/prop-01', {
+          headers: { Authorization: `Bearer ${token}` },
+          data: { occupiedRooms: 0, totalRooms: 50 }
+        });
+        await request.put('/api/properties/prop-02', {
+          headers: { Authorization: `Bearer ${token}` },
+          data: { occupiedRooms: 0, totalRooms: 50 }
+        });
+      }
+    } catch (e) {
+      console.warn('Property occupancy reset fallback:', e);
+    }
+  });
+
   test('registers tenant, searches kos with price filter, completes booking, and confirms tenancy in dashboard', async ({ page, request }) => {
     // Automatically accept all browser dialog alerts and log them
     page.on('dialog', async (dialog) => {

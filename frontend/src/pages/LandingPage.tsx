@@ -66,10 +66,17 @@ export default function LandingPage() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/properties${queryParams}`);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error(`Failed to fetch properties [${res.status}]:`, errText);
+        setProperties([]);
+        return;
+      }
       const data = (await res.json()) as Property[];
       setProperties(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Error fetching properties:", err);
+      console.error("Network or parsing error fetching properties:", err);
+      setProperties([]);
     } finally {
       setLoading(false);
     }
@@ -78,10 +85,17 @@ export default function LandingPage() {
   const fetchReviews = async (): Promise<void> => {
     try {
       const res = await fetch(`${API_BASE}/reviews`);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error(`Failed to fetch reviews [${res.status}]:`, errText);
+        setReviews([]);
+        return;
+      }
       const data = (await res.json()) as Review[];
       setReviews(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Error fetching reviews:", err);
+      console.error("Network or parsing error fetching reviews:", err);
+      setReviews([]);
     }
   };
 
@@ -180,7 +194,10 @@ export default function LandingPage() {
       fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(currentUser.id)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       })
-        .then((res) => res.json())
+        .then(async (res) => {
+          if (!res.ok) return [];
+          return res.json();
+        })
         .then((data: unknown) => {
           if (Array.isArray(data)) {
             const hasActive = data.some((r: { status?: string }) => r.status === 'active');

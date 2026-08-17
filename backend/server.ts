@@ -15,10 +15,14 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure uploads directory exists
+// Ensure uploads directory exists (graceful for serverless read-only environments)
 const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+} catch {
+  // Read-only filesystem in Vercel serverless functions
 }
 
 const app: Application = express();
@@ -28,7 +32,10 @@ const PORT: number = parseInt(process.env.PORT || '5000', 10);
 app.use(compression());
 
 // Security & Parsing Middleware
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false
+}));
 app.use(cors());
 app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ limit: '5mb', extended: true }));
@@ -55,12 +62,19 @@ app.use(async (_req: Request, res: Response, next: NextFunction) => {
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Database initialization failed in middleware:", err);
-    res.status(500).json({ message: "Database initialization failed: " + errorMsg });
+    res.status(500).json({ message: "Database initialization failed: " + errorMsg, error: errorMsg });
   }
 });
 
 // Mount API router
 app.use('/api', router);
+
+// Global Error Handler to guarantee JSON responses and prevent plain text 500 crashes
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("Unhandled API Error:", err);
+  const errorMsg = err instanceof Error ? err.message : "Internal Server Error";
+  res.status(500).json({ message: errorMsg, error: errorMsg });
+});
 
 const isDirectRun = process.argv[1] && (
   process.argv[1].endsWith('server.ts') || 

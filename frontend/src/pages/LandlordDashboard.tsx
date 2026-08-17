@@ -111,6 +111,7 @@ export default function LandlordDashboard() {
     setTabLoading(prev => ({ ...prev, overview: true }));
     try {
       const statsRes = await fetch(`${API_BASE}/stats?landlordId=${encodeURIComponent(landlordId)}`);
+      if (!statsRes.ok) return;
       const statsData = (await statsRes.json()) as LandlordStats;
       setStats(statsData);
       loadedTabs.current.add('overview');
@@ -125,12 +126,17 @@ export default function LandlordDashboard() {
     setTabLoading(prev => ({ ...prev, properties: true }));
     try {
       const propRes = await fetch(`${API_BASE}/properties?ownerId=${encodeURIComponent(landlordId)}`);
+      if (!propRes.ok) {
+        setProperties([]);
+        return;
+      }
       const propData = (await propRes.json()) as Property[];
       const safeProps = Array.isArray(propData) ? propData : [];
       setProperties(safeProps);
       loadedTabs.current.add('properties');
     } catch (err) {
       console.error("Error loading landlord properties:", err);
+      setProperties([]);
     } finally {
       setTabLoading(prev => ({ ...prev, properties: false }));
     }
@@ -143,8 +149,8 @@ export default function LandlordDashboard() {
         fetch(`${API_BASE}/properties?ownerId=${encodeURIComponent(landlordId)}`),
         fetch(`${API_BASE}/reviews`)
       ]);
-      const propData = (await propRes.json()) as Property[];
-      const revData = (await revRes.json()) as Review[];
+      const propData = propRes.ok ? ((await propRes.json()) as Property[]) : [];
+      const revData = revRes.ok ? ((await revRes.json()) as Review[]) : [];
       const safeProps = Array.isArray(propData) ? propData : [];
       const safeReviews = Array.isArray(revData) ? revData : [];
       const propIds = safeProps.map((p) => p.id);
@@ -153,6 +159,7 @@ export default function LandlordDashboard() {
       loadedTabs.current.add('reviews');
     } catch (err) {
       console.error("Error loading landlord reviews:", err);
+      setReviews([]);
     } finally {
       setTabLoading(prev => ({ ...prev, reviews: false }));
     }

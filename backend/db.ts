@@ -29,11 +29,14 @@ try {
 
 const host = process.env.DB_HOST || 'localhost';
 const isTiDB = host.includes('tidbcloud.com');
-const isSSLTrue = process.env.DB_SSL === 'true';
+const isSSLFalse = process.env.DB_SSL === 'false';
 
-const sslOption = (isTiDB || isSSLTrue)
-  ? { minVersion: 'TLSv1.2', rejectUnauthorized: true }
-  : (process.env.DB_SSL === 'false' ? undefined : { rejectUnauthorized: false });
+const sslOption = isSSLFalse
+  ? undefined
+  : {
+      minVersion: 'TLSv1.2',
+      rejectUnauthorized: process.env.DB_REJECT_UNAUTHORIZED === 'true'
+    };
 
 const dbConfig: ConnectionOptions = {
   host,
@@ -45,28 +48,11 @@ const dbConfig: ConnectionOptions = {
   waitForConnections: true,
   connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '5', 10),
   maxIdle: 5,
-  idleTimeout: 10000,
+  idleTimeout: 30000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
   queueLimit: 0
 };
-
-// Attempt database creation if needed
-(async () => {
-  let baseConnection: Connection | null = null;
-  try {
-    baseConnection = await mysql.createConnection({
-      host: dbConfig.host,
-      port: dbConfig.port,
-      user: dbConfig.user,
-      password: dbConfig.password,
-      ...(sslOption ? { ssl: sslOption } : {})
-    });
-    await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database || 'kosmo_db'}\`;`);
-  } catch (err) {
-    // If user lacks global CREATE DATABASE privilege on shared cloud MySQL, proceed to pool connection
-  } finally {
-    if (baseConnection) await baseConnection.end();
-  }
-})();
 
 export interface CustomConnection extends Connection {
   release: () => Promise<void>;
@@ -109,6 +95,21 @@ export async function initDb(): Promise<void> {
 
   initPromise = (async () => {
     try {
+      // Auto-create database if possible (graceful fallback)
+      try {
+        const baseConnection = await mysql.createConnection({
+          host: dbConfig.host,
+          port: dbConfig.port,
+          user: dbConfig.user,
+          password: dbConfig.password,
+          ...(sslOption ? { ssl: sslOption } : {})
+        });
+        await baseConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database || 'kosmo_db'}\`;`);
+        await baseConnection.end();
+      } catch {
+        // Safe fallback for cloud MySQL where CREATE DATABASE is not permitted
+      }
+
       // Optimasi serverless: Cek apakah semua tabel wajib sudah ada
       const [tableRows] = await pool.query<RowDataPacket[]>("SHOW TABLES");
       const existingTables = tableRows.map(row => Object.values(row)[0].toLowerCase());

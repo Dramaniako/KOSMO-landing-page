@@ -456,6 +456,7 @@ interface CreatePropertyBody {
   latitude?: string;
   longitude?: string;
   totalRooms?: number | string;
+  occupiedRooms?: number | string;
   image?: string;
   ownerId?: string;
 }
@@ -630,7 +631,7 @@ router.post('/properties', authenticateToken, requireRole(['admin', 'landlord', 
 
 router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: Request<{ id: string }, unknown, CreatePropertyBody>, res: Response) => {
   const { id } = req.params;
-  const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image } = req.body;
+  const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, occupiedRooms, image } = req.body;
 
   const connection = await pool.getConnection();
   try {
@@ -641,13 +642,25 @@ router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
 
+    const existing = rows[0];
+    const updatedName = name !== undefined ? name : existing.name;
+    const updatedDistrict = district !== undefined ? district : existing.district;
+    const updatedAddress = address !== undefined ? address : existing.address;
+    const updatedPrice = price !== undefined ? parseInt(String(price), 10) : existing.price;
+    const updatedDesc = description !== undefined ? description : existing.description;
+    const updatedLat = latitude !== undefined ? latitude : existing.latitude;
+    const updatedLng = longitude !== undefined ? longitude : existing.longitude;
+    const updatedRooms = totalRooms !== undefined ? parseInt(String(totalRooms), 10) : existing.totalRooms;
+    const updatedOccupied = occupiedRooms !== undefined ? parseInt(String(occupiedRooms), 10) : existing.occupiedRooms;
+    const updatedImage = image !== undefined ? image : existing.image;
+
     await connection.query(
       `UPDATE properties SET name = ?, district = ?, address = ?, price = ?, description = ?, 
-       latitude = ?, longitude = ?, totalRooms = ?, image = ? 
+       latitude = ?, longitude = ?, totalRooms = ?, occupiedRooms = ?, image = ? 
        WHERE id = ?`,
       [
-        name, district, address, parseInt(String(price || 0), 10), description, 
-        latitude, longitude, parseInt(String(totalRooms || 0), 10), image, id
+        updatedName, updatedDistrict, updatedAddress, updatedPrice, updatedDesc, 
+        updatedLat, updatedLng, updatedRooms, updatedOccupied, updatedImage, id
       ]
     );
 

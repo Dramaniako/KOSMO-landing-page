@@ -284,11 +284,16 @@ export default function AdminDashboard() {
     setTabLoading(prev => ({ ...prev, users: true }));
     try {
       const res = await fetch(`${API_BASE}/users`);
+      if (!res.ok) {
+        setUsers([]);
+        return;
+      }
       const data = (await res.json()) as User[];
       setUsers(Array.isArray(data) ? data : []);
       loadedTabs.current.add('users');
     } catch (err) {
       console.error('Error loading users:', err);
+      setUsers([]);
     } finally {
       setTabLoading(prev => ({ ...prev, users: false }));
     }
@@ -298,11 +303,16 @@ export default function AdminDashboard() {
     setTabLoading(prev => ({ ...prev, properties: true }));
     try {
       const res = await fetch(`${API_BASE}/properties`);
+      if (!res.ok) {
+        setProperties([]);
+        return;
+      }
       const data = (await res.json()) as Property[];
       setProperties(Array.isArray(data) ? data : []);
       loadedTabs.current.add('properties');
     } catch (err) {
       console.error('Error loading properties:', err);
+      setProperties([]);
     } finally {
       setTabLoading(prev => ({ ...prev, properties: false }));
     }
@@ -312,11 +322,16 @@ export default function AdminDashboard() {
     setTabLoading(prev => ({ ...prev, reviews: true }));
     try {
       const res = await fetch(`${API_BASE}/reviews`);
+      if (!res.ok) {
+        setReviews([]);
+        return;
+      }
       const data = (await res.json()) as Review[];
       setReviews(Array.isArray(data) ? data : []);
       loadedTabs.current.add('reviews');
     } catch (err) {
       console.error('Error loading reviews:', err);
+      setReviews([]);
     } finally {
       setTabLoading(prev => ({ ...prev, reviews: false }));
     }
@@ -326,11 +341,16 @@ export default function AdminDashboard() {
     setTabLoading(prev => ({ ...prev, withdrawals: true }));
     try {
       const res = await fetch(`${API_BASE}/admin/withdrawals`);
+      if (!res.ok) {
+        setWithdrawals([]);
+        return;
+      }
       const data = (await res.json()) as Withdrawal[];
       setWithdrawals(Array.isArray(data) ? data : []);
       loadedTabs.current.add('withdrawals');
     } catch (err) {
       console.error('Error loading withdrawals:', err);
+      setWithdrawals([]);
     } finally {
       setTabLoading(prev => ({ ...prev, withdrawals: false }));
     }
@@ -339,6 +359,7 @@ export default function AdminDashboard() {
   const fetchStats = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch(`${API_BASE}/admin/stats`);
+      if (!res.ok) return;
       const data = (await res.json()) as AdminStats;
       setStats(data);
     } catch (err) {
@@ -349,6 +370,7 @@ export default function AdminDashboard() {
   const fetchTrackingHistory = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch(`${API_BASE}/admin/tracking-history`);
+      if (!res.ok) return;
       const data = (await res.json()) as TrackingHistory;
       setTrackingHistory(data);
     } catch (err) {
