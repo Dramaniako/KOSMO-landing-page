@@ -297,11 +297,24 @@ router.put('/users/profile/:id', authenticateToken, async (req: Request<{ id: st
 router.get('/users', async (_req: Request, res: Response) => {
   try {
     const [rows] = await pool.query<UserRow[]>(
-      'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users'
+      'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT 50'
     );
     res.json(rows);
-  } catch (err) {
+  } catch (err: unknown) {
+    console.error("Get users error:", err);
     res.status(500).json({ message: "Gagal mengambil data user." });
+  }
+});
+
+router.get('/admin/users', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
+  try {
+    const [rows] = await pool.query<UserRow[]>(
+      'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT 50'
+    );
+    res.json(rows);
+  } catch (err: unknown) {
+    console.error("Get admin users error:", err);
+    res.status(500).json({ message: "Gagal mengambil data user admin." });
   }
 });
 

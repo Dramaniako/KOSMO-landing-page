@@ -223,7 +223,7 @@ export default function AdminDashboard() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ users: true });
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [trackingHistory, setTrackingHistory] = useState<TrackingHistory | null>(null);
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('24h');
@@ -278,6 +278,7 @@ export default function AdminDashboard() {
   const loadedTabs = useRef<Set<string>>(new Set());
 
   const fetchUsers = useCallback(async (): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, users: true }));
     try {
       const res = await fetch(`${API_BASE}/users`);
       const data = (await res.json()) as User[];
@@ -285,10 +286,13 @@ export default function AdminDashboard() {
       loadedTabs.current.add('users');
     } catch (err) {
       console.error('Error loading users:', err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, users: false }));
     }
   }, []);
 
   const fetchProperties = useCallback(async (): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, properties: true }));
     try {
       const res = await fetch(`${API_BASE}/properties`);
       const data = (await res.json()) as Property[];
@@ -296,10 +300,13 @@ export default function AdminDashboard() {
       loadedTabs.current.add('properties');
     } catch (err) {
       console.error('Error loading properties:', err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, properties: false }));
     }
   }, []);
 
   const fetchReviews = useCallback(async (): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, reviews: true }));
     try {
       const res = await fetch(`${API_BASE}/reviews`);
       const data = (await res.json()) as Review[];
@@ -307,10 +314,13 @@ export default function AdminDashboard() {
       loadedTabs.current.add('reviews');
     } catch (err) {
       console.error('Error loading reviews:', err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, reviews: false }));
     }
   }, []);
 
   const fetchWithdrawals = useCallback(async (): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, withdrawals: true }));
     try {
       const res = await fetch(`${API_BASE}/admin/withdrawals`);
       const data = (await res.json()) as Withdrawal[];
@@ -318,6 +328,8 @@ export default function AdminDashboard() {
       loadedTabs.current.add('withdrawals');
     } catch (err) {
       console.error('Error loading withdrawals:', err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, withdrawals: false }));
     }
   }, []);
 
@@ -326,7 +338,6 @@ export default function AdminDashboard() {
       const res = await fetch(`${API_BASE}/admin/stats`);
       const data = (await res.json()) as AdminStats;
       setStats(data);
-      loadedTabs.current.add('tracking');
     } catch (err) {
       console.error('Error loading stats:', err);
     }
@@ -342,21 +353,17 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  const fetchData = useCallback(async (): Promise<void> => {
-    setLoading(true);
+  const fetchTrackingTab = useCallback(async (): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, tracking: true }));
     try {
-      await Promise.all([
-        fetchUsers(),
-        fetchProperties(),
-        fetchReviews(),
-        fetchWithdrawals()
-      ]);
+      await Promise.all([fetchStats(), fetchTrackingHistory()]);
+      loadedTabs.current.add('tracking');
     } catch (err) {
-      console.error("Error loading admin dashboard data:", err);
+      console.error('Error loading tracking tab data:', err);
     } finally {
-      setLoading(false);
+      setTabLoading(prev => ({ ...prev, tracking: false }));
     }
-  }, [fetchUsers, fetchProperties, fetchReviews, fetchWithdrawals]);
+  }, [fetchStats, fetchTrackingHistory]);
 
   // Auth check & on-demand tab loader
   useEffect(() => {
@@ -376,10 +383,9 @@ export default function AdminDashboard() {
     } else if (activeTab === 'withdrawals' && !loadedTabs.current.has('withdrawals')) {
       fetchWithdrawals();
     } else if (activeTab === 'tracking' && !loadedTabs.current.has('tracking')) {
-      fetchStats();
-      fetchTrackingHistory();
+      fetchTrackingTab();
     }
-  }, [navigate, activeTab, fetchUsers, fetchProperties, fetchReviews, fetchWithdrawals, fetchStats, fetchTrackingHistory]);
+  }, [navigate, activeTab, fetchUsers, fetchProperties, fetchReviews, fetchWithdrawals, fetchTrackingTab]);
 
   const handleLogout = (): void => {
     localStorage.removeItem('user');
@@ -424,7 +430,7 @@ export default function AdminDashboard() {
       alert(data.message);
       setShowUserModal(false);
       resetUserForm();
-      fetchData();
+      await fetchUsers();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -457,7 +463,7 @@ export default function AdminDashboard() {
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
-      fetchData();
+      await fetchUsers();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -528,7 +534,7 @@ export default function AdminDashboard() {
       alert(data.message);
       setShowPropModal(false);
       resetPropertyForm();
-      fetchData();
+      await fetchProperties();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -579,7 +585,7 @@ export default function AdminDashboard() {
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
-      fetchData();
+      await fetchProperties();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -611,7 +617,7 @@ export default function AdminDashboard() {
       alert(data.message);
       setShowRevModal(false);
       setEditingReview(null);
-      fetchData();
+      await fetchReviews();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -627,7 +633,7 @@ export default function AdminDashboard() {
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
-      fetchData();
+      await fetchReviews();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -645,7 +651,7 @@ export default function AdminDashboard() {
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
       alert(data.message);
-      fetchData();
+      await fetchWithdrawals();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -664,7 +670,7 @@ export default function AdminDashboard() {
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
       alert(data.message);
-      fetchData();
+      await fetchWithdrawals();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -757,385 +763,407 @@ export default function AdminDashboard() {
           </button>
         </header>
 
-        {loading ? (
-          <div className="flex-center" style={{ height: '300px', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ width: '40px', height: '40px', border: '4px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-            <p style={{ color: 'var(--text-muted)' }}>Memuat data database...</p>
-          </div>
-        ) : (
-          <>
-            {/* USERS MANAGEMENT TAB */}
-            {activeTab === 'users' && (
-              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                <div className="flex-between" style={{ marginBottom: '24px' }}>
-                  <h3 style={{ fontSize: '20px' }}>Daftar Pengguna Website ({users.length})</h3>
-                  <button className="btn btn-primary" onClick={() => { resetUserForm(); setShowUserModal(true); }}>
-                    <Plus size={16} />
-                    Tambah User Baru
-                  </button>
-                </div>
+        {/* USERS MANAGEMENT TAB */}
+        {activeTab === 'users' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <div className="flex-between" style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px' }}>Daftar Pengguna Website ({users.length})</h3>
+              <button className="btn btn-primary" onClick={() => { resetUserForm(); setShowUserModal(true); }}>
+                <Plus size={16} />
+                Tambah User Baru
+              </button>
+            </div>
 
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                        <th style={{ padding: '12px 16px' }}>Nama</th>
-                        <th style={{ padding: '12px 16px' }}>Email</th>
-                        <th style={{ padding: '12px 16px' }}>Role</th>
-                        <th style={{ padding: '12px 16px' }}>Nomor Telepon</th>
-                        <th style={{ padding: '12px 16px' }}>Keuangan (Landlord)</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'right' }}>Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {users.map((u) => (
-                        <tr key={u.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '16px' }}>
-                            <strong>{u.name}</strong>
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>ID: {u.id}</span>
-                          </td>
-                          <td style={{ padding: '16px' }}>{u.email}</td>
-                          <td style={{ padding: '16px' }}>
-                            <span className={`badge ${
-                              u.role === 'admin' ? 'badge-danger' : 
-                              u.role === 'landlord' ? 'badge-primary' : 'badge-success'
-                            }`}>
-                              {u.role === 'admin' ? 'Super Admin' : 
-                               u.role === 'landlord' ? 'Landlord' : 'Tenant'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '16px' }}>{u.phone || '-'}</td>
-                          <td style={{ padding: '16px' }}>
-                            {u.role === 'landlord' ? (
-                              <div style={{ fontSize: '12px' }}>
-                                <p>Saldo: {formatRupiah(u.balance)}</p>
-                                <p style={{ color: 'var(--text-muted)' }}>Revenue: {formatRupiah(u.totalRevenue)}</p>
-                              </div>
-                            ) : '-'}
-                          </td>
-                          <td style={{ padding: '16px', textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: '8px' }}>
-                              <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditUser(u)}>
-                                <Edit size={14} />
-                              </button>
-                              <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteUser(u.id)} disabled={u.id === 'user-admin'}>
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            {tabLoading.users && !loadedTabs.current.has('users') ? (
+              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data pengguna...</p>
               </div>
-            )}
-
-            {/* PROPERTIES MODERATION TAB */}
-            {activeTab === 'properties' && (
-              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                <div className="flex-between" style={{ marginBottom: '24px' }}>
-                  <h3 style={{ fontSize: '20px' }}>Daftar Semua Unit Properti ({properties.length})</h3>
-                </div>
-
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                        <th style={{ padding: '12px 16px' }}>Properti</th>
-                        <th style={{ padding: '12px 16px' }}>Wilayah</th>
-                        <th style={{ padding: '12px 16px' }}>Harga / Bln</th>
-                        <th style={{ padding: '12px 16px' }}>Kamar Terisi</th>
-                        <th style={{ padding: '12px 16px' }}>Rating</th>
-                        <th style={{ padding: '12px 16px' }}>ID Pemilik (Landlord)</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'right' }}>Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {properties.map((p) => (
-                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                              <img src={p.image} alt={p.name} style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '4px' }} />
-                              <div>
-                                <strong>{p.name}</strong>
-                                <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{p.address}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td style={{ padding: '16px' }}>{p.district}</td>
-                          <td style={{ padding: '16px', fontWeight: 600, color: 'var(--primary)' }}>{formatRupiah(p.price)}</td>
-                          <td style={{ padding: '16px' }}>
-                            <strong>{p.occupiedRooms}</strong> / {p.totalRooms} Kamar
-                          </td>
-                          <td style={{ padding: '16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <Star size={14} style={{ fill: '#f59e0b', color: '#f59e0b' }} />
-                              <span>{p.rating > 0 ? p.rating : 'Baru'}</span>
-                            </div>
-                          </td>
-                          <td style={{ padding: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>{p.ownerId}</td>
-                          <td style={{ padding: '16px', textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: '8px' }}>
-                              <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditProperty(p)}>
-                                <Edit size={14} />
-                              </button>
-                              <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteProperty(p.id)}>
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* REVIEWS MODERATION TAB */}
-            {activeTab === 'reviews' && (
-              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Pelanggan Secara Global ({reviews.length})</h3>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {reviews.map((r) => (
-                    <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1, marginRight: '24px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                          <strong style={{ fontSize: '15px' }}>{r.userName}</strong>
-                          <span className="badge badge-primary" style={{ fontSize: '10px' }}>
-                            {r.propertyName}
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                      <th style={{ padding: '12px 16px' }}>Nama</th>
+                      <th style={{ padding: '12px 16px' }}>Email</th>
+                      <th style={{ padding: '12px 16px' }}>Role</th>
+                      <th style={{ padding: '12px 16px' }}>Nomor Telepon</th>
+                      <th style={{ padding: '12px 16px' }}>Keuangan (Landlord)</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((u) => (
+                      <tr key={u.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '16px' }}>
+                          <strong>{u.name}</strong>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>ID: {u.id}</span>
+                        </td>
+                        <td style={{ padding: '16px' }}>{u.email}</td>
+                        <td style={{ padding: '16px' }}>
+                          <span className={`badge ${
+                            u.role === 'admin' ? 'badge-danger' : 
+                            u.role === 'landlord' ? 'badge-primary' : 'badge-success'
+                          }`}>
+                            {u.role === 'admin' ? 'Super Admin' : 
+                             u.role === 'landlord' ? 'Landlord' : 'Tenant'}
                           </span>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.date}</span>
-                        </div>
-                        
-                        <div style={{ display: 'flex', gap: '2px', marginBottom: '8px' }}>
-                          {[...Array(5)].map((_, i) => (
-                            <Star 
-                              key={i} 
-                              size={12} 
-                              style={{ 
-                                fill: i < r.rating ? '#f59e0b' : 'transparent', 
-                                color: i < r.rating ? '#f59e0b' : '#cbd5e1' 
-                              }} 
-                            />
-                          ))}
-                        </div>
-
-                        <p style={{ fontSize: '14px', color: 'var(--text-main)', fontStyle: 'italic' }}>
-                          "{r.comment}"
-                        </p>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditReview(r)}>
-                          Edit
-                        </button>
-                        <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteReview(r.id)}>
-                          Hapus
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                        </td>
+                        <td style={{ padding: '16px' }}>{u.phone || '-'}</td>
+                        <td style={{ padding: '16px' }}>
+                          {u.role === 'landlord' ? (
+                            <div style={{ fontSize: '12px' }}>
+                              <p>Saldo: {formatRupiah(u.balance)}</p>
+                              <p style={{ color: 'var(--text-muted)' }}>Revenue: {formatRupiah(u.totalRevenue)}</p>
+                            </div>
+                          ) : '-'}
+                        </td>
+                        <td style={{ padding: '16px', textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', gap: '8px' }}>
+                            <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditUser(u)}>
+                              <Edit size={14} />
+                            </button>
+                            <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteUser(u.id)} disabled={u.id === 'user-admin'}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
+          </div>
+        )}
 
-            {/* TRACKING TAB */}
-            {activeTab === 'tracking' && (
-              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                <div className="flex-between" style={{ marginBottom: '24px' }}>
-                  <h3 style={{ fontSize: '20px' }}>Tracking Pengunjung Website</h3>
-                  <a 
-                    href={`${API_BASE}/reports/tracking/excel`}
-                    className="btn btn-primary"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
-                  >
-                    <Download size={16} /> Unduh Laporan Excel
-                  </a>
-                </div>
+        {/* PROPERTIES MODERATION TAB */}
+        {activeTab === 'properties' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <div className="flex-between" style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px' }}>Daftar Semua Unit Properti ({properties.length})</h3>
+            </div>
 
-                {stats ? (
-                  <>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
-                      <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', color: 'white', borderRadius: '16px' }}>
-                        <Eye size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
-                        <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalVisitors}</p>
-                        <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Pengunjung Website</p>
-                      </div>
-                      <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)', color: 'white', borderRadius: '16px' }}>
-                        <Users size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
-                        <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalUsers}</p>
-                        <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Pengguna Terdaftar</p>
-                      </div>
-                      <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)', color: 'white', borderRadius: '16px' }}>
-                        <Key size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
-                        <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalLandlords}</p>
-                        <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Landlord</p>
-                      </div>
-                      <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)', color: 'white', borderRadius: '16px' }}>
-                        <Building size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
-                        <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalProperties}</p>
-                        <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Properti</p>
-                      </div>
-                      <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)', color: 'white', borderRadius: '16px' }}>
-                        <LayoutDashboard size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
-                        <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalRooms}</p>
-                        <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Kamar</p>
-                      </div>
-                    </div>
-
-                    {/* Time Range Selector */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '32px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                      <h4 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-main)' }}>Analisis Tren Aktivitas Pengunjung</h4>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button 
-                          type="button"
-                          className={`btn ${timeRange === '24h' ? 'btn-primary' : 'btn-outline'}`} 
-                          style={{ padding: '6px 16px', fontSize: '13px' }}
-                          onClick={() => setTimeRange('24h')}
-                        >
-                          24 Jam
-                        </button>
-                        <button 
-                          type="button"
-                          className={`btn ${timeRange === '7d' ? 'btn-primary' : 'btn-outline'}`} 
-                          style={{ padding: '6px 16px', fontSize: '13px' }}
-                          onClick={() => setTimeRange('7d')}
-                        >
-                          1 Minggu
-                        </button>
-                        <button 
-                          type="button"
-                          className={`btn ${timeRange === '30d' ? 'btn-primary' : 'btn-outline'}`} 
-                          style={{ padding: '6px 16px', fontSize: '13px' }}
-                          onClick={() => setTimeRange('30d')}
-                        >
-                          1 Bulan
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Visitor Chart */}
-                    {trackingHistory ? (
-                      <VisitorChart 
-                        data={
-                          timeRange === '24h' ? trackingHistory.history24h : 
-                          timeRange === '7d' ? trackingHistory.history7d : 
-                          trackingHistory.history30d
-                        }
-                        timeRange={timeRange}
-                      />
-                    ) : (
-                      <div style={{ height: '280px', backgroundColor: '#f8fafc', display: 'flex', justifyContent: 'center', alignItems: 'center', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                        <div style={{ width: '24px', height: '24px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite', marginRight: '8px' }}></div>
-                        <p style={{ color: 'var(--text-muted)' }}>Memuat data grafik...</p>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p style={{ color: 'var(--text-muted)' }}>Memuat statistik...</p>
-                )}
+            {tabLoading.properties && !loadedTabs.current.has('properties') ? (
+              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data properti...</p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                      <th style={{ padding: '12px 16px' }}>Properti</th>
+                      <th style={{ padding: '12px 16px' }}>Wilayah</th>
+                      <th style={{ padding: '12px 16px' }}>Harga / Bln</th>
+                      <th style={{ padding: '12px 16px' }}>Kamar Terisi</th>
+                      <th style={{ padding: '12px 16px' }}>Rating</th>
+                      <th style={{ padding: '12px 16px' }}>ID Pemilik (Landlord)</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {properties.map((p) => (
+                      <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <img src={p.image} alt={p.name} style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '4px' }} />
+                            <div>
+                              <strong>{p.name}</strong>
+                              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{p.address}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '16px' }}>{p.district}</td>
+                        <td style={{ padding: '16px', fontWeight: 600, color: 'var(--primary)' }}>{formatRupiah(p.price)}</td>
+                        <td style={{ padding: '16px' }}>
+                          <strong>{p.occupiedRooms}</strong> / {p.totalRooms} Kamar
+                        </td>
+                        <td style={{ padding: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Star size={14} style={{ fill: '#f59e0b', color: '#f59e0b' }} />
+                            <span>{p.rating > 0 ? p.rating : 'Baru'}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>{p.ownerId}</td>
+                        <td style={{ padding: '16px', textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', gap: '8px' }}>
+                            <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditProperty(p)}>
+                              <Edit size={14} />
+                            </button>
+                            <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteProperty(p.id)}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
+          </div>
+        )}
 
-            {/* WITHDRAWALS MANAGEMENT TAB */}
-            {activeTab === 'withdrawals' && (
-              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                <div className="flex-between" style={{ marginBottom: '24px' }}>
-                  <div>
-                    <h3 style={{ fontSize: '20px' }}>Moderasi Pencairan Dana Landlord ({withdrawals.length})</h3>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '2px' }}>
-                      Kelola dan verifikasi transfer penarikan saldo pendapatan mitra kos.
-                    </p>
-                  </div>
-                </div>
+        {/* REVIEWS MODERATION TAB */}
+        {activeTab === 'reviews' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Pelanggan Secara Global ({reviews.length})</h3>
 
-                {withdrawals.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '40px' }}>
-                    Belum ada riwayat permohonan pencairan dana.
-                  </p>
-                ) : (
-                  <div className="table-responsive">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>Tanggal & ID</th>
-                          <th>Landlord</th>
-                          <th>Bank & Rekening</th>
-                          <th>Nominal</th>
-                          <th>Status</th>
-                          <th>Ref ID</th>
-                          <th>Aksi</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {withdrawals.map((w) => (
-                          <tr key={w.id}>
-                            <td>
-                              <strong style={{ fontSize: '13px', display: 'block' }}>{w.id}</strong>
-                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.date}</span>
-                            </td>
-                            <td>
-                              <p style={{ fontWeight: 600, fontSize: '13px' }}>{w.userName || w.userId}</p>
-                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.userEmail || '-'}</span>
-                            </td>
-                            <td>
-                              <span className="badge" style={{ backgroundColor: '#e0f2fe', color: '#0369a1', fontSize: '11px', fontWeight: 600 }}>{w.bankName}</span>
-                              <p style={{ fontSize: '13px', marginTop: '4px', fontWeight: 500 }}>{w.accountNumber}</p>
-                              {w.accountHolder && <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>a.n. {w.accountHolder}</p>}
-                            </td>
-                            <td>
-                              <strong style={{ color: 'var(--primary)', fontSize: '14px' }}>{formatRupiah(w.amount)}</strong>
-                            </td>
-                            <td>
-                              <span 
-                                className={`badge ${w.status === 'completed' ? 'badge-success' : w.status === 'rejected' ? 'badge-danger' : w.status === 'processing' ? 'badge-warning' : 'badge-secondary'}`}
-                                title={w.rejectionReason ? `Alasan: ${w.rejectionReason}` : undefined}
-                              >
-                                {w.status === 'completed' ? 'Selesai' : w.status === 'rejected' ? 'Ditolak' : w.status === 'processing' ? 'Diproses' : 'Menunggu'}
-                              </span>
-                              {w.rejectionReason && (
-                                <p style={{ fontSize: '10px', color: 'var(--danger)', marginTop: '2px' }}>{w.rejectionReason}</p>
-                              )}
-                            </td>
-                            <td>
-                              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                                {w.referenceId || '-'}
-                              </span>
-                            </td>
-                            <td>
-                              {w.status === 'pending' || w.status === 'processing' ? (
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <button 
-                                    className="btn btn-sm btn-primary"
-                                    style={{ padding: '4px 8px', fontSize: '11px' }}
-                                    onClick={() => handleProcessWithdrawal(w.id)}
-                                  >
-                                    Selesaikan
-                                  </button>
-                                  <button 
-                                    className="btn btn-sm btn-danger btn-outline"
-                                    style={{ padding: '4px 8px', fontSize: '11px' }}
-                                    onClick={() => handleRejectWithdrawal(w.id)}
-                                  >
-                                    Tolak
-                                  </button>
-                                </div>
-                              ) : (
-                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Telah Diproses</span>
-                              )}
-                            </td>
-                          </tr>
+            {tabLoading.reviews && !loadedTabs.current.has('reviews') ? (
+              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat ulasan pelanggan...</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {reviews.map((r) => (
+                  <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, marginRight: '24px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                        <strong style={{ fontSize: '15px' }}>{r.userName}</strong>
+                        <span className="badge badge-primary" style={{ fontSize: '10px' }}>
+                          {r.propertyName}
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.date}</span>
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '2px', marginBottom: '8px' }}>
+                        {[...Array(5)].map((_, i) => (
+                          <Star 
+                            key={i} 
+                            size={12} 
+                            style={{ 
+                              fill: i < r.rating ? '#f59e0b' : 'transparent', 
+                              color: i < r.rating ? '#f59e0b' : '#cbd5e1' 
+                            }} 
+                          />
                         ))}
-                      </tbody>
-                    </table>
+                      </div>
+
+                      <p style={{ fontSize: '14px', color: 'var(--text-main)', fontStyle: 'italic' }}>
+                        "{r.comment}"
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditReview(r)}>
+                        Edit
+                      </button>
+                      <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteReview(r.id)}>
+                        Hapus
+                      </button>
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
             )}
-          </>
+          </div>
+        )}
+
+        {/* TRACKING TAB */}
+        {activeTab === 'tracking' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <div className="flex-between" style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px' }}>Tracking Pengunjung Website</h3>
+              <a 
+                href={`${API_BASE}/reports/tracking/excel`}
+                className="btn btn-primary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
+              >
+                <Download size={16} /> Unduh Laporan Excel
+              </a>
+            </div>
+
+            {tabLoading.tracking && !loadedTabs.current.has('tracking') ? (
+              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat statistik pengunjung...</p>
+              </div>
+            ) : stats ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+                  <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', color: 'white', borderRadius: '16px' }}>
+                    <Eye size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                    <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalVisitors}</p>
+                    <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Pengunjung Website</p>
+                  </div>
+                  <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)', color: 'white', borderRadius: '16px' }}>
+                    <Users size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                    <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalUsers}</p>
+                    <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Pengguna Terdaftar</p>
+                  </div>
+                  <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)', color: 'white', borderRadius: '16px' }}>
+                    <Key size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                    <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalLandlords}</p>
+                    <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Landlord</p>
+                  </div>
+                  <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)', color: 'white', borderRadius: '16px' }}>
+                    <Building size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                    <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalProperties}</p>
+                    <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Properti</p>
+                  </div>
+                  <div className="card" style={{ padding: '24px', background: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)', color: 'white', borderRadius: '16px' }}>
+                    <LayoutDashboard size={28} style={{ marginBottom: '8px', opacity: 0.8 }} />
+                    <p style={{ fontSize: '32px', fontWeight: 700 }}>{stats.totalRooms}</p>
+                    <p style={{ fontSize: '13px', opacity: 0.85 }}>Total Kamar</p>
+                  </div>
+                </div>
+
+                {/* Time Range Selector */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '32px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                  <h4 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-main)' }}>Analisis Tren Aktivitas Pengunjung</h4>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      type="button"
+                      className={`btn ${timeRange === '24h' ? 'btn-primary' : 'btn-outline'}`} 
+                      style={{ padding: '6px 16px', fontSize: '13px' }}
+                      onClick={() => setTimeRange('24h')}
+                    >
+                      24 Jam
+                    </button>
+                    <button 
+                      type="button"
+                      className={`btn ${timeRange === '7d' ? 'btn-primary' : 'btn-outline'}`} 
+                      style={{ padding: '6px 16px', fontSize: '13px' }}
+                      onClick={() => setTimeRange('7d')}
+                    >
+                      1 Minggu
+                    </button>
+                    <button 
+                      type="button"
+                      className={`btn ${timeRange === '30d' ? 'btn-primary' : 'btn-outline'}`} 
+                      style={{ padding: '6px 16px', fontSize: '13px' }}
+                      onClick={() => setTimeRange('30d')}
+                    >
+                      1 Bulan
+                    </button>
+                  </div>
+                </div>
+
+                {/* Visitor Chart */}
+                {trackingHistory ? (
+                  <VisitorChart 
+                    data={
+                      timeRange === '24h' ? trackingHistory.history24h : 
+                      timeRange === '7d' ? trackingHistory.history7d : 
+                      trackingHistory.history30d
+                    }
+                    timeRange={timeRange}
+                  />
+                ) : (
+                  <div style={{ height: '280px', backgroundColor: '#f8fafc', display: 'flex', justifyContent: 'center', alignItems: 'center', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                    <div style={{ width: '24px', height: '24px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite', marginRight: '8px' }}></div>
+                    <p style={{ color: 'var(--text-muted)' }}>Memuat data grafik...</p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p style={{ color: 'var(--text-muted)' }}>Memuat statistik...</p>
+            )}
+          </div>
+        )}
+
+        {/* WITHDRAWALS MANAGEMENT TAB */}
+        {activeTab === 'withdrawals' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <div className="flex-between" style={{ marginBottom: '24px' }}>
+              <div>
+                <h3 style={{ fontSize: '20px' }}>Moderasi Pencairan Dana Landlord ({withdrawals.length})</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '2px' }}>
+                  Kelola dan verifikasi transfer penarikan saldo pendapatan mitra kos.
+                </p>
+              </div>
+            </div>
+
+            {tabLoading.withdrawals && !loadedTabs.current.has('withdrawals') ? (
+              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data penarikan saldo...</p>
+              </div>
+            ) : withdrawals.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '40px' }}>
+                Belum ada riwayat permohonan pencairan dana.
+              </p>
+            ) : (
+              <div className="table-responsive">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Tanggal & ID</th>
+                      <th>Landlord</th>
+                      <th>Bank & Rekening</th>
+                      <th>Nominal</th>
+                      <th>Status</th>
+                      <th>Ref ID</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {withdrawals.map((w) => (
+                      <tr key={w.id}>
+                        <td>
+                          <strong style={{ fontSize: '13px', display: 'block' }}>{w.id}</strong>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.date}</span>
+                        </td>
+                        <td>
+                          <p style={{ fontWeight: 600, fontSize: '13px' }}>{w.userName || w.userId}</p>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.userEmail || '-'}</span>
+                        </td>
+                        <td>
+                          <span className="badge" style={{ backgroundColor: '#e0f2fe', color: '#0369a1', fontSize: '11px', fontWeight: 600 }}>{w.bankName}</span>
+                          <p style={{ fontSize: '13px', marginTop: '4px', fontWeight: 500 }}>{w.accountNumber}</p>
+                          {w.accountHolder && <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>a.n. {w.accountHolder}</p>}
+                        </td>
+                        <td>
+                          <strong style={{ color: 'var(--primary)', fontSize: '14px' }}>{formatRupiah(w.amount)}</strong>
+                        </td>
+                        <td>
+                          <span 
+                            className={`badge ${w.status === 'completed' ? 'badge-success' : w.status === 'rejected' ? 'badge-danger' : w.status === 'processing' ? 'badge-warning' : 'badge-secondary'}`}
+                            title={w.rejectionReason ? `Alasan: ${w.rejectionReason}` : undefined}
+                          >
+                            {w.status === 'completed' ? 'Selesai' : w.status === 'rejected' ? 'Ditolak' : w.status === 'processing' ? 'Diproses' : 'Menunggu'}
+                          </span>
+                          {w.rejectionReason && (
+                            <p style={{ fontSize: '10px', color: 'var(--danger)', marginTop: '2px' }}>{w.rejectionReason}</p>
+                          )}
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                            {w.referenceId || '-'}
+                          </span>
+                        </td>
+                        <td>
+                          {w.status === 'pending' || w.status === 'processing' ? (
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button 
+                                className="btn btn-sm btn-primary"
+                                style={{ padding: '4px 8px', fontSize: '11px' }}
+                                onClick={() => handleProcessWithdrawal(w.id)}
+                              >
+                                Selesaikan
+                              </button>
+                              <button 
+                                className="btn btn-sm btn-danger btn-outline"
+                                style={{ padding: '4px 8px', fontSize: '11px' }}
+                                onClick={() => handleRejectWithdrawal(w.id)}
+                              >
+                                Tolak
+                              </button>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Telah Diproses</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         )}
       </main>
 
