@@ -403,7 +403,7 @@ export default function TenantDashboard() {
                       type="text" 
                       className="form-input"
                       value={profileForm.name}
-                      onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, name: e.target.value })}
                       required
                     />
                   </div>
@@ -414,7 +414,7 @@ export default function TenantDashboard() {
                       type="text" 
                       className="form-input"
                       value={profileForm.phone}
-                      onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, phone: e.target.value })}
                     />
                   </div>
 
@@ -423,7 +423,7 @@ export default function TenantDashboard() {
                     <select 
                       className="form-select"
                       value={profileForm.paymentMethod}
-                      onChange={(e) => setProfileForm({ ...profileForm, paymentMethod: e.target.value })}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProfileForm({ ...profileForm, paymentMethod: e.target.value })}
                     >
                       <option value="Virtual Account">Virtual Account (BCA/Mandiri)</option>
                       <option value="Kartu Kredit">Credit Card / Debit Online</option>
@@ -481,7 +481,7 @@ export default function TenantDashboard() {
                   <input 
                     type="checkbox" 
                     checked={profileForm.notifications}
-                    onChange={(e) => {
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       const newNotif = e.target.checked;
                       setProfileForm({ ...profileForm, notifications: newNotif });
                       fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
@@ -502,7 +502,7 @@ export default function TenantDashboard() {
                     className="form-select" 
                     style={{ width: '130px' }}
                     value={profileForm.language}
-                    onChange={(e) => {
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
                       const newLang = e.target.value;
                       setProfileForm({ ...profileForm, language: newLang });
                       fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
@@ -825,7 +825,7 @@ export default function TenantDashboard() {
                     <select 
                       className="form-select"
                       value={reviewForm.propertyId}
-                      onChange={(e) => setReviewForm({ ...reviewForm, propertyId: e.target.value })}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setReviewForm({ ...reviewForm, propertyId: e.target.value })}
                     >
                       {properties.map((p) => (
                         <option key={p.id} value={p.id}>{p.name} ({p.district})</option>
@@ -839,7 +839,7 @@ export default function TenantDashboard() {
                   <select 
                     className="form-select"
                     value={reviewForm.rating}
-                    onChange={(e) => setReviewForm({ ...reviewForm, rating: parseInt(e.target.value, 10) })}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setReviewForm({ ...reviewForm, rating: parseInt(e.target.value, 10) })}
                   >
                     <option value={5}>5 Bintang (Sangat Puas)</option>
                     <option value={4}>4 Bintang (Puas)</option>
@@ -856,7 +856,7 @@ export default function TenantDashboard() {
                     rows={4}
                     placeholder="Berikan ulasan jujur mengenai fasilitas, kebersihan, dan kenyamanan hunian..."
                     value={reviewForm.comment}
-                    onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReviewForm({ ...reviewForm, comment: e.target.value })}
                     required
                   ></textarea>
                 </div>
@@ -875,7 +875,7 @@ export default function TenantDashboard() {
         </div>
       )}
 
-      {/* Terminate Rental Password Modal */}
+      {/* Security Password Confirmation Modal for Rental Termination */}
       {showTerminateModal && terminateRental && (
         <div className="modal-overlay">
           <div className="modal-container" style={{ maxWidth: '400px' }}>
@@ -888,7 +888,7 @@ export default function TenantDashboard() {
                 Untuk berhenti menyewa <strong>{terminateRental.propertyName}</strong>, harap masukkan password akun Anda untuk konfirmasi keamanan.
               </p>
               
-              <form onSubmit={async (e) => {
+              <form onSubmit={async (e: React.FormEvent<HTMLFormElement>) => {
                 e.preventDefault();
                 setTerminateProcessing(true);
                 try {
@@ -933,7 +933,7 @@ export default function TenantDashboard() {
                     style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
                     placeholder="Masukkan password"
                     value={terminatePassword}
-                    onChange={(e) => setTerminatePassword(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTerminatePassword(e.target.value)}
                     required 
                   />
                 </div>

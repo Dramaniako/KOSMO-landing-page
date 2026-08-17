@@ -2,8 +2,11 @@
   "name": "kosmo-root",
   "version": "1.0.0",
   "type": "module",
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
-    "build": "cd frontend && npm install && npm run build",
+    "build": "npm --prefix frontend run build",
     "type-check": "npm --prefix frontend run type-check && npx tsc --noEmit --project backend/tsconfig.json",
     "type-check:frontend": "npm --prefix frontend run type-check",
     "type-check:backend": "npx tsc --noEmit --project backend/tsconfig.json",
