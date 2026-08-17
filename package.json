@@ -6,7 +6,8 @@
     "build": "cd frontend && npm install && npm run build",
     "dev:backend": "tsx watch backend/server.ts",
     "start": "tsx backend/server.ts",
-    "test": "node --experimental-strip-types --test tests/*.test.*",
+    "test": "node --experimental-strip-types --test tests/auth.test.ts tests/contract.test.ts tests/jwt.test.ts tests/payment.test.ts tests/rentals.test.ts tests/router.test.js tests/search.test.ts tests/types.test.js tests/upload.test.ts tests/withdrawals.test.ts",
+    "test:integration": "node --experimental-strip-types --test tests/db_integration.test.ts tests/perf_api.test.ts tests/perf_db.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

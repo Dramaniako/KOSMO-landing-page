@@ -82,5 +82,4 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
   });
 
   server.close();
-  await pool.end();
 });

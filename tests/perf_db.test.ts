@@ -69,6 +69,4 @@ test('Database Performance & Query Execution Plans', async (t) => {
       );
     }
   });
-
-  await pool.end();
 });
