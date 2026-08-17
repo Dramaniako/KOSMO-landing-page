@@ -35,7 +35,7 @@ const sslOption = isSSLFalse
   ? undefined
   : {
       minVersion: 'TLSv1.2',
-      rejectUnauthorized: process.env.DB_REJECT_UNAUTHORIZED === 'true' ? true : false
+      rejectUnauthorized: false
     };
 
 export const dbConfig: ConnectionOptions = {
@@ -45,6 +45,7 @@ export const dbConfig: ConnectionOptions = {
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'kosmo_db',
   ...(sslOption ? { ssl: sslOption } : {}),
+  connectTimeout: 10000,
   waitForConnections: true,
   connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '5', 10),
   maxIdle: 5,
@@ -358,10 +359,6 @@ export async function initDb(): Promise<void> {
     } catch (err: unknown) {
       console.error("Failed to initialize database tables or seed default values:", err);
       initPromise = null;
-      try {
-        const errorStack = err instanceof Error ? err.stack || err.message : String(err);
-        fs.writeFileSync('db_error.log', `[${new Date().toISOString()}] initDb error: ${errorStack}\n`);
-      } catch (e) {}
     }
   })();
 

@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 export interface RentalContractData {
   rentalId: string;
@@ -21,9 +22,13 @@ export function generateRentalContractPdf(
 ): Promise<{ filePath: string; fileName: string; buffer: Buffer }> {
   return new Promise((resolve, reject) => {
     try {
-      const targetDir = outputDir || path.join(process.cwd(), 'backend', 'uploads');
-      if (!fs.existsSync(targetDir)) {
-        fs.mkdirSync(targetDir, { recursive: true });
+      const targetDir = outputDir || (process.env.VERCEL ? path.join(os.tmpdir(), 'kosmo_uploads') : path.join(process.cwd(), 'backend', 'uploads'));
+      try {
+        if (!fs.existsSync(targetDir)) {
+          fs.mkdirSync(targetDir, { recursive: true });
+        }
+      } catch {
+        // Read-only filesystem in serverless
       }
 
       const fileName = `contract_${data.rentalId}.pdf`;

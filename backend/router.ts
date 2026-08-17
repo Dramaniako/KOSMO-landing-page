@@ -10,7 +10,6 @@ import rateLimit from 'express-rate-limit';
 import midtransClient from 'midtrans-client';
 import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
-import fs from 'fs';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { generateRentalContractPdf } from './services/contract';
 import { apiCache } from './services/cache';
@@ -547,12 +546,9 @@ router.get('/properties', async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
     res.json(normalized);
   } catch (err: unknown) {
-    console.error("Get properties error:", err);
-    try {
-      const errorMsg = err instanceof Error ? err.stack || err.message : String(err);
-      fs.appendFileSync('db_error.log', `[${new Date().toISOString()}] GET /properties error: ${errorMsg}\n`);
-    } catch (e) {}
-    res.status(500).json({ message: "Gagal mengambil properti." });
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("Error in GET /api/properties:", err);
+    res.status(500).json({ error: 'Internal Server Error', message: "Gagal mengambil properti: " + errorMsg });
   }
 });
 
@@ -777,7 +773,8 @@ router.get('/reviews', async (req: Request, res: Response) => {
     res.json(rows);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ message: "Gagal mengambil data review: " + errorMsg });
+    console.error("Error in GET /api/reviews:", err);
+    res.status(500).json({ error: 'Internal Server Error', message: "Gagal mengambil data review: " + errorMsg });
   }
 });
 
@@ -1336,9 +1333,9 @@ router.post('/tracking/visit', async (req: Request, res: Response) => {
     );
     res.status(201).json({ message: "Kunjungan berhasil dilacak." });
   } catch (err: unknown) {
-    console.error("Tracking error:", err);
     const errorMsg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ message: "Gagal melacak kunjungan: " + errorMsg });
+    console.error("Error in POST /api/tracking/visit:", err);
+    res.status(500).json({ error: 'Internal Server Error', message: "Gagal melacak kunjungan: " + errorMsg });
   }
 });
 
