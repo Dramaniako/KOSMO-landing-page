@@ -9,5 +9,6 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["backend/**/*", "api/**/*", "tests/**/*", "scripts/**/*"]
+  "include": ["backend/**/*", "tests/**/*", "scripts/**/*"],
+  "exclude": ["node_modules", "dist", "api/**/*"]
 }

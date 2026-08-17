@@ -2275,8 +2275,8 @@ if (process.env.NODE_ENV !== "production" && !process.env.VERCEL && process.env.
 }
 var server_default = app;
 
-// api/index.ts
-var index_default = server_default;
+// backend/api.ts
+var api_default = server_default;
 export {
-  index_default as default
+  api_default as default
 };

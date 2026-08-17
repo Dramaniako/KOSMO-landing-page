@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "build": "npm --prefix frontend run build && npm run build:backend",
-    "build:backend": "esbuild api/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --packages=external",
+    "build:backend": "esbuild backend/api.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --packages=external",
     "type-check": "npm --prefix frontend run type-check && npx tsc --noEmit",
     "type-check:frontend": "npm --prefix frontend run type-check",
     "type-check:backend": "npx tsc --noEmit",
