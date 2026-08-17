@@ -453,9 +453,11 @@ function normalizePropertySummary(p: PropertyRow): PropertyRow {
 }
 
 router.get('/properties', async (req: Request, res: Response) => {
-  const { district, priceMin, priceMax, facility, ownerId, owner } = req.query;
+  const { district, priceMin, priceMax, minPrice, maxPrice, facility, ownerId, owner } = req.query;
   const targetOwner = ownerId || owner;
-  const cacheKey = `properties:${district || 'all'}:${priceMin || 0}:${priceMax || 0}:${facility || 'all'}:${targetOwner || 'all'}`;
+  const effectiveMin = priceMin !== undefined ? priceMin : minPrice;
+  const effectiveMax = priceMax !== undefined ? priceMax : maxPrice;
+  const cacheKey = `properties:${district || 'all'}:${effectiveMin || 0}:${effectiveMax || 0}:${facility || 'all'}:${targetOwner || 'all'}`;
 
   const cachedData = apiCache.get<PropertyRow[]>(cacheKey);
   if (cachedData) {
@@ -480,13 +482,13 @@ router.get('/properties', async (req: Request, res: Response) => {
       sql += ' AND p.district = ?';
       params.push(String(district));
     }
-    if (priceMin) {
+    if (effectiveMin !== undefined && effectiveMin !== '') {
       sql += ' AND p.price >= ?';
-      params.push(parseInt(String(priceMin), 10));
+      params.push(parseInt(String(effectiveMin), 10));
     }
-    if (priceMax) {
+    if (effectiveMax !== undefined && effectiveMax !== '') {
       sql += ' AND p.price <= ?';
-      params.push(parseInt(String(priceMax), 10));
+      params.push(parseInt(String(effectiveMax), 10));
     }
 
     sql += ' GROUP BY p.id';

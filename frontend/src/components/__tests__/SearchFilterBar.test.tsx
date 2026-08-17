@@ -16,11 +16,13 @@ describe('SearchFilterBar Component', () => {
 
   const mockRenderIcon = (name: string) => <span data-testid={`icon-${name}`}>{name}</span>;
 
-  it('renders all filter controls, district options, and price indicator', () => {
+  it('renders all filter controls, district options, and dual price inputs', () => {
     render(
       <SearchFilterBar
         district="Semua"
         setDistrict={vi.fn()}
+        priceMin={1000000}
+        setPriceMin={vi.fn()}
         priceMax={5000000}
         setPriceMax={vi.fn()}
         facilities={initialFacilities}
@@ -32,7 +34,8 @@ describe('SearchFilterBar Component', () => {
     );
 
     expect(screen.getByLabelText(/wilayah di bali/i)).toBeInTheDocument();
-    expect(screen.getByText(/5\.000\.000/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/harga minimum/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/harga maksimum/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /cari kos/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /reset/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /wifi/i })).toBeInTheDocument();
@@ -44,6 +47,8 @@ describe('SearchFilterBar Component', () => {
       <SearchFilterBar
         district="Semua"
         setDistrict={setDistrict}
+        priceMin={0}
+        setPriceMin={vi.fn()}
         priceMax={5000000}
         setPriceMax={vi.fn()}
         facilities={initialFacilities}
@@ -60,12 +65,38 @@ describe('SearchFilterBar Component', () => {
     expect(setDistrict).toHaveBeenCalledWith('Badung');
   });
 
-  it('triggers setPriceMax when moving the range slider', () => {
+  it('triggers setPriceMin when typing in the minimum price input', () => {
+    const setPriceMin = vi.fn();
+    render(
+      <SearchFilterBar
+        district="Semua"
+        setDistrict={vi.fn()}
+        priceMin={0}
+        setPriceMin={setPriceMin}
+        priceMax={10000000}
+        setPriceMax={vi.fn()}
+        facilities={initialFacilities}
+        toggleFacility={vi.fn()}
+        handleSearch={vi.fn()}
+        resetFilters={vi.fn()}
+        renderFacilityIcon={mockRenderIcon}
+      />
+    );
+
+    const minInput = screen.getByLabelText(/harga minimum/i);
+    fireEvent.change(minInput, { target: { value: '1500000' } });
+
+    expect(setPriceMin).toHaveBeenCalledWith(1500000);
+  });
+
+  it('triggers setPriceMax when typing in the maximum price input', () => {
     const setPriceMax = vi.fn();
     render(
       <SearchFilterBar
         district="Semua"
         setDistrict={vi.fn()}
+        priceMin={0}
+        setPriceMin={vi.fn()}
         priceMax={5000000}
         setPriceMax={setPriceMax}
         facilities={initialFacilities}
@@ -76,8 +107,8 @@ describe('SearchFilterBar Component', () => {
       />
     );
 
-    const slider = screen.getByRole('slider');
-    fireEvent.change(slider, { target: { value: '7500000' } });
+    const maxInput = screen.getByLabelText(/harga maksimum/i);
+    fireEvent.change(maxInput, { target: { value: '7500000' } });
 
     expect(setPriceMax).toHaveBeenCalledWith(7500000);
   });
@@ -88,6 +119,8 @@ describe('SearchFilterBar Component', () => {
       <SearchFilterBar
         district="Semua"
         setDistrict={vi.fn()}
+        priceMin={0}
+        setPriceMin={vi.fn()}
         priceMax={5000000}
         setPriceMax={vi.fn()}
         facilities={initialFacilities}
@@ -112,6 +145,8 @@ describe('SearchFilterBar Component', () => {
       <SearchFilterBar
         district="Semua"
         setDistrict={vi.fn()}
+        priceMin={0}
+        setPriceMin={vi.fn()}
         priceMax={5000000}
         setPriceMax={vi.fn()}
         facilities={initialFacilities}

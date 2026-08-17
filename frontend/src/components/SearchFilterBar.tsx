@@ -5,6 +5,8 @@ import { FacilityFilterState } from '../types/index.ts';
 export interface Props {
   district: string;
   setDistrict: (district: string) => void;
+  priceMin: number;
+  setPriceMin: (price: number) => void;
   priceMax: number;
   setPriceMax: (price: number) => void;
   facilities: FacilityFilterState;
@@ -17,6 +19,8 @@ export interface Props {
 export default function SearchFilterBar({
   district,
   setDistrict,
+  priceMin,
+  setPriceMin,
   priceMax,
   setPriceMax,
   facilities,
@@ -25,27 +29,35 @@ export default function SearchFilterBar({
   resetFilters,
   renderFacilityIcon
 }: Props) {
-  const formatRupiah = (val: number): string => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      maximumFractionDigits: 0
-    }).format(val);
+  const formatDisplay = (val: number): string => {
+    if (val === 0) return '';
+    return new Intl.NumberFormat('id-ID').format(val);
+  };
+
+  const handleMinChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const digits = e.target.value.replace(/\D/g, '');
+    setPriceMin(digits ? parseInt(digits, 10) : 0);
+  };
+
+  const handleMaxChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const digits = e.target.value.replace(/\D/g, '');
+    setPriceMax(digits ? parseInt(digits, 10) : 0);
   };
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-lg shadow-slate-100 border border-slate-200/60 -mt-8 relative z-10 max-w-5xl mx-auto filter-wrapper">
       <form onSubmit={handleSearch}>
         {/* Top Row: 12-Column Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-          {/* District Selector (col-span-5) */}
-          <div className="form-group md:col-span-5 flex flex-col gap-1.5 mb-0">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          {/* District Selector (col-span-4) */}
+          <div className="form-group md:col-span-4 flex flex-col gap-1.5 mb-0">
             <label htmlFor="district-select" className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 form-label">
               <MapPin size={14} className="text-blue-600" />
               Wilayah di Bali
             </label>
             <select
               id="district-select"
+              aria-label="Wilayah di Bali"
               className="w-full rounded-xl border border-slate-200 p-2.5 text-sm bg-slate-50 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors form-select"
               value={district}
               onChange={(e) => setDistrict(e.target.value)}
@@ -58,42 +70,64 @@ export default function SearchFilterBar({
             </select>
           </div>
 
-          {/* Budget Range (col-span-4) */}
-          <div className="form-group md:col-span-4 flex flex-col gap-1.5 mb-0">
-            <div className="flex justify-between items-center">
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 form-label">
-                <DollarSign size={14} className="text-emerald-600" />
-                Maksimal Budget
-              </label>
-              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                {formatRupiah(priceMax)}
+          {/* Minimum Price Input (col-span-3) */}
+          <div className="form-group md:col-span-3 flex flex-col gap-1.5 mb-0">
+            <label htmlFor="min-price-input" className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 form-label">
+              <DollarSign size={14} className="text-emerald-600" />
+              Harga Minimum
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold pointer-events-none">
+                Rp
               </span>
-            </div>
-            <div className="py-1">
               <input
-                type="range"
-                min="1000000"
-                max="15000000"
-                step="500000"
-                value={priceMax}
-                onChange={(e) => setPriceMax(parseInt(e.target.value, 10))}
-                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                id="min-price-input"
+                aria-label="Harga Minimum"
+                type="text"
+                inputMode="numeric"
+                placeholder="0"
+                value={formatDisplay(priceMin)}
+                onChange={handleMinChange}
+                className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm bg-slate-50 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors form-input"
               />
             </div>
           </div>
 
-          {/* Search & Reset Actions (col-span-3) */}
-          <div className="md:col-span-3 flex gap-2">
+          {/* Maximum Price Input (col-span-3) */}
+          <div className="form-group md:col-span-3 flex flex-col gap-1.5 mb-0">
+            <label htmlFor="max-price-input" className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 form-label">
+              <DollarSign size={14} className="text-emerald-600" />
+              Harga Maksimum
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold pointer-events-none">
+                Rp
+              </span>
+              <input
+                id="max-price-input"
+                aria-label="Harga Maksimum"
+                type="text"
+                inputMode="numeric"
+                placeholder="10.000.000"
+                value={formatDisplay(priceMax)}
+                onChange={handleMaxChange}
+                className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm bg-slate-50 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors form-input"
+              />
+            </div>
+          </div>
+
+          {/* Search & Reset Actions (col-span-2) */}
+          <div className="md:col-span-2 flex gap-2">
             <button
               type="submit"
-              className="btn btn-primary flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-xl shadow-sm hover:shadow transition text-sm"
+              className="btn btn-primary flex-1 flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm hover:shadow transition text-sm whitespace-nowrap"
             >
               <Search size={15} />
               <span>Cari Kos</span>
             </button>
             <button
               type="button"
-              className="btn btn-secondary flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-3.5 rounded-xl transition text-sm border border-slate-200/60"
+              className="btn btn-secondary flex items-center justify-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-3 rounded-xl transition text-sm border border-slate-200/60"
               onClick={resetFilters}
             >
               <RotateCcw size={14} />

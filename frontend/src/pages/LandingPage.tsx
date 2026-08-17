@@ -25,6 +25,7 @@ export default function LandingPage() {
 
   // Filter States
   const [district, setDistrict] = useState<string>('Semua');
+  const [priceMin, setPriceMin] = useState<number>(0);
   const [priceMax, setPriceMax] = useState<number>(10000000);
   const [facilities, setFacilities] = useState<FacilityFilterState>({
     Listrik: false,
@@ -98,7 +99,7 @@ export default function LandingPage() {
 
   const handleSearch = (e: React.FormEvent): void => {
     e.preventDefault();
-    let query = `?priceMin=0&priceMax=${priceMax}`;
+    let query = `?priceMin=${priceMin}&priceMax=${priceMax}`;
     if (district !== 'Semua') {
       query += `&district=${encodeURIComponent(district)}`;
     }
@@ -122,6 +123,7 @@ export default function LandingPage() {
 
   const resetFilters = (): void => {
     setDistrict('Semua');
+    setPriceMin(0);
     setPriceMax(10000000);
     setFacilities({
       Listrik: false,
@@ -321,6 +323,8 @@ export default function LandingPage() {
         <SearchFilterBar
           district={district}
           setDistrict={setDistrict}
+          priceMin={priceMin}
+          setPriceMin={setPriceMin}
           priceMax={priceMax}
           setPriceMax={setPriceMax}
           facilities={facilities}
