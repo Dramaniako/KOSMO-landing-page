@@ -39,8 +39,25 @@ export default function LandingPage() {
     Parkir: false
   });
 
-  const rawUser = localStorage.getItem('user');
-  const currentUser: User | null = rawUser ? (JSON.parse(rawUser) as User) : null;
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const rawUser = localStorage.getItem('user');
+      return rawUser ? (JSON.parse(rawUser) as User) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const rawUser = localStorage.getItem('user');
+      if (rawUser) {
+        setCurrentUser(JSON.parse(rawUser) as User);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const fetchProperties = async (queryParams: string = ''): Promise<void> => {
     setLoading(true);

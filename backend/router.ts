@@ -44,10 +44,10 @@ export {
 };
 export type { JWTPayload, AuthenticatedRequest };
 
-// Rate Limiter for Authentication Endpoints (max 10 requests per minute)
+// Rate Limiter for Authentication Endpoints
 export const authLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 10,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 50,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Terlalu banyak percobaan masuk/daftar. Silakan coba lagi dalam 1 menit.' }

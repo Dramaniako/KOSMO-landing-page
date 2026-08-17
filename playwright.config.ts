@@ -25,15 +25,15 @@ export default defineConfig({
   webServer: [
     {
       command: 'npx tsx backend/server.ts',
-      url: 'http://localhost:5000/api/properties',
+      port: 5000,
       reuseExistingServer: true,
-      timeout: 120 * 1000
+      timeout: 60 * 1000
     },
     {
       command: 'npm --prefix frontend run dev',
-      url: 'http://localhost:5173',
+      port: 5173,
       reuseExistingServer: true,
-      timeout: 120 * 1000
+      timeout: 60 * 1000
     }
   ]
 });

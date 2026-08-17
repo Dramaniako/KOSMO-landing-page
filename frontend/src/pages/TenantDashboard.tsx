@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   User as UserIcon, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
-  Plus, LogOut, Globe, MessageSquare, Building, X, Download
+  Plus, LogOut, Globe, MessageSquare, Building, X, Download, Home, Compass, History
 } from 'lucide-react';
 import { User, Property, Review, Rental } from '../types/index.ts';
 
@@ -538,63 +538,137 @@ export default function TenantDashboard() {
         )}
 
         {/* RENTALS TAB */}
-        {activeTab === 'rentals' && (
-          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-            <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Properti Kos yang Sedang Disewa</h3>
+        {activeTab === 'rentals' && (() => {
+          const activeRental = myRentals.find((r) => r.status === 'active');
+          const pastRentals = myRentals.filter((r) => r.status !== 'active');
 
-            {tabLoading.rentals && !loadedTabs.current.has('rentals') ? (
-              <div className="flex-center" style={{ height: '160px', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data sewa kos...</p>
-              </div>
-            ) : myRentals.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
-                <p style={{ fontStyle: 'italic', fontSize: '14px' }}>Anda belum menyewa kos apapun saat ini.</p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {myRentals.map((rent) => (
-                  <div key={rent.id} className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: rent.status === 'active' ? '#ffffff' : '#f8fafc' }}>
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* SECTION 1: Hunian Aktif Saya */}
+              <div className="card" style={{ padding: '28px', backgroundColor: 'white' }}>
+                <div className="flex-between" style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Home size={20} style={{ color: 'var(--primary)' }} />
+                    </div>
                     <div>
-                      <span className={`badge ${rent.status === 'active' ? 'badge-success' : 'badge-danger'}`} style={{ marginBottom: '6px', fontSize: '10px' }}>
-                        {rent.status === 'active' ? 'Sewa Aktif' : 'Penyewaan Selesai'}
+                      <h3 style={{ fontSize: '18px', fontWeight: 700 }}>Hunian Aktif Saya</h3>
+                      <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Status hunian sewa all-inclusive yang sedang berjalan</p>
+                    </div>
+                  </div>
+                </div>
+
+                {tabLoading.rentals && !loadedTabs.current.has('rentals') ? (
+                  <div className="flex-center" style={{ height: '160px', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data sewa kos...</p>
+                  </div>
+                ) : activeRental ? (
+                  <div className="flex-between" style={{ padding: '20px', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md)', background: '#f0fdf4' }}>
+                    <div>
+                      <span className="badge badge-success" style={{ marginBottom: '8px', fontSize: '11px', display: 'inline-block' }}>
+                        Sewa Aktif
                       </span>
-                      <h4 style={{ fontSize: '16px', fontWeight: 700 }}>{rent.propertyName}</h4>
-                      <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Mulai Sewa: {rent.startDate}</p>
+                      <h4 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--dark)' }}>{activeRental.propertyName}</h4>
+                      <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        Mulai Sewa: <strong>{activeRental.startDate}</strong> &bull; All-Inclusive
+                      </p>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <strong style={{ fontSize: '18px', color: 'var(--primary)', display: 'block' }}>Rp {rent.price ? rent.price.toLocaleString('id-ID') : '0'}/bln</strong>
-                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                      <strong style={{ fontSize: '20px', color: 'var(--primary)', display: 'block' }}>
+                        Rp {activeRental.price ? activeRental.price.toLocaleString('id-ID') : '0'}/bln
+                      </strong>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' }}>
                         <a
-                          href={`${API_BASE}/rentals/${rent.id}/contract`}
+                          href={`${API_BASE}/rentals/${activeRental.id}/contract`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="btn btn-outline"
-                          style={{ padding: '4px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                          style={{ padding: '6px 14px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                         >
-                          <Download size={13} />
+                          <Download size={14} />
                           Unduh Kontrak Sewa (PDF)
                         </a>
-                        {rent.status === 'active' && (
-                          <button 
-                            className="btn btn-outline btn-danger" 
-                            style={{ padding: '4px 12px', fontSize: '12px' }}
-                            onClick={() => {
-                              setTerminateRental(rent);
-                              setShowTerminateModal(true);
-                            }}
-                          >
-                            Berhenti Menyewa
-                          </button>
-                        )}
+                        <button 
+                          className="btn btn-outline btn-danger" 
+                          style={{ padding: '6px 14px', fontSize: '12px' }}
+                          onClick={() => {
+                            setTerminateRental(activeRental);
+                            setShowTerminateModal(true);
+                          }}
+                        >
+                          Berhenti Menyewa
+                        </button>
                       </div>
                     </div>
                   </div>
-                ))}
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '36px 20px', backgroundColor: '#f8fafc', borderRadius: 'var(--radius-md)', border: '1px dashed var(--border-color)' }}>
+                    <div style={{ width: '48px', height: '48px', margin: '0 auto 12px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Home size={24} style={{ color: '#94a3b8' }} />
+                    </div>
+                    <p style={{ fontWeight: 600, fontSize: '15px', color: 'var(--dark)' }}>Anda belum memiliki sewa kos aktif saat ini.</p>
+                    <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: '18px' }}>
+                      Temukan kamar kos impian Anda di Bali dengan fasilitas lengkap all-inclusive.
+                    </p>
+                    <button className="btn btn-primary" onClick={() => navigate('/')} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <Compass size={16} />
+                      Jelajahi Kos
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+
+              {/* SECTION 2: Riwayat Sewa Masa Lalu */}
+              {pastRentals.length > 0 && (
+                <div className="card" style={{ padding: '28px', backgroundColor: 'white' }}>
+                  <div className="flex-between" style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <History size={20} style={{ color: 'var(--text-muted)' }} />
+                      </div>
+                      <div>
+                        <h3 style={{ fontSize: '18px', fontWeight: 700 }}>Riwayat Sewa Masa Lalu</h3>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Daftar sewa kos yang telah selesai atau diberhentikan ({pastRentals.length})</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {pastRentals.map((rent) => (
+                      <div key={rent.id} className="flex-between" style={{ padding: '16px 20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#f8fafc' }}>
+                        <div>
+                          <span className="badge badge-secondary" style={{ marginBottom: '6px', fontSize: '10px', display: 'inline-block', backgroundColor: '#e2e8f0', color: '#475569' }}>
+                            Penyewaan Selesai
+                          </span>
+                          <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#334155' }}>{rent.propertyName}</h4>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Mulai Sewa: {rent.startDate}</p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <strong style={{ fontSize: '16px', color: '#64748b', display: 'block' }}>
+                            Rp {rent.price ? rent.price.toLocaleString('id-ID') : '0'}/bln
+                          </strong>
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '6px' }}>
+                            <a
+                              href={`${API_BASE}/rentals/${rent.id}/contract`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-outline"
+                              style={{ padding: '4px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              <Download size={12} />
+                              Unduh Kontrak Sewa (PDF)
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* BILLING HISTORY TAB */}
         {activeTab === 'bills' && (
