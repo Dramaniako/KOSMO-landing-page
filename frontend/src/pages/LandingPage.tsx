@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Property, Review, User, FacilityFilterState } from '../types/index.ts';
 import KosCard from '../components/KosCard.tsx';
+import KosCardSkeleton from '../components/KosCardSkeleton.tsx';
 import SearchFilterBar from '../components/SearchFilterBar.tsx';
 import BookingModal from '../components/BookingModal.tsx';
 
@@ -146,11 +147,9 @@ export default function LandingPage() {
 
   const handleSignContract = (): void => {
     setContractSigned(true);
-    setTimeout(() => {
-      setShowContract(false);
-      setShowPayment(true);
-      setContractSigned(false);
-    }, 1500);
+    setShowContract(false);
+    setShowPayment(true);
+    setContractSigned(false);
   };
 
   const handleProcessPayment = async (): Promise<void> => {
@@ -332,6 +331,7 @@ export default function LandingPage() {
           handleSearch={handleSearch}
           resetFilters={resetFilters}
           renderFacilityIcon={renderFacilityIcon}
+          isSearching={loading}
         />
       </section>
 
@@ -345,13 +345,15 @@ export default function LandingPage() {
             </p>
           </div>
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Menampilkan {properties.length} properti
+            Menampilkan {loading ? '...' : properties.length} properti
           </span>
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center min-h-[300px]">
-            <div className="text-center text-slate-400 font-medium text-sm">Memuat properti...</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 property-grid">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <KosCardSkeleton key={i} />
+            ))}
           </div>
         ) : properties.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-sm">

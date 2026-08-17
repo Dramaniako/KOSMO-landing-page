@@ -67,7 +67,10 @@ export default function TenantDashboard() {
   const fetchMyRentals = useCallback(async (userId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, rentals: true, bills: true }));
     try {
-      const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`);
+      const token = localStorage.getItem('token');
+      const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       const rentData = (await rentRes.json()) as Rental[];
       setMyRentals(Array.isArray(rentData) ? rentData : []);
       loadedTabs.current.add('rentals');

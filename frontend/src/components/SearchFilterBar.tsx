@@ -14,6 +14,7 @@ export interface Props {
   handleSearch: (e: React.FormEvent) => void;
   resetFilters: () => void;
   renderFacilityIcon: (facilityName: string) => React.ReactNode;
+  isSearching?: boolean;
 }
 
 export default function SearchFilterBar({
@@ -27,7 +28,8 @@ export default function SearchFilterBar({
   toggleFacility,
   handleSearch,
   resetFilters,
-  renderFacilityIcon
+  renderFacilityIcon,
+  isSearching = false
 }: Props) {
   const formatDisplay = (val: number): string => {
     if (val === 0) return '';
@@ -76,8 +78,8 @@ export default function SearchFilterBar({
               <DollarSign size={14} className="text-emerald-600" />
               Harga Minimum
             </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold pointer-events-none">
+            <div className="relative flex-1">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-semibold select-none pointer-events-none">
                 Rp
               </span>
               <input
@@ -88,7 +90,7 @@ export default function SearchFilterBar({
                 placeholder="0"
                 value={formatDisplay(priceMin)}
                 onChange={handleMinChange}
-                className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm bg-slate-50 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors form-input"
+                className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition form-input"
               />
             </div>
           </div>
@@ -99,8 +101,8 @@ export default function SearchFilterBar({
               <DollarSign size={14} className="text-emerald-600" />
               Harga Maksimum
             </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold pointer-events-none">
+            <div className="relative flex-1">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-semibold select-none pointer-events-none">
                 Rp
               </span>
               <input
@@ -111,7 +113,7 @@ export default function SearchFilterBar({
                 placeholder="10.000.000"
                 value={formatDisplay(priceMax)}
                 onChange={handleMaxChange}
-                className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm bg-slate-50 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors form-input"
+                className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition form-input"
               />
             </div>
           </div>
@@ -120,9 +122,14 @@ export default function SearchFilterBar({
           <div className="md:col-span-2 flex gap-2">
             <button
               type="submit"
-              className="btn btn-primary flex-1 flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm hover:shadow transition text-sm whitespace-nowrap"
+              disabled={isSearching}
+              className="btn btn-primary flex-1 flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-70 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm hover:shadow transition text-sm whitespace-nowrap"
             >
-              <Search size={15} />
+              {isSearching ? (
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Search size={15} />
+              )}
               <span>Cari Kos</span>
             </button>
             <button

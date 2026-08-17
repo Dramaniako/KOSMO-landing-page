@@ -165,4 +165,26 @@ describe('SearchFilterBar Component', () => {
     fireEvent.click(resetButton);
     expect(resetFilters).toHaveBeenCalled();
   });
+
+  it('disables search button when isSearching is true', () => {
+    render(
+      <SearchFilterBar
+        district="Semua"
+        setDistrict={vi.fn()}
+        priceMin={0}
+        setPriceMin={vi.fn()}
+        priceMax={5000000}
+        setPriceMax={vi.fn()}
+        facilities={initialFacilities}
+        toggleFacility={vi.fn()}
+        handleSearch={vi.fn()}
+        resetFilters={vi.fn()}
+        renderFacilityIcon={mockRenderIcon}
+        isSearching={true}
+      />
+    );
+
+    const searchButton = screen.getByRole('button', { name: /cari kos/i });
+    expect(searchButton).toBeDisabled();
+  });
 });
