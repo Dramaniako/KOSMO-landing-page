@@ -76,7 +76,7 @@ KOSMO-landing-page/
 ├── .agents/                        # AI Workspace rules and execution standards
 │   └── rules/workspace-rules.md    # Operating rules, zero-any policy, commit rules
 ├── api/                            # Vercel Serverless deployment entrypoint
-│   └── index.js                    # Serverless bridge wrapping backend/server.ts
+│   └── index.ts                    # Serverless bridge directly exporting Express app
 ├── backend/                        # Backend REST API architecture
 │   ├── db/                         # Legacy JSON files (preserved/unreferenced)
 │   ├── middleware/                 # Express middleware suite
