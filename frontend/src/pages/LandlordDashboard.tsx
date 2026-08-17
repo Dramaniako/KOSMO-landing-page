@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Building, DollarSign, Star, Percent, Trash2, Edit, Plus, LogOut, 
@@ -52,7 +52,8 @@ export default function LandlordDashboard() {
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ overview: true });
+  const loadedTabs = useRef<Set<string>>(new Set());
 
   // Modals
   const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
@@ -95,35 +96,54 @@ export default function LandlordDashboard() {
 
   const [uploadingImage, setUploadingImage] = useState<boolean>(false);
 
-  const fetchDashboardData = useCallback(async (landlordId: string): Promise<void> => {
-    setLoading(true);
+  const fetchOverviewStats = useCallback(async (landlordId: string): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, overview: true }));
     try {
-      // Fetch stats for specific landlord
       const statsRes = await fetch(`${API_BASE}/stats?landlordId=${encodeURIComponent(landlordId)}`);
       const statsData = (await statsRes.json()) as LandlordStats;
       setStats(statsData);
+      loadedTabs.current.add('overview');
+    } catch (err) {
+      console.error("Error loading landlord stats:", err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, overview: false }));
+    }
+  }, []);
 
-      // Fetch properties
-      const propRes = await fetch(`${API_BASE}/properties`);
+  const fetchLandlordProperties = useCallback(async (landlordId: string): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, properties: true }));
+    try {
+      const propRes = await fetch(`${API_BASE}/properties?ownerId=${encodeURIComponent(landlordId)}`);
       const propData = (await propRes.json()) as Property[];
       const safeProps = Array.isArray(propData) ? propData : [];
-      // Filter landlord's own properties
-      const landlordProps = safeProps.filter((p) => p.ownerId === landlordId);
-      setProperties(landlordProps);
+      setProperties(safeProps);
+      loadedTabs.current.add('properties');
+    } catch (err) {
+      console.error("Error loading landlord properties:", err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, properties: false }));
+    }
+  }, []);
 
-      // Fetch reviews
-      const revRes = await fetch(`${API_BASE}/reviews`);
+  const fetchLandlordReviews = useCallback(async (landlordId: string): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, reviews: true }));
+    try {
+      const [propRes, revRes] = await Promise.all([
+        fetch(`${API_BASE}/properties?ownerId=${encodeURIComponent(landlordId)}`),
+        fetch(`${API_BASE}/reviews`)
+      ]);
+      const propData = (await propRes.json()) as Property[];
       const revData = (await revRes.json()) as Review[];
+      const safeProps = Array.isArray(propData) ? propData : [];
       const safeReviews = Array.isArray(revData) ? revData : [];
-      // Filter reviews of landlord's properties
-      const propIds = landlordProps.map((p) => p.id);
+      const propIds = safeProps.map((p) => p.id);
       const landlordReviews = safeReviews.filter((r) => propIds.includes(r.propertyId));
       setReviews(landlordReviews);
-
+      loadedTabs.current.add('reviews');
     } catch (err) {
-      console.error("Error loading landlord dashboard data:", err);
+      console.error("Error loading landlord reviews:", err);
     } finally {
-      setLoading(false);
+      setTabLoading(prev => ({ ...prev, reviews: false }));
     }
   }, []);
 
@@ -133,8 +153,14 @@ export default function LandlordDashboard() {
       return;
     }
 
-    fetchDashboardData(landlordUser.id);
-  }, [landlordUser, navigate, fetchDashboardData]);
+    if (activeTab === 'overview' && !loadedTabs.current.has('overview')) {
+      fetchOverviewStats(landlordUser.id);
+    } else if (activeTab === 'properties' && !loadedTabs.current.has('properties')) {
+      fetchLandlordProperties(landlordUser.id);
+    } else if (activeTab === 'reviews' && !loadedTabs.current.has('reviews')) {
+      fetchLandlordReviews(landlordUser.id);
+    }
+  }, [landlordUser, navigate, activeTab, fetchOverviewStats, fetchLandlordProperties, fetchLandlordReviews]);
 
   useEffect(() => {
     if (!showPropModal) return;
@@ -228,7 +254,7 @@ export default function LandlordDashboard() {
       setLandlordUser(updatedUser);
       localStorage.setItem('user', JSON.stringify(updatedUser));
 
-      fetchDashboardData(landlordUser.id);
+      await fetchOverviewStats(landlordUser.id);
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -316,7 +342,9 @@ export default function LandlordDashboard() {
       alert(data.message);
       setShowPropModal(false);
       resetPropertyForm();
-      fetchDashboardData(landlordUser.id);
+      loadedTabs.current.delete('overview');
+      loadedTabs.current.delete('reviews');
+      await fetchLandlordProperties(landlordUser.id);
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -447,16 +475,16 @@ export default function LandlordDashboard() {
           </div>
         </header>
 
-        {loading ? (
-          <div className="flex-center" style={{ height: '300px', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ width: '40px', height: '40px', border: '4px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-            <p style={{ color: 'var(--text-muted)' }}>Memuat data dashboard...</p>
-          </div>
-        ) : (
-          <>
-            {/* Overview / Finance Tab */}
-            {activeTab === 'overview' && (
-              <div>
+        {/* Overview / Finance Tab */}
+        {activeTab === 'overview' && (
+          <div>
+            {tabLoading.overview && !loadedTabs.current.has('overview') ? (
+              <div className="flex-center" style={{ height: '260px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '36px', height: '36px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data keuangan landlord...</p>
+              </div>
+            ) : (
+              <>
                 {/* Stats Cards Row */}
                 <div className="stats-grid">
                   <div className="stats-card">
@@ -580,117 +608,131 @@ export default function LandlordDashboard() {
                     )}
                   </div>
                 </div>
-              </div>
+              </>
             )}
+          </div>
+        )}
 
-            {/* Properties Management Tab */}
-            {activeTab === 'properties' && (
-              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                <div className="flex-between" style={{ marginBottom: '24px' }}>
-                  <h3 style={{ fontSize: '20px' }}>Properti Saya ({properties.length})</h3>
-                  <button className="btn btn-primary" onClick={() => { resetPropertyForm(); setShowPropModal(true); }}>
-                    <Plus size={16} />
-                    Tambah Properti
-                  </button>
-                </div>
+        {/* Properties Management Tab */}
+        {activeTab === 'properties' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <div className="flex-between" style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px' }}>Properti Saya ({properties.length})</h3>
+              <button className="btn btn-primary" onClick={() => { resetPropertyForm(); setShowPropModal(true); }}>
+                <Plus size={16} />
+                Tambah Properti
+              </button>
+            </div>
 
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                        <th style={{ padding: '12px 16px' }}>Properti</th>
-                        <th style={{ padding: '12px 16px' }}>Wilayah</th>
-                        <th style={{ padding: '12px 16px' }}>Harga / Bln</th>
-                        <th style={{ padding: '12px 16px' }}>Okupansi Kamar</th>
-                        <th style={{ padding: '12px 16px' }}>Rating</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'right' }}>Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {properties.map((p) => (
-                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                              <img src={p.image} alt={p.name} style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px' }} />
-                              <div>
-                                <strong style={{ fontSize: '15px', color: 'var(--dark)' }}>{p.name}</strong>
-                                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{p.address}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td style={{ padding: '16px' }}>{p.district}</td>
-                          <td style={{ padding: '16px', fontWeight: 600, color: 'var(--primary)' }}>{formatRupiah(p.price)}</td>
-                          <td style={{ padding: '16px' }}>
-                            <strong>{p.occupiedRooms}</strong> / {p.totalRooms} Kamar
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
-                              ({p.totalRooms - p.occupiedRooms} Kamar Kosong)
-                            </span>
-                          </td>
-                          <td style={{ padding: '16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <Star size={14} style={{ fill: '#f59e0b', color: '#f59e0b' }} />
-                              <span>{p.rating > 0 ? p.rating : 'N/A'}</span>
-                            </div>
-                          </td>
-                          <td style={{ padding: '16px', textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: '8px' }}>
-                              <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditProperty(p)}>
-                                <Edit size={14} />
-                              </button>
-                              <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteProperty(p.id)}>
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            {tabLoading.properties && !loadedTabs.current.has('properties') ? (
+              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '36px', height: '36px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat daftar properti Anda...</p>
               </div>
-            )}
-
-            {/* Reviews Management Tab */}
-            {activeTab === 'reviews' && (
-              <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Properti Saya ({reviews.length})</h3>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {reviews.map((r) => (
-                    <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1, marginRight: '24px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                          <strong style={{ fontSize: '15px' }}>{r.userName}</strong>
-                          <span className="badge badge-primary" style={{ fontSize: '10px' }}>
-                            {r.propertyName}
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                      <th style={{ padding: '12px 16px' }}>Properti</th>
+                      <th style={{ padding: '12px 16px' }}>Wilayah</th>
+                      <th style={{ padding: '12px 16px' }}>Harga / Bln</th>
+                      <th style={{ padding: '12px 16px' }}>Okupansi Kamar</th>
+                      <th style={{ padding: '12px 16px' }}>Rating</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {properties.map((p) => (
+                      <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <img src={p.image} alt={p.name} style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px' }} />
+                            <div>
+                              <strong style={{ fontSize: '15px', color: 'var(--dark)' }}>{p.name}</strong>
+                              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{p.address}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '16px' }}>{p.district}</td>
+                        <td style={{ padding: '16px', fontWeight: 600, color: 'var(--primary)' }}>{formatRupiah(p.price)}</td>
+                        <td style={{ padding: '16px' }}>
+                          <strong>{p.occupiedRooms}</strong> / {p.totalRooms} Kamar
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                            ({p.totalRooms - p.occupiedRooms} Kamar Kosong)
                           </span>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.date}</span>
-                        </div>
-                        
-                        <div style={{ display: 'flex', gap: '2px', marginBottom: '8px' }}>
-                          {[...Array(5)].map((_, i) => (
-                            <Star 
-                              key={i} 
-                              size={12} 
-                              style={{ 
-                                fill: i < r.rating ? '#f59e0b' : 'transparent', 
-                                color: i < r.rating ? '#f59e0b' : '#cbd5e1' 
-                              }} 
-                            />
-                          ))}
-                        </div>
+                        </td>
+                        <td style={{ padding: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Star size={14} style={{ fill: '#f59e0b', color: '#f59e0b' }} />
+                            <span>{p.rating > 0 ? p.rating : 'N/A'}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '16px', textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', gap: '8px' }}>
+                            <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditProperty(p)}>
+                              <Edit size={14} />
+                            </button>
+                            <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteProperty(p.id)}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
-                        <p style={{ fontSize: '14px', color: 'var(--text-main)', fontStyle: 'italic' }}>
-                          "{r.comment}"
-                        </p>
+        {/* Reviews Management Tab */}
+        {activeTab === 'reviews' && (
+          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+            <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Properti Saya ({reviews.length})</h3>
+
+            {tabLoading.reviews && !loadedTabs.current.has('reviews') ? (
+              <div className="flex-center" style={{ height: '200px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '36px', height: '36px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat ulasan properti...</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {reviews.map((r) => (
+                  <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, marginRight: '24px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                        <strong style={{ fontSize: '15px' }}>{r.userName}</strong>
+                        <span className="badge badge-primary" style={{ fontSize: '10px' }}>
+                          {r.propertyName}
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.date}</span>
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '2px', marginBottom: '8px' }}>
+                        {[...Array(5)].map((_, i) => (
+                          <Star 
+                            key={i} 
+                            size={12} 
+                            style={{ 
+                              fill: i < r.rating ? '#f59e0b' : 'transparent', 
+                              color: i < r.rating ? '#f59e0b' : '#cbd5e1' 
+                            }} 
+                          />
+                        ))}
                       </div>
 
+                      <p style={{ fontSize: '14px', color: 'var(--text-main)', fontStyle: 'italic' }}>
+                        "{r.comment}"
+                      </p>
                     </div>
-                  ))}
-                </div>
+
+                  </div>
+                ))}
               </div>
             )}
-          </>
+          </div>
         )}
       </main>
 
@@ -957,7 +999,9 @@ export default function LandlordDashboard() {
                   setShowDeleteModal(false);
                   setDeletePassword('');
                   setDeletingPropertyId(null);
-                  fetchDashboardData(landlordUser.id);
+                  loadedTabs.current.delete('overview');
+                  loadedTabs.current.delete('reviews');
+                  await fetchLandlordProperties(landlordUser.id);
                 } catch (err: unknown) {
                   const errorMsg = err instanceof Error ? err.message : String(err);
                   alert(errorMsg);

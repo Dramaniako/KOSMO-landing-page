@@ -453,8 +453,9 @@ function normalizePropertySummary(p: PropertyRow): PropertyRow {
 }
 
 router.get('/properties', async (req: Request, res: Response) => {
-  const { district, priceMin, priceMax, facility } = req.query;
-  const cacheKey = `properties:${district || 'all'}:${priceMin || 0}:${priceMax || 0}:${facility || 'all'}`;
+  const { district, priceMin, priceMax, facility, ownerId, owner } = req.query;
+  const targetOwner = ownerId || owner;
+  const cacheKey = `properties:${district || 'all'}:${priceMin || 0}:${priceMax || 0}:${facility || 'all'}:${targetOwner || 'all'}`;
 
   const cachedData = apiCache.get<PropertyRow[]>(cacheKey);
   if (cachedData) {
@@ -471,6 +472,10 @@ router.get('/properties', async (req: Request, res: Response) => {
     `;
     const params: (string | number)[] = [];
 
+    if (targetOwner) {
+      sql += ' AND p.ownerId = ?';
+      params.push(String(targetOwner));
+    }
     if (district && district !== 'Semua') {
       sql += ' AND p.district = ?';
       params.push(String(district));
@@ -869,28 +874,34 @@ interface WithdrawalRow extends RowDataPacket {
   userPhone?: string;
 }
 
-router.get('/stats', async (req: Request, res: Response) => {
+const handleLandlordStats = async (req: Request, res: Response) => {
   const landlordId = String(req.query.landlordId || 'user-landlord');
 
   try {
-    const [userRows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlordId]);
+    const [
+      [userRows],
+      [properties],
+      [reviews],
+      [withdrawals]
+    ] = await Promise.all([
+      pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlordId]),
+      pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ?', [landlordId]),
+      pool.query<ReviewRow[]>(
+        `SELECT r.* FROM reviews r 
+         JOIN properties p ON r.propertyId = p.id 
+         WHERE p.ownerId = ?`, 
+        [landlordId]
+      ),
+      pool.query<WithdrawalRow[]>(
+        'SELECT * FROM withdrawals WHERE userId = ? ORDER BY date DESC LIMIT 50', 
+        [landlordId]
+      )
+    ]);
+
     const landlord = userRows[0];
     if (!landlord) {
       return res.status(404).json({ message: "Landlord tidak ditemukan." });
     }
-
-    const [properties] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ?', [landlordId]);
-    const [reviews] = await pool.query<ReviewRow[]>(
-      `SELECT r.* FROM reviews r 
-       JOIN properties p ON r.propertyId = p.id 
-       WHERE p.ownerId = ?`, 
-      [landlordId]
-    );
-
-    const [withdrawals] = await pool.query<WithdrawalRow[]>(
-      'SELECT * FROM withdrawals WHERE userId = ? ORDER BY date DESC', 
-      [landlordId]
-    );
 
     let totalRooms = 0;
     let occupiedRooms = 0;
@@ -917,6 +928,52 @@ router.get('/stats', async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Get stats error:", err);
     res.status(500).json({ message: "Gagal memuat statistik dasbor." });
+  }
+};
+
+router.get('/stats', handleLandlordStats);
+router.get('/landlord/stats', handleLandlordStats);
+
+router.get('/withdrawals', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.query.userId || req.user?.id || '');
+  try {
+    let sql = 'SELECT * FROM withdrawals WHERE 1=1';
+    const params: string[] = [];
+    if (userId) {
+      sql += ' AND userId = ?';
+      params.push(userId);
+    }
+    sql += ' ORDER BY id DESC LIMIT 50';
+    const [rows] = await pool.query<WithdrawalRow[]>(sql, params);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: "Gagal mengambil data penarikan." });
+  }
+});
+
+router.get('/withdrawals/me', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const userId = String(req.user?.id || req.query.userId || 'user-landlord');
+  try {
+    const [rows] = await pool.query<WithdrawalRow[]>('SELECT * FROM withdrawals WHERE userId = ? ORDER BY id DESC LIMIT 50', [userId]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: "Gagal mengambil data penarikan." });
+  }
+});
+
+router.get('/landlord/rentals', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
+  const landlordId = String(req.query.landlordId || req.user?.id || 'user-landlord');
+  try {
+    const [rows] = await pool.query<RentalRow[]>(
+      `SELECT r.*, p.name as propertyName FROM rentals r 
+       JOIN properties p ON r.propertyId = p.id 
+       WHERE p.ownerId = ? ORDER BY r.id DESC LIMIT 50`,
+      [landlordId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("Get landlord rentals error:", err);
+    res.status(500).json({ message: "Gagal mengambil data sewa landlord." });
   }
 });
 

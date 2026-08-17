@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   User as UserIcon, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
@@ -61,32 +61,54 @@ export default function TenantDashboard() {
   }));
 
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
+  const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({});
+  const loadedTabs = useRef<Set<string>>(new Set(['profile']));
 
-  const fetchData = useCallback(async (userId: string): Promise<void> => {
+  const fetchMyRentals = useCallback(async (userId: string): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, rentals: true, bills: true }));
     try {
-      // Fetch properties
+      const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`);
+      const rentData = (await rentRes.json()) as Rental[];
+      setMyRentals(Array.isArray(rentData) ? rentData : []);
+      loadedTabs.current.add('rentals');
+      loadedTabs.current.add('bills');
+    } catch (err) {
+      console.error("Error loading rentals:", err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, rentals: false, bills: false }));
+    }
+  }, []);
+
+  const fetchProperties = useCallback(async (): Promise<void> => {
+    try {
       const propRes = await fetch(`${API_BASE}/properties`);
       const propData = (await propRes.json()) as Property[];
       const safeProps = Array.isArray(propData) ? propData : [];
       setProperties(safeProps);
-      
       if (safeProps.length > 0) {
         setReviewForm((prev) => ({ ...prev, propertyId: prev.propertyId || safeProps[0].id }));
       }
-
-      // Fetch reviews by user
-      const revRes = await fetch(`${API_BASE}/reviews?userId=${encodeURIComponent(userId)}`);
-      const revData = (await revRes.json()) as Review[];
-      setMyReviews(Array.isArray(revData) ? revData : []);
-
-      // Fetch rentals by user
-      const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`);
-      const rentData = (await rentRes.json()) as Rental[];
-      setMyRentals(Array.isArray(rentData) ? rentData : []);
     } catch (err) {
-      console.error("Error loading tenant dashboard data:", err);
+      console.error("Error loading properties:", err);
     }
   }, []);
+
+  const fetchMyReviews = useCallback(async (userId: string): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, reviews: true }));
+    try {
+      const [revRes] = await Promise.all([
+        fetch(`${API_BASE}/reviews?userId=${encodeURIComponent(userId)}`),
+        fetchProperties()
+      ]);
+      const revData = (await revRes.json()) as Review[];
+      setMyReviews(Array.isArray(revData) ? revData : []);
+      loadedTabs.current.add('reviews');
+    } catch (err) {
+      console.error("Error loading reviews:", err);
+    } finally {
+      setTabLoading(prev => ({ ...prev, reviews: false }));
+    }
+  }, [fetchProperties]);
 
   useEffect(() => {
     if (!currentUser || (currentUser.role !== 'tenant' && currentUser.role !== 'landlord')) {
@@ -94,8 +116,12 @@ export default function TenantDashboard() {
       return;
     }
 
-    fetchData(currentUser.id);
-  }, [currentUser, navigate, fetchData]);
+    if ((activeTab === 'rentals' || activeTab === 'bills') && !loadedTabs.current.has('rentals')) {
+      fetchMyRentals(currentUser.id);
+    } else if (activeTab === 'reviews' && !loadedTabs.current.has('reviews')) {
+      fetchMyReviews(currentUser.id);
+    }
+  }, [currentUser, navigate, activeTab, fetchMyRentals, fetchMyReviews]);
 
   const handleLogout = (): void => {
     localStorage.removeItem('user');
@@ -125,8 +151,11 @@ export default function TenantDashboard() {
     }
   };
 
-  const resetReviewForm = (): void => {
+  const resetReviewForm = async (): Promise<void> => {
     setEditingReview(null);
+    if (properties.length === 0) {
+      await fetchProperties();
+    }
     setReviewForm({
       propertyId: properties[0]?.id || '',
       rating: 5,
@@ -171,15 +200,18 @@ export default function TenantDashboard() {
       alert(data.message);
       setShowRevModal(false);
       resetReviewForm();
-      fetchData(currentUser.id);
+      await fetchMyReviews(currentUser.id);
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
     }
   };
 
-  const handleEditReview = (rev: Review): void => {
+  const handleEditReview = async (rev: Review): Promise<void> => {
     setEditingReview(rev);
+    if (properties.length === 0) {
+      await fetchProperties();
+    }
     setReviewForm({
       propertyId: rev.propertyId,
       rating: rev.rating,
@@ -198,7 +230,7 @@ export default function TenantDashboard() {
       if (!res.ok) throw new Error(data.message);
 
       alert(data.message);
-      fetchData(currentUser.id);
+      await fetchMyReviews(currentUser.id);
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
@@ -466,7 +498,12 @@ export default function TenantDashboard() {
           <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
             <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Properti Kos yang Sedang Disewa</h3>
 
-            {myRentals.length === 0 ? (
+            {tabLoading.rentals && !loadedTabs.current.has('rentals') ? (
+              <div className="flex-center" style={{ height: '160px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat data sewa kos...</p>
+              </div>
+            ) : myRentals.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
                 <p style={{ fontStyle: 'italic', fontSize: '14px' }}>Anda belum menyewa kos apapun saat ini.</p>
               </div>
@@ -520,33 +557,40 @@ export default function TenantDashboard() {
           <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
             <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Riwayat Transaksi & Tagihan</h3>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#ffffff' }}>
-                <div>
-                  <span className="badge badge-success" style={{ marginBottom: '6px', fontSize: '10px' }}>Berhasil</span>
-                  <h4 style={{ fontSize: '15px' }}>KOSMO Hub Denpasar (Kamar 101)</h4>
-                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Invoice: INV-KSM-0526-782 &bull; Tanggal: 3 Jun 2026</p>
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tagihan: All-Inclusive (Sewa, Listrik, Air)</p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <strong style={{ fontSize: '18px', color: 'var(--dark)' }}>Rp 3.500.000</strong>
-                  <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>Via BCA Virtual Account</span>
-                </div>
+            {tabLoading.bills && !loadedTabs.current.has('bills') ? (
+              <div className="flex-center" style={{ height: '160px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat riwayat tagihan...</p>
               </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#ffffff' }}>
+                  <div>
+                    <span className="badge badge-success" style={{ marginBottom: '6px', fontSize: '10px' }}>Berhasil</span>
+                    <h4 style={{ fontSize: '15px' }}>KOSMO Hub Denpasar (Kamar 101)</h4>
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Invoice: INV-KSM-0526-782 &bull; Tanggal: 3 Jun 2026</p>
+                    <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tagihan: All-Inclusive (Sewa, Listrik, Air)</p>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <strong style={{ fontSize: '18px', color: 'var(--dark)' }}>Rp 3.500.000</strong>
+                    <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>Via BCA Virtual Account</span>
+                  </div>
+                </div>
 
-              <div className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#ffffff' }}>
-                <div>
-                  <span className="badge badge-success" style={{ marginBottom: '6px', fontSize: '10px' }}>Berhasil</span>
-                  <h4 style={{ fontSize: '15px' }}>KOSMO Hub Denpasar (Kamar 101) - Deposit</h4>
-                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Invoice: INV-KSM-0526-462 &bull; Tanggal: 3 Jun 2026</p>
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tagihan: Deposit Awal Jaminan Kamar</p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <strong style={{ fontSize: '18px', color: 'var(--dark)' }}>Rp 550.000</strong>
-                  <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>Via BCA Virtual Account</span>
+                <div className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#ffffff' }}>
+                  <div>
+                    <span className="badge badge-success" style={{ marginBottom: '6px', fontSize: '10px' }}>Berhasil</span>
+                    <h4 style={{ fontSize: '15px' }}>KOSMO Hub Denpasar (Kamar 101) - Deposit</h4>
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Invoice: INV-KSM-0526-462 &bull; Tanggal: 3 Jun 2026</p>
+                    <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tagihan: Deposit Awal Jaminan Kamar</p>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <strong style={{ fontSize: '18px', color: 'var(--dark)' }}>Rp 550.000</strong>
+                    <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>Via BCA Virtual Account</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -557,7 +601,7 @@ export default function TenantDashboard() {
               <h3 style={{ fontSize: '20px' }}>Ulasan Sewa Saya ({myReviews.length})</h3>
               <button 
                 className="btn btn-primary" 
-                onClick={() => { resetReviewForm(); setShowRevModal(true); }}
+                onClick={async () => { await resetReviewForm(); setShowRevModal(true); }}
                 disabled={properties.length === 0}
               >
                 <Plus size={16} />
@@ -565,10 +609,15 @@ export default function TenantDashboard() {
               </button>
             </div>
 
-            {myReviews.length === 0 ? (
+            {tabLoading.reviews && !loadedTabs.current.has('reviews') ? (
+              <div className="flex-center" style={{ height: '160px', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Memuat ulasan saya...</p>
+              </div>
+            ) : myReviews.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
                 <p style={{ fontStyle: 'italic', fontSize: '14px' }}>Anda belum menulis ulasan apapun.</p>
-                <button className="btn btn-secondary" style={{ marginTop: '16px' }} onClick={() => { resetReviewForm(); setShowRevModal(true); }}>
+                <button className="btn btn-secondary" style={{ marginTop: '16px' }} onClick={async () => { await resetReviewForm(); setShowRevModal(true); }}>
                   Tulis Review Pertama Anda
                 </button>
               </div>
@@ -713,7 +762,7 @@ export default function TenantDashboard() {
                   alert("Sewa kos berhasil diberhentikan.");
                   setShowTerminateModal(false);
                   setTerminatePassword('');
-                  fetchData(currentUser.id);
+                  await fetchMyRentals(currentUser.id);
                 } catch (err: unknown) {
                   const errorMsg = err instanceof Error ? err.message : String(err);
                   alert(errorMsg);
