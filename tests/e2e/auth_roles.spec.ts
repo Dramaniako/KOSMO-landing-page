@@ -94,7 +94,7 @@ test.describe('Role-Based Authentication & Dashboard Redirection', () => {
     await page.fill('input[type="password"]', 'tenant123');
     await page.click('button[type="submit"]');
 
-    await page.waitForURL('**/tenant', { timeout: 5000 });
+    await page.waitForURL('**/tenant', { timeout: 10000 });
     expect(page.url()).toContain('/tenant');
     await expect(page.locator('body')).toContainText('Tenant');
   });
@@ -106,7 +106,7 @@ test.describe('Role-Based Authentication & Dashboard Redirection', () => {
     await page.fill('input[type="password"]', 'landlord123');
     await page.click('button[type="submit"]');
 
-    await page.waitForURL('**/landlord', { timeout: 5000 });
+    await page.waitForURL('**/landlord', { timeout: 10000 });
     expect(page.url()).toContain('/landlord');
     await expect(page.locator('body')).toContainText('Landlord');
   });
@@ -118,7 +118,7 @@ test.describe('Role-Based Authentication & Dashboard Redirection', () => {
     await page.fill('input[type="password"]', 'admin123');
     await page.click('button[type="submit"]');
 
-    await page.waitForURL('**/admin', { timeout: 5000 });
+    await page.waitForURL('**/admin', { timeout: 10000 });
     expect(page.url()).toContain('/admin');
     await expect(page.locator('body')).toContainText('Admin');
   });

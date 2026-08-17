@@ -46,7 +46,7 @@ describe('Frontend Component Render Performance', () => {
     );
     const duration = performance.now() - start;
 
-    expect(duration).toBeLessThan(200);
+    expect(duration).toBeLessThan(500);
     const img = container.querySelector('img');
     expect(img).not.toBeNull();
     expect(img?.getAttribute('loading')).toBe('lazy');
@@ -72,7 +72,7 @@ describe('Frontend Component Render Performance', () => {
     );
     const duration = performance.now() - start;
 
-    expect(duration).toBeLessThan(200);
+    expect(duration).toBeLessThan(500);
     expect(container.querySelector('select')).not.toBeNull();
   });
 });

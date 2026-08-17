@@ -9,10 +9,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": "..",
+    "rootDir": ".",
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["**/*", "../api/**/*"],
+  "include": ["**/*"],
   "exclude": ["node_modules", "dist", "uploads"]
 }
