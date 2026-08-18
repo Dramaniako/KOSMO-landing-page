@@ -1,25 +1,9 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import {
   MapPin, Star, X, ArrowRight, ShieldCheck, Download, CreditCard, Sparkles, Check, AlertCircle
 } from 'lucide-react';
 import { Property, User } from '../types/index';
 import { useTranslation } from '../context/LanguageContext';
-
-declare global {
-  interface Window {
-    snap?: {
-      pay: (
-        token: string,
-        options: {
-          onSuccess?: (result: unknown) => void;
-          onPending?: (result: unknown) => void;
-          onError?: (result: unknown) => void;
-          onClose?: () => void;
-        }
-      ) => void;
-    };
-  }
-}
 
 export interface Props {
   property: Property | null;
@@ -41,33 +25,6 @@ export interface Props {
   activeRentalError?: string | null;
 }
 
-export const loadSnapScript = (clientKey: string): Promise<void> => {
-  return new Promise((resolve) => {
-    if (typeof window !== 'undefined' && window.snap) {
-      resolve();
-      return;
-    }
-    const snapScriptUrl = 'https://app.sandbox.midtrans.com/snap/snap.js';
-    let script = document.querySelector(`script[src="${snapScriptUrl}"]`) as HTMLScriptElement | null;
-    if (!script) {
-      script = document.createElement('script');
-      script.src = snapScriptUrl;
-      script.setAttribute('data-client-key', clientKey);
-      script.async = true;
-      script.onload = () => resolve();
-      script.onerror = () => resolve();
-      document.body.appendChild(script);
-    } else {
-      if (typeof window !== 'undefined' && window.snap) {
-        resolve();
-      } else {
-        script.addEventListener('load', () => resolve());
-        script.addEventListener('error', () => resolve());
-      }
-    }
-  });
-};
-
 export default function BookingModal({
   property,
   showContract,
@@ -88,11 +45,6 @@ export default function BookingModal({
   activeRentalError = null
 }: Props) {
   const { t } = useTranslation();
-
-  useEffect(() => {
-    const clientKey = (import.meta.env.VITE_MIDTRANS_CLIENT_KEY as string) || 'Mid-client-79XoSgAAmI4wnKaG';
-    loadSnapScript(clientKey);
-  }, []);
 
   if (!property) return null;
 

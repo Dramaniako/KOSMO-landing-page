@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Users, Building, Star, Trash2, Edit, Plus, LogOut, 
+import {
+  Users, Building, Star, Trash2, Edit, Plus, LogOut,
   Key, LayoutDashboard, MessageSquare,
   BarChart3, Eye, Download, ShieldAlert, X,
   Landmark, CheckCircle, XCircle
 } from 'lucide-react';
-import { 
-  User, Property, Review, AdminStats, TrackingHistory, 
-  TrackingHistoryItem, FacilityFilterState, Withdrawal 
+import {
+  User, Property, Review, AdminStats, TrackingHistory,
+  TrackingHistoryItem, FacilityFilterState, Withdrawal
 } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
@@ -64,12 +64,12 @@ function VisitorChart({ data, timeRange }: VisitorChartProps) {
   const maxVal = Math.max(...data.map((d) => d.count), 5);
   const width = 800;
   const height = 280;
-  
+
   const paddingLeft = 45;
   const paddingRight = 20;
   const paddingTop = 20;
   const paddingBottom = 40;
-  
+
   const chartWidth = width - paddingLeft - paddingRight;
   const chartHeight = height - paddingTop - paddingBottom;
 
@@ -80,7 +80,7 @@ function VisitorChart({ data, timeRange }: VisitorChartProps) {
   });
 
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaPath = points.length > 0 
+  const areaPath = points.length > 0
     ? `${linePath} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`
     : '';
 
@@ -104,32 +104,32 @@ function VisitorChart({ data, timeRange }: VisitorChartProps) {
         <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ overflow: 'visible' }}>
           <defs>
             <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25"/>
-              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0"/>
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
             </linearGradient>
             <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#6366f1"/>
-              <stop offset="100%" stopColor="#8b5cf6"/>
+              <stop offset="0%" stopColor="#6366f1" />
+              <stop offset="100%" stopColor="#8b5cf6" />
             </linearGradient>
           </defs>
 
           {/* Grid lines & Y labels */}
           {gridLevels.map((lvl, idx) => (
             <g key={idx} opacity={0.6}>
-              <line 
-                x1={paddingLeft} 
-                y1={lvl.y} 
-                x2={width - paddingRight} 
-                y2={lvl.y} 
-                stroke="#e2e8f0" 
+              <line
+                x1={paddingLeft}
+                y1={lvl.y}
+                x2={width - paddingRight}
+                y2={lvl.y}
+                stroke="#e2e8f0"
                 strokeWidth={1}
                 strokeDasharray={idx === 0 ? "0" : "4 4"}
               />
-              <text 
-                x={paddingLeft - 8} 
-                y={lvl.y + 4} 
-                fill="#64748b" 
-                fontSize="11px" 
+              <text
+                x={paddingLeft - 8}
+                y={lvl.y + 4}
+                fill="#64748b"
+                fontSize="11px"
                 textAnchor="end"
               >
                 {lvl.val}
@@ -141,13 +141,13 @@ function VisitorChart({ data, timeRange }: VisitorChartProps) {
           {points.length > 1 && (
             <>
               <path d={areaPath} fill="url(#chartGradient)" />
-              <path 
-                d={linePath} 
-                fill="none" 
-                stroke="url(#lineGrad)" 
-                strokeWidth={3} 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
+              <path
+                d={linePath}
+                fill="none"
+                stroke="url(#lineGrad)"
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
             </>
           )}
@@ -155,20 +155,20 @@ function VisitorChart({ data, timeRange }: VisitorChartProps) {
           {/* Points circles & interactive hover areas */}
           {points.map((p, idx) => (
             <g key={idx}>
-              <circle 
-                cx={p.x} 
-                cy={p.y} 
-                r={hoveredPoint?.index === idx ? 6 : 4} 
-                fill={hoveredPoint?.index === idx ? "#4f46e5" : "white"} 
-                stroke={hoveredPoint?.index === idx ? "white" : "#6366f1"} 
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={hoveredPoint?.index === idx ? 6 : 4}
+                fill={hoveredPoint?.index === idx ? "#4f46e5" : "white"}
+                stroke={hoveredPoint?.index === idx ? "white" : "#6366f1"}
                 strokeWidth={2}
                 style={{ transition: 'all 0.15s ease' }}
               />
-              <circle 
-                cx={p.x} 
-                cy={p.y} 
-                r={14} 
-                fill="transparent" 
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={14}
+                fill="transparent"
                 style={{ cursor: 'pointer' }}
                 onMouseEnter={() => setHoveredPoint(p)}
                 onMouseLeave={() => setHoveredPoint(null)}
@@ -178,12 +178,12 @@ function VisitorChart({ data, timeRange }: VisitorChartProps) {
 
           {/* X axis labels */}
           {xLabels.map((p, idx) => (
-            <text 
-              key={idx} 
-              x={p.x} 
-              y={height - 12} 
-              fill="#64748b" 
-              fontSize="11px" 
+            <text
+              key={idx}
+              x={p.x}
+              y={height - 12}
+              fill="#64748b"
+              fontSize="11px"
               textAnchor="middle"
             >
               {p.label.split(' ')[0]}
@@ -438,7 +438,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    const url = editingUser 
+    const url = editingUser
       ? `${API_BASE}/users/${editingUser.id}`
       : `${API_BASE}/users`;
     const method = editingUser ? 'PUT' : 'POST';
@@ -542,7 +542,7 @@ export default function AdminDashboard() {
       facilities: facilityList
     };
 
-    const url = editingProperty 
+    const url = editingProperty
       ? `${API_BASE}/properties/${editingProperty.id}`
       : `${API_BASE}/properties`;
     const method = editingProperty ? 'PUT' : 'POST';
@@ -719,7 +719,7 @@ export default function AdminDashboard() {
 
           <ul className="sidebar-links">
             <li>
-              <button 
+              <button
                 className={`sidebar-link ${activeTab === 'users' ? 'active' : ''}`}
                 onClick={() => setActiveTab('users')}
               >
@@ -728,7 +728,7 @@ export default function AdminDashboard() {
               </button>
             </li>
             <li>
-              <button 
+              <button
                 className={`sidebar-link ${activeTab === 'properties' ? 'active' : ''}`}
                 onClick={() => setActiveTab('properties')}
               >
@@ -737,7 +737,7 @@ export default function AdminDashboard() {
               </button>
             </li>
             <li>
-              <button 
+              <button
                 className={`sidebar-link ${activeTab === 'reviews' ? 'active' : ''}`}
                 onClick={() => setActiveTab('reviews')}
               >
@@ -746,7 +746,7 @@ export default function AdminDashboard() {
               </button>
             </li>
             <li>
-              <button 
+              <button
                 className={`sidebar-link ${activeTab === 'withdrawals' ? 'active' : ''}`}
                 onClick={() => setActiveTab('withdrawals')}
               >
@@ -755,7 +755,7 @@ export default function AdminDashboard() {
               </button>
             </li>
             <li>
-              <button 
+              <button
                 className={`sidebar-link ${activeTab === 'tracking' ? 'active' : ''}`}
                 onClick={() => setActiveTab('tracking')}
               >
@@ -829,12 +829,11 @@ export default function AdminDashboard() {
                         </td>
                         <td style={{ padding: '16px' }}>{u.email}</td>
                         <td style={{ padding: '16px' }}>
-                          <span className={`badge ${
-                            u.role === 'admin' ? 'badge-danger' : 
+                          <span className={`badge ${u.role === 'admin' ? 'badge-danger' :
                             u.role === 'landlord' ? 'badge-primary' : 'badge-success'
-                          }`}>
-                            {u.role === 'admin' ? 'Super Admin' : 
-                             u.role === 'landlord' ? 'Landlord' : 'Tenant'}
+                            }`}>
+                            {u.role === 'admin' ? 'Super Admin' :
+                              u.role === 'landlord' ? 'Landlord' : 'Tenant'}
                           </span>
                         </td>
                         <td style={{ padding: '16px' }}>{u.phone || '-'}</td>
@@ -956,16 +955,16 @@ export default function AdminDashboard() {
                         </span>
                         <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.date}</span>
                       </div>
-                      
+
                       <div style={{ display: 'flex', gap: '2px', marginBottom: '8px' }}>
                         {[...Array(5)].map((_, i) => (
-                          <Star 
-                            key={i} 
-                            size={12} 
-                            style={{ 
-                              fill: i < r.rating ? '#f59e0b' : 'transparent', 
-                              color: i < r.rating ? '#f59e0b' : '#cbd5e1' 
-                            }} 
+                          <Star
+                            key={i}
+                            size={12}
+                            style={{
+                              fill: i < r.rating ? '#f59e0b' : 'transparent',
+                              color: i < r.rating ? '#f59e0b' : '#cbd5e1'
+                            }}
                           />
                         ))}
                       </div>
@@ -995,7 +994,7 @@ export default function AdminDashboard() {
           <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
             <div className="flex-between" style={{ marginBottom: '24px' }}>
               <h3 style={{ fontSize: '20px' }}>Tracking Pengunjung Website</h3>
-              <a 
+              <a
                 href={`${API_BASE}/reports/tracking/excel`}
                 className="btn btn-primary"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
@@ -1043,25 +1042,25 @@ export default function AdminDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '32px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
                   <h4 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-main)' }}>Analisis Tren Aktivitas Pengunjung</h4>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button 
+                    <button
                       type="button"
-                      className={`btn ${timeRange === '24h' ? 'btn-primary' : 'btn-outline'}`} 
+                      className={`btn ${timeRange === '24h' ? 'btn-primary' : 'btn-outline'}`}
                       style={{ padding: '6px 16px', fontSize: '13px' }}
                       onClick={() => setTimeRange('24h')}
                     >
                       24 Jam
                     </button>
-                    <button 
+                    <button
                       type="button"
-                      className={`btn ${timeRange === '7d' ? 'btn-primary' : 'btn-outline'}`} 
+                      className={`btn ${timeRange === '7d' ? 'btn-primary' : 'btn-outline'}`}
                       style={{ padding: '6px 16px', fontSize: '13px' }}
                       onClick={() => setTimeRange('7d')}
                     >
                       1 Minggu
                     </button>
-                    <button 
+                    <button
                       type="button"
-                      className={`btn ${timeRange === '30d' ? 'btn-primary' : 'btn-outline'}`} 
+                      className={`btn ${timeRange === '30d' ? 'btn-primary' : 'btn-outline'}`}
                       style={{ padding: '6px 16px', fontSize: '13px' }}
                       onClick={() => setTimeRange('30d')}
                     >
@@ -1072,11 +1071,11 @@ export default function AdminDashboard() {
 
                 {/* Visitor Chart */}
                 {trackingHistory ? (
-                  <VisitorChart 
+                  <VisitorChart
                     data={
-                      timeRange === '24h' ? trackingHistory.history24h : 
-                      timeRange === '7d' ? trackingHistory.history7d : 
-                      trackingHistory.history30d
+                      timeRange === '24h' ? trackingHistory.history24h :
+                        timeRange === '7d' ? trackingHistory.history7d :
+                          trackingHistory.history30d
                     }
                     timeRange={timeRange}
                   />
@@ -1148,7 +1147,7 @@ export default function AdminDashboard() {
                           <strong style={{ color: 'var(--primary)', fontSize: '14px' }}>{formatRupiah(w.amount)}</strong>
                         </td>
                         <td>
-                          <span 
+                          <span
                             className={`badge ${w.status === 'completed' ? 'badge-success' : w.status === 'rejected' ? 'badge-danger' : w.status === 'processing' ? 'badge-warning' : 'badge-secondary'}`}
                             title={w.rejectionReason ? `Alasan: ${w.rejectionReason}` : undefined}
                           >
@@ -1166,14 +1165,14 @@ export default function AdminDashboard() {
                         <td>
                           {w.status === 'pending' || w.status === 'processing' ? (
                             <div style={{ display: 'flex', gap: '6px' }}>
-                              <button 
+                              <button
                                 className="btn btn-sm btn-primary"
                                 style={{ padding: '4px 8px', fontSize: '11px' }}
                                 onClick={() => handleProcessWithdrawal(w.id)}
                               >
                                 Selesaikan
                               </button>
-                              <button 
+                              <button
                                 className="btn btn-sm btn-danger btn-outline"
                                 style={{ padding: '4px 8px', fontSize: '11px' }}
                                 onClick={() => handleRejectWithdrawal(w.id)}
@@ -1210,8 +1209,8 @@ export default function AdminDashboard() {
               <form onSubmit={handleUserSubmit}>
                 <div className="form-group">
                   <label className="form-label">Nama Lengkap</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-input"
                     value={userForm.name}
                     onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
@@ -1221,8 +1220,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Alamat Email</label>
-                  <input 
-                    type="email" 
+                  <input
+                    type="email"
                     className="form-input"
                     value={userForm.email}
                     onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
@@ -1232,8 +1231,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Password {editingUser && '(Kosongkan jika tidak diganti)'}</label>
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     className="form-input"
                     value={userForm.password}
                     onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
@@ -1243,7 +1242,7 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Pilih Role User</label>
-                  <select 
+                  <select
                     className="form-select"
                     value={userForm.role}
                     onChange={(e) => setUserForm({ ...userForm, role: e.target.value as 'tenant' | 'landlord' | 'admin' })}
@@ -1256,8 +1255,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Nomor Telepon</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-input"
                     value={userForm.phone}
                     onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
@@ -1266,8 +1265,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group" style={{ marginBottom: '24px' }}>
                   <label className="form-label">Metode Pembayaran Pilihan</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-input"
                     value={userForm.paymentMethod}
                     onChange={(e) => setUserForm({ ...userForm, paymentMethod: e.target.value })}
@@ -1303,8 +1302,8 @@ export default function AdminDashboard() {
               <form onSubmit={handlePropertySubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Nama Properti</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-input"
                     value={propertyForm.name}
                     onChange={(e) => setPropertyForm({ ...propertyForm, name: e.target.value })}
@@ -1314,7 +1313,7 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Kabupaten / Kota</label>
-                  <select 
+                  <select
                     className="form-select"
                     value={propertyForm.district}
                     onChange={(e) => setPropertyForm({ ...propertyForm, district: e.target.value })}
@@ -1327,8 +1326,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Harga Sewa / Bln (Rp)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     className="form-input"
                     value={propertyForm.price}
                     onChange={(e) => setPropertyForm({ ...propertyForm, price: e.target.value })}
@@ -1338,8 +1337,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Alamat Lengkap</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-input"
                     value={propertyForm.address}
                     onChange={(e) => setPropertyForm({ ...propertyForm, address: e.target.value })}
@@ -1349,8 +1348,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Deskripsi Properti</label>
-                  <textarea 
-                    className="form-textarea" 
+                  <textarea
+                    className="form-textarea"
                     rows={3}
                     value={propertyForm.description}
                     onChange={(e) => setPropertyForm({ ...propertyForm, description: e.target.value })}
@@ -1359,8 +1358,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Latitude</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-input"
                     value={propertyForm.latitude}
                     onChange={(e) => setPropertyForm({ ...propertyForm, latitude: e.target.value })}
@@ -1369,8 +1368,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Longitude</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-input"
                     value={propertyForm.longitude}
                     onChange={(e) => setPropertyForm({ ...propertyForm, longitude: e.target.value })}
@@ -1379,8 +1378,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Total Kamar</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     className="form-input"
                     value={propertyForm.totalRooms}
                     onChange={(e) => setPropertyForm({ ...propertyForm, totalRooms: e.target.value })}
@@ -1390,8 +1389,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Kamar Terisi</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     className="form-input"
                     value={propertyForm.occupiedRooms}
                     onChange={(e) => setPropertyForm({ ...propertyForm, occupiedRooms: e.target.value })}
@@ -1401,8 +1400,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Cover Image URL</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     className="form-input"
                     value={propertyForm.image}
                     onChange={(e) => setPropertyForm({ ...propertyForm, image: e.target.value })}
@@ -1411,7 +1410,7 @@ export default function AdminDashboard() {
 
                 <div className="form-group">
                   <label className="form-label">Pilih Landlord Pemilik</label>
-                  <select 
+                  <select
                     className="form-select"
                     value={propertyForm.ownerId}
                     onChange={(e) => setPropertyForm({ ...propertyForm, ownerId: e.target.value })}
@@ -1427,8 +1426,8 @@ export default function AdminDashboard() {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '6px' }}>
                     {(Object.keys(propertyForm.facilities) as (keyof FacilityFilterState)[]).map((fac) => (
                       <label key={String(fac)} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-                        <input 
-                          type="checkbox" 
+                        <input
+                          type="checkbox"
                           style={{ width: '16px', height: '16px' }}
                           checked={propertyForm.facilities[fac]}
                           onChange={() => setPropertyForm({
@@ -1472,7 +1471,7 @@ export default function AdminDashboard() {
               <form onSubmit={handleReviewSubmit}>
                 <div className="form-group">
                   <label className="form-label">Rating Bintang</label>
-                  <select 
+                  <select
                     className="form-select"
                     value={reviewForm.rating}
                     onChange={(e) => setReviewForm({ ...reviewForm, rating: parseInt(e.target.value, 10) })}
@@ -1487,8 +1486,8 @@ export default function AdminDashboard() {
 
                 <div className="form-group" style={{ marginBottom: '24px' }}>
                   <label className="form-label">Komentar Ulasan</label>
-                  <textarea 
-                    className="form-textarea" 
+                  <textarea
+                    className="form-textarea"
                     rows={4}
                     value={reviewForm.comment}
                     onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}

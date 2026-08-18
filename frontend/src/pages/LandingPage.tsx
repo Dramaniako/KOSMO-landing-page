@@ -8,7 +8,7 @@ import { Property, Review, User, FacilityFilterState } from '../types/index';
 import KosCard from '../components/KosCard';
 import KosCardSkeleton from '../components/KosCardSkeleton';
 import SearchFilterBar from '../components/SearchFilterBar';
-import BookingModal, { loadSnapScript } from '../components/BookingModal';
+import BookingModal from '../components/BookingModal';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
 
@@ -261,72 +261,70 @@ export default function LandingPage() {
         throw new Error(errorData.message || "Gagal membuat transaksi pembayaran.");
       }
 
-      const data = (await tokenRes.json()) as { snapToken?: string; rentalId: string };
+      const data = (await tokenRes.json()) as {
+        snapToken?: string;
+        token?: string;
+        rentalId: string;
+      };
 
-      // Launch Midtrans Snap Popup if available
-      if (data.snapToken && typeof window !== 'undefined' && window.snap) {
-        window.snap.pay(data.snapToken, {
-          onSuccess: async (result: unknown) => {
-            console.log("Midtrans payment success:", result);
-            const verifyToken = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
-            const verifyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-            if (verifyToken) {
-              verifyHeaders['Authorization'] = `Bearer ${verifyToken}`;
-            }
+      const snapToken = data.snapToken || data.token;
 
-            await fetch(`${API_BASE}/rentals`, {
-              method: 'POST',
-              headers: verifyHeaders,
-              body: JSON.stringify({
-                rentalId: data.rentalId,
-                tenantId: currentUser.id,
-                propertyId: selectedProperty.id,
-                propertyName: selectedProperty.name,
-                price: selectedProperty.price,
-                durationMonths: 1
-              })
-            });
-
-            setShowPayment(false);
-            setSelectedProperty(null);
-            navigate('/tenant');
-          },
-          onPending: (result: unknown) => {
-            console.log("Midtrans payment pending:", result);
-            setShowPayment(false);
-            setSelectedProperty(null);
-            navigate('/tenant');
-          },
-          onError: (err: unknown) => {
-            console.error("Midtrans Snap payment error:", err);
-            alert("Pembayaran belum berhasil diselesaikan. Silakan coba lagi.");
-          },
-          onClose: () => {
-            console.log("Snap payment popup closed by user.");
-          }
-        });
-        return;
+      // Step 2: Validate Snap readiness
+      if (typeof window === 'undefined' || !window.snap) {
+        throw new Error("Midtrans SDK belum siap. Silakan refresh halaman atau coba sesaat lagi.");
       }
 
-      // Automated/Fallback logic
-      const rentRes = await fetch(`${API_BASE}/rentals`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          rentalId: data.rentalId,
-          tenantId: currentUser.id,
-          propertyId: selectedProperty.id,
-          propertyName: selectedProperty.name,
-          price: selectedProperty.price,
-          durationMonths: 1
-        })
+      if (!snapToken) {
+        throw new Error("Token pembayaran tidak ditemukan dari respons server.");
+      }
+
+      // Step 3: Launch Midtrans Snap Popup
+      window.snap.pay(snapToken, {
+        onSuccess: async (result: unknown) => {
+          console.log("Midtrans payment success:", result);
+          const verifyToken = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+          const verifyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (verifyToken) {
+            verifyHeaders['Authorization'] = `Bearer ${verifyToken}`;
+          }
+
+          const createRes = await fetch(`${API_BASE}/rentals`, {
+            method: 'POST',
+            headers: verifyHeaders,
+            body: JSON.stringify({
+              rentalId: data.rentalId,
+              tenantId: currentUser.id,
+              propertyId: selectedProperty.id,
+              propertyName: selectedProperty.name,
+              price: selectedProperty.price,
+              durationMonths: 1
+            })
+          });
+
+          if (createRes.ok) {
+            setShowPayment(false);
+            setSelectedProperty(null);
+            navigate('/tenant');
+          } else {
+            const errData = await createRes.json().catch(() => ({}));
+            alert(errData.message || "Gagal mengaktifkan sewa setelah pembayaran.");
+          }
+        },
+        onPending: (result: unknown) => {
+          console.log("Midtrans payment pending:", result);
+          setShowPayment(false);
+          setSelectedProperty(null);
+          navigate('/tenant');
+        },
+        onError: (err: unknown) => {
+          console.error("Midtrans Snap payment error:", err);
+          alert("Pembayaran gagal atau dibatalkan. Silakan coba lagi.");
+        },
+        onClose: () => {
+          console.log("Snap payment popup closed by user.");
+        }
       });
 
-      if (rentRes.ok) {
-        setShowPayment(false);
-        setSelectedProperty(null);
-        navigate('/tenant');
-      }
     } catch (err: unknown) {
       console.error("Payment processing exception:", err);
       const errMsg = err instanceof Error ? err.message : String(err);

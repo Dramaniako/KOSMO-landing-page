@@ -38,43 +38,7 @@ app.use(compression());
 // Security & Parsing Middleware
 app.use(
   helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: [
-          "'self'",
-          "'unsafe-inline'",
-          "'unsafe-eval'",
-          "https://app.sandbox.midtrans.com",
-          "https://snap-assets.sandbox.midtrans.com",
-          "https://*.midtrans.com",
-          "https://pay.google.com",
-          "https://gwk.gopayapi.com",
-          "https://unpkg.com"
-        ],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
-        fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        imgSrc: [
-          "'self'",
-          "data:",
-          "blob:",
-          "https://res.cloudinary.com",
-          "https://*.cloudinary.com",
-          "https://*.tile.openstreetmap.org",
-          "https://unpkg.com",
-          "https://images.unsplash.com"
-        ],
-        frameSrc: ["'self'", "https://app.sandbox.midtrans.com", "https://*.midtrans.com"],
-        connectSrc: [
-          "'self'",
-          "https://app.sandbox.midtrans.com",
-          "https://api.sandbox.midtrans.com",
-          "https://*.midtrans.com",
-          "https://api.cloudinary.com",
-          "https://*.tile.openstreetmap.org"
-        ]
-      }
-    },
+    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' }
   })
