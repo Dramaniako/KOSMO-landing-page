@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Wifi, Tv, Wind, Shield, Droplet, Check, ShieldCheck, Heart,
-  Zap, Sparkles, Car, Star, MapPin
+  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal
 } from 'lucide-react';
 import { Property, Review, User, FacilityFilterState } from '../types/index';
 import KosCard from '../components/KosCard';
@@ -488,33 +488,23 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold mb-4 border border-blue-100 dark:border-blue-800">
             <Zap size={14} />
-            <span>KOSMO Transparency Guarantee</span>
+            <span>KOSMO Experience & Transparency</span>
           </div>
           <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-4">
             Kenapa Memilih KOSMO All-Inclusive?
           </h2>
           <p className="text-slate-600 dark:text-slate-300 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed mb-12">
-            Tidak ada lagi kejutan tagihan listrik jebol atau internet lemot di akhir bulan. Semua kebutuhan utama Anda sudah tercover.
+            Temukan kemudahan mencari dan menyewa kos impian, transparansi fasilitas & infrastruktur tanpa biaya tersembunyi, serta opsi pencarian yang dipersonalisasi sesuai kebutuhan gaya hidup Anda.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
             <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
               <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4">
-                <Zap size={24} />
+                <Search size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Listrik & Air Tanpa Batas</h3>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Kemudahan Cari & Sewa Kos</h3>
               <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
-                Gunakan AC dan peralatan elektronik Anda dengan tenang tanpa pusing memikirkan token listrik habis tengah malam.
-              </p>
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
-              <div className="w-12 h-12 rounded-xl bg-pink-100 dark:bg-pink-900/50 text-pink-600 dark:text-pink-400 flex items-center justify-center mb-4">
-                <Wifi size={24} />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Dedicated High-Speed WiFi</h3>
-              <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
-                Dirancang khusus untuk remote worker dan digital nomad dengan koneksi stabil, backup provider, dan area coworking.
+                Jelajahi pilihan hunian terbaik, booking instan secara online, dan tandatangani e-contract resmi dalam hitungan menit tanpa birokrasi berbelit.
               </p>
             </div>
 
@@ -522,9 +512,19 @@ export default function LandingPage() {
               <div className="w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-4">
                 <ShieldCheck size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Smart Lock & Keamanan 24/7</h3>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Kejelasan Fasilitas & Infrastruktur</h3>
               <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
-                Akses pintu kamar menggunakan PIN/Smart Card dan CCTV area umum untuk privasi dan kenyamanan maksimal.
+                Detail infrastruktur transparan: listrik, air PDAM, WiFi fiber berkecepatan tinggi, hingga sistem keamanan smart lock 24 jam tanpa ada biaya tersembunyi.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
+              <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4">
+                <SlidersHorizontal size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Opsi Pencarian Terpersonalisasi</h3>
+              <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
+                Saring hunian idaman berdasarkan lokasi strategis di Bali, rentang anggaran fleksibel, dan kombinasi fasilitas spesifik yang paling Anda butuhkan.
               </p>
             </div>
           </div>
