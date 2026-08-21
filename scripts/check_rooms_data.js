@@ -1,11 +1,12 @@
 import mysql from 'mysql2/promise';
 
 const dbConfig = {
-  host: 'bsbw2iv6fgwbjlitkihs-mysql.services.clever-cloud.com',
-  port: 3306,
-  user: 'ueibw0ee4mk0kzpy',
-  password: '4fD3zYPoP178R3XgpH5Q',
-  database: 'bsbw2iv6fgwbjlitkihs'
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '3306', 10),
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'kosmo_db',
+  ssl: process.env.DB_SSL === 'false' ? undefined : { rejectUnauthorized: false }
 };
 
 try {
