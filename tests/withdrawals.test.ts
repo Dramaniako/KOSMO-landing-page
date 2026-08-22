@@ -40,7 +40,7 @@ function processWithdrawal(
   }
 
   const updatedBalance = account.balance - amount;
-  const updatedTotalWithdrawn = account.totalWithdrawn + amount;
+  const updatedTotalWithdrawn = account.totalWithdrawn; // Only updated on completed
 
   const withdrawal: WithdrawalRecord = {
     id: `w-${Math.random().toString(36).substring(2, 8)}`,
@@ -62,6 +62,7 @@ function processWithdrawal(
 
 function processAdminDisbursement(
   withdrawal: WithdrawalRecord,
+  account?: LandlordAccount,
   targetStatus: 'processing' | 'completed' = 'completed'
 ): { success: boolean; message?: string; updatedStatus?: 'processing' | 'completed' | 'rejected'; referenceId?: string } {
   if (withdrawal.status === 'completed') {
@@ -69,6 +70,10 @@ function processAdminDisbursement(
   }
   if (withdrawal.status === 'rejected') {
     return { success: false, message: 'Penarikan yang sudah ditolak tidak dapat diproses.' };
+  }
+
+  if (targetStatus === 'completed' && account) {
+    account.totalWithdrawn += withdrawal.amount;
   }
 
   withdrawal.status = targetStatus;
@@ -93,7 +98,6 @@ function rejectAdminDisbursement(
   withdrawal.rejectionReason = reason;
   withdrawal.processedAt = new Date().toISOString();
   account.balance += withdrawal.amount;
-  account.totalWithdrawn = Math.max(0, account.totalWithdrawn - withdrawal.amount);
 
   return {
     success: true,
@@ -118,12 +122,18 @@ test('Landlord withdrawals and financial calculations', async (t) => {
     const result = processWithdrawal(account, 4000000, 'BCA', '1234567890', 'Pak Budi');
     assert.equal(result.success, true);
     assert.equal(result.updatedBalance, 6000000);
-    assert.equal(result.updatedTotalWithdrawn, 6000000);
+    assert.equal(result.updatedTotalWithdrawn, 2000000);
     assert.equal(result.withdrawal?.status, 'pending');
     assert.equal(result.withdrawal?.accountHolder, 'Pak Budi');
   });
 
   await t.test('admin can transition pending withdrawal to processing then completed', () => {
+    const account: LandlordAccount = {
+      id: 'landlord-1',
+      balance: 7000000,
+      totalWithdrawn: 1000000
+    };
+
     const withdrawal: WithdrawalRecord = {
       id: 'w-101',
       userId: 'landlord-1',
@@ -133,17 +143,19 @@ test('Landlord withdrawals and financial calculations', async (t) => {
       status: 'pending'
     };
 
-    const resProcessing = processAdminDisbursement(withdrawal, 'processing');
+    const resProcessing = processAdminDisbursement(withdrawal, account, 'processing');
     assert.equal(resProcessing.success, true);
     assert.equal(withdrawal.status, 'processing');
+    assert.equal(account.totalWithdrawn, 1000000);
     assert.ok(withdrawal.referenceId?.startsWith('REF-'));
 
-    const resCompleted = processAdminDisbursement(withdrawal, 'completed');
+    const resCompleted = processAdminDisbursement(withdrawal, account, 'completed');
     assert.equal(resCompleted.success, true);
     assert.equal(withdrawal.status, 'completed');
+    assert.equal(account.totalTotalWithdrawn || account.totalWithdrawn, 4000000);
   });
 
-  await t.test('admin rejection reverses deducted funds and totalWithdrawn back to landlord', () => {
+  await t.test('admin rejection reverses deducted funds and leaves totalWithdrawn intact', () => {
     const account: LandlordAccount = {
       id: 'landlord-1',
       balance: 6000000,
@@ -164,7 +176,7 @@ test('Landlord withdrawals and financial calculations', async (t) => {
     assert.equal(pendingWithdrawal.status, 'rejected');
     assert.equal(pendingWithdrawal.rejectionReason, 'Rekening tidak valid');
     assert.equal(result.updatedBalance, 10000000);
-    assert.equal(result.updatedTotalWithdrawn, 0);
+    assert.equal(result.updatedTotalWithdrawn, 4000000);
   });
 
   await t.test('prevents rejecting an already completed withdrawal', () => {

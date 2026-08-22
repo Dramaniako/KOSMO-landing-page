@@ -1214,13 +1214,13 @@ router.post('/withdraw', authenticateToken, requireRole(['admin', 'landlord']), 
       return res.status(400).json({ message: "Saldo tidak mencukupi." });
     }
 
-    // Deduct balance and update withdrawn statistics
+    // Deduct balance upfront (totalWithdrawn is incremented only when admin marks status as completed)
     const newBalance = parseFloat(String(user.balance || 0)) - withdrawAmount;
-    const newWithdrawn = parseFloat(String(user.totalWithdrawn || 0)) + withdrawAmount;
+    const currentWithdrawn = parseFloat(String(user.totalWithdrawn || 0));
 
     await connection.query(
-      'UPDATE users SET balance = ?, totalWithdrawn = ? WHERE id = ?',
-      [newBalance, newWithdrawn, targetUserId]
+      'UPDATE users SET balance = ? WHERE id = ?',
+      [newBalance, targetUserId]
     );
 
     const withdrawalId = generateId("w");
@@ -1238,7 +1238,7 @@ router.post('/withdraw', authenticateToken, requireRole(['admin', 'landlord']), 
       message: "Permintaan penarikan dana berhasil diajukan dan sedang menunggu proses.",
       withdrawalId,
       balance: newBalance,
-      totalWithdrawn: newWithdrawn,
+      totalWithdrawn: currentWithdrawn,
       status: 'pending'
     });
   } catch (err) {
@@ -1304,6 +1304,14 @@ router.post('/admin/withdrawals/:id/process', authenticateToken, requireRole(['a
     const refId = req.body?.referenceId || withdrawal.referenceId || `REF-${Date.now().toString(36).toUpperCase()}`;
     const processedAt = new Date().toISOString();
 
+    // Increment totalWithdrawn upon successful completion
+    if (targetStatus === 'completed' && withdrawal.status !== 'completed') {
+      await connection.query(
+        'UPDATE users SET totalWithdrawn = totalWithdrawn + ? WHERE id = ?',
+        [withdrawal.amount, withdrawal.userId]
+      );
+    }
+
     await connection.query(
       "UPDATE withdrawals SET status = ?, referenceId = ?, processedAt = ? WHERE id = ?", 
       [targetStatus, refId, processedAt, id]
@@ -1354,10 +1362,10 @@ router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['ad
 
     const withdrawAmount = parseFloat(String(withdrawal.amount));
 
-    // Reverse balance deduction and reduce totalWithdrawn
+    // Reverse balance deduction
     await connection.query(
-      'UPDATE users SET balance = balance + ?, totalWithdrawn = GREATEST(0, totalWithdrawn - ?) WHERE id = ?',
-      [withdrawAmount, withdrawAmount, withdrawal.userId]
+      'UPDATE users SET balance = balance + ? WHERE id = ?',
+      [withdrawAmount, withdrawal.userId]
     );
 
     const rejectionReason = reason || "Pencairan dana ditolak oleh administrator";
@@ -1379,7 +1387,7 @@ router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['ad
   } catch (err: unknown) {
     await connection.rollback();
     console.error("Reject withdrawal error:", err);
-    res.status(500).json({ message: "Gagal menolak dan mereverse penarikan dana." });
+    res.status(500).json({ message: "Gagal menolak penarikan dana." });
   } finally {
     connection.release();
   }
@@ -1831,22 +1839,67 @@ interface CreateRentalBody {
   signature?: string;
 }
 
-router.post('/rentals', authenticateToken, async (req: Request<Record<string, never>, unknown, CreateRentalBody>, res: Response) => {
+router.post('/rentals', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const { tenantId, propertyId, propertyName, price, durationMonths, signature } = req.body;
+  const authUser = req.user;
   if (!tenantId || !propertyId) {
     return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
+  }
+
+  // Authorization check: non-admins can only book for themselves
+  if (authUser?.role !== 'admin' && authUser?.id !== tenantId) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat memesan atas nama akun lain." });
+  }
+
+  const rentalId = (req.body.rentalId && typeof req.body.rentalId === 'string' && req.body.rentalId.trim() !== '')
+    ? req.body.rentalId
+    : generateId("rent");
+
+  // Optional: Verify Midtrans status if configured
+  if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes('placeholder') && !process.env.MIDTRANS_SERVER_KEY.includes('your-server-key')) {
+    try {
+      const statusResponse = await snap.transaction.status(rentalId);
+      const isValidPayment = 
+        statusResponse.transaction_status === 'settlement' || 
+        (statusResponse.transaction_status === 'capture' && statusResponse.fraud_status === 'accept');
+      if (!isValidPayment) {
+        return res.status(402).json({ message: "Pembayaran belum diselesaikan pada payment gateway Midtrans." });
+      }
+    } catch (midtransErr) {
+      // In development or simulation environments, allow proceeding if token was minted
+      console.warn("Midtrans status check warning:", midtransErr);
+    }
   }
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const [propRows] = await connection.query<PropertyRow[]>('SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ?', [propertyId]);
+    const [propRows] = await connection.query<PropertyRow[]>(
+      'SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ? FOR UPDATE',
+      [propertyId]
+    );
     const property = propRows[0];
     if (!property) {
       await connection.rollback();
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
+
+    const [existingRentals] = await connection.query<RentalRow[]>(
+      'SELECT id, status, document FROM rentals WHERE id = ? FOR UPDATE',
+      [rentalId]
+    );
+
+    // Idempotency: If webhook already activated this lease, return success immediately
+    if (existingRentals.length > 0 && existingRentals[0].status === 'active') {
+      await connection.commit();
+      return res.status(200).json({
+        message: "Penyewaan kos sudah aktif!",
+        rentalId,
+        document: existingRentals[0].document || 'sertifikat_kepemilikan.pdf'
+      });
+    }
+
     if (property.occupiedRooms >= property.totalRooms) {
       await connection.rollback();
       return res.status(400).json({ message: "Kamar kos sudah penuh." });
@@ -1857,8 +1910,8 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
 
     // Check single active tenancy rule
     const [activeRentals] = await connection.query<RentalRow[]>(
-      "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' LIMIT 1",
-      [tenantId]
+      "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? LIMIT 1",
+      [tenantId, rentalId]
     );
     if (activeRentals.length > 0) {
       await connection.rollback();
@@ -1867,9 +1920,6 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
       });
     }
 
-    const rentalId = (req.body.rentalId && typeof req.body.rentalId === 'string' && req.body.rentalId.trim() !== '')
-      ? req.body.rentalId
-      : generateId("rent");
     const startDate = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
     const rentalPrice = price || property.price;
     const rentalName = propertyName || property.name;
@@ -1893,12 +1943,7 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
       console.warn("PDF contract generation warning:", contractErr);
     }
 
-    const [existingRentals] = await connection.query<RentalRow[]>(
-      'SELECT id, status FROM rentals WHERE id = ?',
-      [rentalId]
-    );
-
-    if (existingRentals.length > 0 && existingRentals[0].status === 'pending') {
+    if (existingRentals.length > 0) {
       await connection.query(
         `UPDATE rentals 
          SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ? 
@@ -1914,7 +1959,7 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
     }
 
     await connection.query(
-      'UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?',
+      'UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?',
       [propertyId]
     );
 
@@ -1926,6 +1971,7 @@ router.post('/rentals', authenticateToken, async (req: Request<Record<string, ne
     }
 
     await connection.commit();
+    apiCache.invalidatePattern('properties');
     res.status(201).json({
       message: "Penyewaan kos berhasil diproses!",
       rentalId,
@@ -2072,9 +2118,19 @@ export function verifyMidtransSignature(
   if (!orderId || !statusCode || !grossAmount || !serverKey || !signatureKey) {
     return false;
   }
-  const payload = `${orderId}${statusCode}${grossAmount}${serverKey}`;
-  const calculatedHash = crypto.createHash('sha512').update(payload).digest('hex');
-  return calculatedHash.toLowerCase() === signatureKey.toLowerCase();
+  // Normalize grossAmount string (Midtrans might format with or without .00)
+  const normalizedAmount = grossAmount.includes('.') ? parseFloat(grossAmount).toFixed(2) : grossAmount;
+  const payload = `${orderId}${statusCode}${normalizedAmount}${serverKey}`;
+  const calculatedHash = crypto.createHash('sha512').update(payload).digest('hex').toLowerCase();
+  const targetSig = signatureKey.toLowerCase();
+
+  const calculatedBuffer = Buffer.from(calculatedHash, 'utf8');
+  const targetBuffer = Buffer.from(targetSig, 'utf8');
+
+  if (calculatedBuffer.length !== targetBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(calculatedBuffer, targetBuffer);
 }
 
 interface PaymentTokenBody {
@@ -2083,10 +2139,16 @@ interface PaymentTokenBody {
   durationMonths?: number;
 }
 
-router.post('/payment/token', authenticateToken, async (req: Request<Record<string, never>, unknown, PaymentTokenBody>, res: Response) => {
+router.post('/payment/token', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const { propertyId, tenantId, durationMonths } = req.body;
+  const authUser = req.user;
   if (!propertyId || !tenantId) {
     return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
+  }
+
+  // Authorization check: non-admins can only generate tokens for themselves
+  if (authUser?.role !== 'admin' && authUser?.id !== tenantId) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat membuat token atas nama akun lain." });
   }
 
   const duration = durationMonths && durationMonths > 0 ? durationMonths : 1;
@@ -2154,7 +2216,7 @@ router.post('/payment/token', authenticateToken, async (req: Request<Record<stri
     let transactionToken = `snap-token-${rentalId}`;
     let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${rentalId}`;
 
-    if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes('your-server-key')) {
+    if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes('your-server-key') && !process.env.MIDTRANS_SERVER_KEY.includes('placeholder')) {
       try {
         const transaction = await snap.createTransaction(parameter);
         transactionToken = transaction.token;
@@ -2233,20 +2295,35 @@ router.post('/payment/webhook', async (req: Request<Record<string, never>, unkno
         return res.status(404).json({ message: "Data sewa tidak ditemukan." });
       }
 
+      // Validate payment gross amount against expected rental price
+      const paidAmount = parseFloat(gross_amount);
+      const expectedPrice = Number(rental.price || 0);
+      if (isNaN(paidAmount) || Math.abs(paidAmount - expectedPrice) > 1.0) {
+        await connection.rollback();
+        console.error(`Midtrans gross_amount mismatch: expected ${expectedPrice}, got ${paidAmount}`);
+        return res.status(400).json({ message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa." });
+      }
+
       // Check if already processed to prevent duplicate room increments or balance credits
       if (rental.status !== 'active') {
-        await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [order_id]);
-
-        await connection.query(
-          'UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?',
-          [rental.propertyId]
-        );
-
         const [propRows] = await connection.query<PropertyRow[]>(
-          'SELECT ownerId FROM properties WHERE id = ?',
+          'SELECT totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE',
           [rental.propertyId]
         );
         const property = propRows[0];
+
+        if (property && property.occupiedRooms >= property.totalRooms) {
+          await connection.rollback();
+          console.error(`Overbooking conflict detected for property ${property.id}, rental ${order_id}`);
+          return res.status(409).json({ message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." });
+        }
+
+        await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [order_id]);
+
+        await connection.query(
+          'UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?',
+          [rental.propertyId]
+        );
 
         if (property && property.ownerId) {
           const rentalPrice = rental.price || 0;
@@ -2258,6 +2335,7 @@ router.post('/payment/webhook', async (req: Request<Record<string, never>, unkno
       }
 
       await connection.commit();
+      apiCache.invalidatePattern('properties');
       return res.json({ message: "Pembayaran berhasil diproses dan status rental diaktifkan." });
     } catch (err: unknown) {
       await connection.rollback();
@@ -2272,6 +2350,7 @@ router.post('/payment/webhook', async (req: Request<Record<string, never>, unkno
   if (transaction_status === 'cancel' || transaction_status === 'deny' || transaction_status === 'expire') {
     try {
       await pool.query("UPDATE rentals SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [order_id]);
+      apiCache.invalidatePattern('properties');
       return res.json({ message: `Status transaksi dibatalkan (${transaction_status}).` });
     } catch (err: unknown) {
       console.error("Cancel rental error:", err);
