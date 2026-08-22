@@ -216,4 +216,35 @@ test('Authentication logic, password security gates & JWT', async (t) => {
     });
     assert.equal(negativePrice.success, false);
   });
+
+  await t.test('property modification ownership guard allows owner or admin and blocks others', () => {
+    const isModificationPermitted = (caller: { id: string; role: string }, propertyOwnerId: string): boolean => {
+      if (caller.role === 'admin') return true;
+      return caller.id === propertyOwnerId;
+    };
+
+    assert.equal(isModificationPermitted({ id: 'user-landlord-1', role: 'landlord' }, 'user-landlord-1'), true);
+    assert.equal(isModificationPermitted({ id: 'user-admin', role: 'admin' }, 'user-landlord-1'), true);
+    assert.equal(isModificationPermitted({ id: 'user-landlord-2', role: 'landlord' }, 'user-landlord-1'), false);
+    assert.equal(isModificationPermitted({ id: 'user-tenant-1', role: 'tenant' }, 'user-landlord-1'), false);
+  });
+
+  await t.test('rental termination ownership guard permits only tenant, property owner, or admin', () => {
+    const isTerminationPermitted = (
+      caller: { id: string; role: string },
+      rentalTenantId: string,
+      propertyOwnerId: string
+    ): boolean => {
+      if (caller.role === 'admin') return true;
+      if (caller.id === rentalTenantId) return true;
+      if (caller.id === propertyOwnerId) return true;
+      return false;
+    };
+
+    assert.equal(isTerminationPermitted({ id: 'tenant-1', role: 'tenant' }, 'tenant-1', 'landlord-1'), true);
+    assert.equal(isTerminationPermitted({ id: 'landlord-1', role: 'landlord' }, 'tenant-1', 'landlord-1'), true);
+    assert.equal(isTerminationPermitted({ id: 'admin-1', role: 'admin' }, 'tenant-1', 'landlord-1'), true);
+    assert.equal(isTerminationPermitted({ id: 'tenant-2', role: 'tenant' }, 'tenant-1', 'landlord-1'), false);
+    assert.equal(isTerminationPermitted({ id: 'landlord-2', role: 'landlord' }, 'tenant-1', 'landlord-1'), false);
+  });
 });
