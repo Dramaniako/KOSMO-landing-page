@@ -55,6 +55,39 @@ test('InMemoryCache service logic & TTL lifecycle', async (t) => {
     assert.equal(cache.size(), 2);
   });
 
+  await t.test('purgeExpired() removes all expired items and returns count', () => {
+    const cache = new InMemoryCache();
+    cache.set('valid1', 'val1', 60);
+    cache.set('valid2', 'val2', 60);
+    cache.set('exp1', 'expVal1', -5);
+    cache.set('exp2', 'expVal2', -10);
+
+    assert.equal(cache.size(), 4);
+    const purged = cache.purgeExpired();
+    assert.equal(purged, 2);
+    assert.equal(cache.size(), 2);
+    assert.equal(cache.get('valid1'), 'val1');
+    assert.equal(cache.get('valid2'), 'val2');
+    assert.equal(cache.get('exp1'), null);
+    assert.equal(cache.get('exp2'), null);
+  });
+
+  await t.test('enforces maxEntries capacity with oldest eviction', () => {
+    const cache = new InMemoryCache(3);
+    cache.set('k1', 'v1', 60);
+    cache.set('k2', 'v2', 60);
+    cache.set('k3', 'v3', 60);
+    assert.equal(cache.size(), 3);
+
+    // Adding 4th item should evict oldest (k1)
+    cache.set('k4', 'v4', 60);
+    assert.equal(cache.size(), 3);
+    assert.equal(cache.get('k1'), null);
+    assert.equal(cache.get('k2'), 'v2');
+    assert.equal(cache.get('k3'), 'v3');
+    assert.equal(cache.get('k4'), 'v4');
+  });
+
   await t.test('clear() purges all keys in cache', () => {
     const cache = new InMemoryCache();
     cache.set('k1', 'v1');
@@ -69,3 +102,4 @@ test('InMemoryCache service logic & TTL lifecycle', async (t) => {
     assert.equal(cache.get('k3'), null);
   });
 });
+

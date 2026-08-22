@@ -25,6 +25,7 @@ test('Express router endpoints registration', async (t) => {
       }));
 
     const expectedEndpoints = [
+      { path: '/health', method: 'get' },
       { path: '/upload', method: 'post' },
       { path: '/auth/login', method: 'post' },
       { path: '/auth/register', method: 'post' },

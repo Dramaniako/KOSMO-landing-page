@@ -91,7 +91,9 @@ async function ensureIndexes(): Promise<void> {
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
-    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)"
+    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
+    "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
+    "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)"
   ];
 
   for (const sql of indexStatements) {

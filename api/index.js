@@ -83,7 +83,9 @@ async function ensureIndexes() {
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
-    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)"
+    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
+    "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
+    "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)"
   ];
   for (const sql of indexStatements) {
     try {
@@ -407,6 +409,10 @@ function generateRentalContractPdf(data, outputDir) {
 // backend/services/cache.ts
 var InMemoryCache = class {
   store = /* @__PURE__ */ new Map();
+  maxEntries;
+  constructor(maxEntries = 500) {
+    this.maxEntries = maxEntries;
+  }
   get(key) {
     const entry = this.store.get(key);
     if (!entry) return null;
@@ -417,6 +423,15 @@ var InMemoryCache = class {
     return entry.data;
   }
   set(key, data, ttlSeconds = 60) {
+    if (this.store.size >= this.maxEntries) {
+      this.purgeExpired();
+      if (this.store.size >= this.maxEntries) {
+        const oldestKey = this.store.keys().next().value;
+        if (oldestKey) {
+          this.store.delete(oldestKey);
+        }
+      }
+    }
     this.store.set(key, {
       data,
       expiresAt: Date.now() + ttlSeconds * 1e3
@@ -431,6 +446,17 @@ var InMemoryCache = class {
         this.store.delete(key);
       }
     }
+  }
+  purgeExpired() {
+    const now = Date.now();
+    let purgedCount = 0;
+    for (const [key, entry] of this.store.entries()) {
+      if (now > entry.expiresAt) {
+        this.store.delete(key);
+        purgedCount++;
+      }
+    }
+    return purgedCount;
   }
   clear() {
     this.store.clear();
@@ -580,6 +606,33 @@ var authLimiter = rateLimit({
   message: { message: "Terlalu banyak percobaan masuk/daftar. Silakan coba lagi dalam 1 menit." }
 });
 var router = express.Router();
+router.get("/health", async (_req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT 1 AS healthy, NOW() AS db_time");
+    res.json({
+      status: "ok",
+      service: "kosmo-api",
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      uptime: process.uptime(),
+      database: {
+        status: "connected",
+        queryOk: Array.isArray(rows) && rows.length > 0
+      }
+    });
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Database ping failed";
+    res.status(503).json({
+      status: "degraded",
+      service: "kosmo-api",
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      uptime: process.uptime(),
+      database: {
+        status: "disconnected",
+        error: errorMsg
+      }
+    });
+  }
+});
 var ALLOWED_IMAGE_MIMETYPES = [
   "image/jpeg",
   "image/png",

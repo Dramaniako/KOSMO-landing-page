@@ -54,6 +54,35 @@ export const authLimiter = rateLimit({
 
 const router: Router = express.Router();
 
+// System & Infrastructure Health Check
+router.get('/health', async (_req: Request, res: Response) => {
+  try {
+    const [rows] = await pool.query<RowDataPacket[]>('SELECT 1 AS healthy, NOW() AS db_time');
+    res.json({
+      status: 'ok',
+      service: 'kosmo-api',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      database: {
+        status: 'connected',
+        queryOk: Array.isArray(rows) && rows.length > 0
+      }
+    });
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : 'Database ping failed';
+    res.status(503).json({
+      status: 'degraded',
+      service: 'kosmo-api',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      database: {
+        status: 'disconnected',
+        error: errorMsg
+      }
+    });
+  }
+});
+
 import { uploadImageStream } from './services/cloudinary';
 
 export const ALLOWED_IMAGE_MIMETYPES = [

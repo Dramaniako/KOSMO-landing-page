@@ -5,6 +5,11 @@ interface CacheEntry<T> {
 
 export class InMemoryCache {
   private store = new Map<string, CacheEntry<unknown>>();
+  private maxEntries: number;
+
+  constructor(maxEntries = 500) {
+    this.maxEntries = maxEntries;
+  }
 
   get<T>(key: string): T | null {
     const entry = this.store.get(key);
@@ -17,6 +22,18 @@ export class InMemoryCache {
   }
 
   set<T>(key: string, data: T, ttlSeconds = 60): void {
+    // If store reached maximum capacity, purge expired entries first
+    if (this.store.size >= this.maxEntries) {
+      this.purgeExpired();
+      // If still at capacity, evict oldest entry
+      if (this.store.size >= this.maxEntries) {
+        const oldestKey = this.store.keys().next().value;
+        if (oldestKey) {
+          this.store.delete(oldestKey);
+        }
+      }
+    }
+
     this.store.set(key, {
       data,
       expiresAt: Date.now() + ttlSeconds * 1000
@@ -35,6 +52,18 @@ export class InMemoryCache {
     }
   }
 
+  purgeExpired(): number {
+    const now = Date.now();
+    let purgedCount = 0;
+    for (const [key, entry] of this.store.entries()) {
+      if (now > entry.expiresAt) {
+        this.store.delete(key);
+        purgedCount++;
+      }
+    }
+    return purgedCount;
+  }
+
   clear(): void {
     this.store.clear();
   }
@@ -45,3 +74,4 @@ export class InMemoryCache {
 }
 
 export const apiCache = new InMemoryCache();
+
