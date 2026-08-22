@@ -353,7 +353,7 @@ router.put('/auth/profile', authenticateToken, async (req: AuthenticatedRequest,
 });
 
 // Admin Route: Get all users
-router.get('/users', async (_req: Request, res: Response) => {
+router.get('/users', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
   try {
     const [rows] = await pool.query<UserRow[]>(
       'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT 50'
@@ -378,7 +378,7 @@ router.get('/admin/users', authenticateToken, requireRole(['admin']), async (_re
 });
 
 // Admin Route: Create user
-router.post('/users', async (req: Request<Record<string, never>, unknown, AdminCreateUserBody>, res: Response) => {
+router.post('/users', authenticateToken, requireRole(['admin']), validateBody(registerSchema), async (req: Request<Record<string, never>, unknown, AdminCreateUserBody>, res: Response) => {
   const { email, password, name, role, phone, paymentMethod } = req.body;
   if (!email || !password || !name || !role) {
     return res.status(400).json({ message: "Nama, email, password, dan role wajib diisi." });
@@ -405,7 +405,7 @@ router.post('/users', async (req: Request<Record<string, never>, unknown, AdminC
 });
 
 // Admin Route: Update user role / details
-router.put('/users/:id', async (req: Request<{ id: string }, unknown, AdminUpdateUserBody>, res: Response) => {
+router.put('/users/:id', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }, unknown, AdminUpdateUserBody>, res: Response) => {
   const { id } = req.params;
   const { name, email, role, phone, paymentMethod, password } = req.body;
 
@@ -435,7 +435,7 @@ router.put('/users/:id', async (req: Request<{ id: string }, unknown, AdminUpdat
 });
 
 // Admin Route: Delete user
-router.delete('/users/:id', async (req: Request<{ id: string }>, res: Response) => {
+router.delete('/users/:id', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   if (id === 'user-admin') {
     return res.status(400).json({ message: "Admin utama tidak dapat dihapus." });

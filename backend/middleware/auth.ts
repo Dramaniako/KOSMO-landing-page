@@ -9,12 +9,22 @@ export interface JWTPayload {
   role: UserRole;
 }
 
+export function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret && process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: JWT_SECRET environment variable is missing in production.');
+  }
+  return secret || 'super-secret-jwt-key-with-high-entropy-minimum-32-chars';
+}
+
 export function generateJwtToken(
   payload: JWTPayload,
-  secret = process.env.JWT_SECRET || 'super-secret-jwt-key-with-high-entropy-minimum-32-chars',
+  secret = getJwtSecret(),
   expiresIn: SignOptions['expiresIn'] = '7d'
 ): string {
-  const options: SignOptions = {};
+  const options: SignOptions = {
+    algorithm: 'HS256'
+  };
   if (expiresIn !== undefined) {
     options.expiresIn = expiresIn;
   }
@@ -23,9 +33,9 @@ export function generateJwtToken(
 
 export function verifyJwtToken(
   token: string,
-  secret = process.env.JWT_SECRET || 'super-secret-jwt-key-with-high-entropy-minimum-32-chars'
+  secret = getJwtSecret()
 ): JWTPayload {
-  const decoded = jwt.verify(token, secret);
+  const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] });
   if (!decoded || typeof decoded !== 'object') {
     throw new Error('Invalid token payload');
   }

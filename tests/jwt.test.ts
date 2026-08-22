@@ -131,4 +131,13 @@ test('Signed JWT Authentication & Middleware', async (t) => {
     assert.equal(statusCode, 403);
     assert.ok(responseBody && typeof responseBody === 'object' && 'message' in responseBody);
   });
+
+  await t.test('verifies JWT is signed with HS256 header', () => {
+    const token = generateJwtToken(mockPayload, secret, '1h');
+    const headerBase64 = token.split('.')[0];
+    const headerJson = Buffer.from(headerBase64, 'base64url').toString('utf8');
+    const header = JSON.parse(headerJson) as { alg: string; typ: string };
+    assert.equal(header.alg, 'HS256');
+    assert.equal(header.typ, 'JWT');
+  });
 });
