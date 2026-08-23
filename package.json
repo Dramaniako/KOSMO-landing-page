@@ -5,6 +5,9 @@
   "workspaces": [
     "frontend"
   ],
+  "allowScripts": {
+    "esbuild": true
+  },
   "scripts": {
     "build": "npm --prefix frontend run build && npm run build:backend",
     "build:backend": "esbuild backend/api.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --packages=external",

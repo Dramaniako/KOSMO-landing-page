@@ -337,7 +337,7 @@ import express from "express";
 import XLSX from "xlsx";
 import multer from "multer";
 import bcrypt2 from "bcryptjs";
-import crypto from "crypto";
+import crypto2 from "crypto";
 import rateLimit from "express-rate-limit";
 import midtransClient from "midtrans-client";
 
@@ -479,12 +479,20 @@ var apiCache = new InMemoryCache();
 
 // backend/middleware/auth.ts
 import jwt from "jsonwebtoken";
+import { randomBytes } from "crypto";
+var defaultSecret = null;
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
-  if (!secret && process.env.NODE_ENV === "production") {
+  if (secret) {
+    return secret;
+  }
+  if (process.env.NODE_ENV === "production") {
     throw new Error("FATAL: JWT_SECRET environment variable is missing in production.");
   }
-  return secret || "super-secret-jwt-key-with-high-entropy-minimum-32-chars";
+  if (!defaultSecret) {
+    defaultSecret = randomBytes(32).toString("hex");
+  }
+  return defaultSecret;
 }
 function generateJwtToken(payload, secret = getJwtSecret(), expiresIn = "7d") {
   const options = {
@@ -580,6 +588,7 @@ function validateBody(schema) {
 }
 
 // backend/services/cloudinary.ts
+import crypto from "crypto";
 import { v2 as cloudinary } from "cloudinary";
 import { Readable } from "stream";
 cloudinary.config({
@@ -591,7 +600,7 @@ cloudinary.config({
 function uploadImageStream(buffer, folder = "kosmo_properties") {
   return new Promise((resolve, reject) => {
     if (!process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME === "kosmo-bali" || !process.env.CLOUDINARY_API_SECRET || process.env.CLOUDINARY_API_SECRET.includes("sample")) {
-      const mockPublicId = `${folder}/prop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
       return resolve({
         secure_url: mockUrl,
@@ -699,7 +708,9 @@ router.post("/upload", upload.single("image"), async (req, res) => {
     res.status(500).json({ message: "Gagal mengunggah gambar ke Cloudinary." });
   }
 });
-var generateId = (prefix) => `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
+var generateId = (prefix) => {
+  return `${prefix}-${crypto2.randomBytes(4).toString("hex")}`;
+};
 router.post("/auth/login", authLimiter, validateBody(loginSchema), async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -984,9 +995,8 @@ router.get("/properties", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
     res.json(normalized);
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Error in GET /api/properties:", err);
-    res.status(500).json({ error: "Internal Server Error", message: "Gagal mengambil properti: " + errorMsg });
+    res.status(500).json({ error: "Internal Server Error", message: "Gagal mengambil properti." });
   }
 });
 router.get("/properties/:id", async (req, res) => {
@@ -1196,9 +1206,8 @@ router.get("/reviews", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
     res.json(rows);
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Error in GET /api/reviews:", err);
-    res.status(500).json({ error: "Internal Server Error", message: "Gagal mengambil data review: " + errorMsg });
+    res.status(500).json({ error: "Internal Server Error", message: "Gagal mengambil data review." });
   }
 });
 router.post("/reviews", async (req, res) => {
@@ -1644,9 +1653,8 @@ router.post("/tracking/visit", async (req, res) => {
     );
     res.status(201).json({ message: "Kunjungan berhasil dilacak." });
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Error in POST /api/tracking/visit:", err);
-    res.status(500).json({ error: "Internal Server Error", message: "Gagal melacak kunjungan: " + errorMsg });
+    res.status(500).json({ error: "Internal Server Error", message: "Gagal melacak kunjungan." });
   }
 });
 router.get("/admin/stats", authenticateToken, requireRole(["admin"]), async (_req, res) => {
@@ -2206,14 +2214,14 @@ function verifyMidtransSignature(orderId, statusCode, grossAmount, serverKey, si
   }
   const normalizedAmount = grossAmount.includes(".") ? parseFloat(grossAmount).toFixed(2) : grossAmount;
   const payload = `${orderId}${statusCode}${normalizedAmount}${serverKey}`;
-  const calculatedHash = crypto.createHash("sha512").update(payload).digest("hex").toLowerCase();
+  const calculatedHash = crypto2.createHash("sha512").update(payload).digest("hex").toLowerCase();
   const targetSig = signatureKey.toLowerCase();
   const calculatedBuffer = Buffer.from(calculatedHash, "utf8");
   const targetBuffer = Buffer.from(targetSig, "utf8");
   if (calculatedBuffer.length !== targetBuffer.length) {
     return false;
   }
-  return crypto.timingSafeEqual(calculatedBuffer, targetBuffer);
+  return crypto2.timingSafeEqual(calculatedBuffer, targetBuffer);
 }
 router.post("/payment/token", authenticateToken, async (req, res) => {
   const { propertyId, tenantId, durationMonths } = req.body;
@@ -2425,11 +2433,10 @@ app.use(async (req, res, next) => {
     try {
       await ensureDbReady();
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Unable to reach database cluster";
       console.error("Database readiness check failed in middleware:", error);
       return res.status(500).json({
         error: "Database connection failed",
-        message: errorMsg
+        message: "Unable to reach database cluster"
       });
     }
   }
@@ -2438,8 +2445,7 @@ app.use(async (req, res, next) => {
 app.use("/api", router_default);
 app.use((err, _req, res, _next) => {
   console.error("Unhandled API Error:", err);
-  const errorMsg = err instanceof Error ? err.message : "Internal Server Error";
-  res.status(500).json({ message: errorMsg, error: errorMsg });
+  res.status(500).json({ message: "Internal Server Error", error: "Internal Server Error" });
 });
 if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
   app.listen(PORT, () => {
