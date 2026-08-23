@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
 
@@ -25,7 +26,7 @@ export function uploadImageStream(
       !process.env.CLOUDINARY_API_SECRET ||
       process.env.CLOUDINARY_API_SECRET.includes('sample')
     ) {
-      const mockPublicId = `${folder}/prop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
       return resolve({
         secure_url: mockUrl,

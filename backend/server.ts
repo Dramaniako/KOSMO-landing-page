@@ -60,11 +60,10 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
       await ensureDbReady();
     } catch (error: unknown) {
-      const errorMsg = error instanceof Error ? error.message : 'Unable to reach database cluster';
       console.error("Database readiness check failed in middleware:", error);
       return res.status(500).json({
         error: 'Database connection failed',
-        message: errorMsg
+        message: 'Unable to reach database cluster'
       });
     }
   }
@@ -77,8 +76,7 @@ app.use('/api', router);
 // Global Error Handler to guarantee JSON responses and prevent plain text 500 crashes
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error("Unhandled API Error:", err);
-  const errorMsg = err instanceof Error ? err.message : "Internal Server Error";
-  res.status(500).json({ message: errorMsg, error: errorMsg });
+  res.status(500).json({ message: "Internal Server Error", error: "Internal Server Error" });
 });
 
 if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {

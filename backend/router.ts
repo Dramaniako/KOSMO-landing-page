@@ -133,7 +133,11 @@ router.post('/upload', upload.single('image'), async (req: MulterRequest, res: R
 });
 
 // ID Generator
-const generateId = (prefix: string): string => `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
+const generateId = (prefix: string): string => {
+  // 🛡️ SECURITY: Use cryptographically secure random numbers instead of weak Math.random()
+  // Math.random() is predictable and can lead to ID collision or guessing attacks
+  return `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
+};
 
 // ==========================================
 // Authentication Endpoints
@@ -575,9 +579,8 @@ router.get('/properties', async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
     res.json(normalized);
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Error in GET /api/properties:", err);
-    res.status(500).json({ error: 'Internal Server Error', message: "Gagal mengambil properti: " + errorMsg });
+    res.status(500).json({ error: 'Internal Server Error', message: "Gagal mengambil properti." });
   }
 });
 
@@ -833,9 +836,8 @@ router.get('/reviews', async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
     res.json(rows);
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Error in GET /api/reviews:", err);
-    res.status(500).json({ error: 'Internal Server Error', message: "Gagal mengambil data review: " + errorMsg });
+    res.status(500).json({ error: 'Internal Server Error', message: "Gagal mengambil data review." });
   }
 });
 
@@ -1407,9 +1409,8 @@ router.post('/tracking/visit', async (req: Request, res: Response) => {
     );
     res.status(201).json({ message: "Kunjungan berhasil dilacak." });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Error in POST /api/tracking/visit:", err);
-    res.status(500).json({ error: 'Internal Server Error', message: "Gagal melacak kunjungan: " + errorMsg });
+    res.status(500).json({ error: 'Internal Server Error', message: "Gagal melacak kunjungan." });
   }
 });
 
