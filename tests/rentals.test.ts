@@ -155,55 +155,9 @@ test('Rental booking and occupancy state transitions', async (t) => {
   });
 });
 
+import { computePaymentSchedule } from '../backend/router';
+
 test('Next payment schedule and billing computation', async (t) => {
-  // Direct logic test of computePaymentSchedule
-  function computePaymentSchedule(startDateStr: string, status: string, referenceDate: Date = new Date()) {
-    if (status !== 'active') {
-      return {
-        nextPaymentDate: '-',
-        nextPaymentDateISO: '',
-        daysRemaining: 0,
-        paymentStatus: 'Penyewaan Selesai'
-      };
-    }
-
-    let start = new Date(startDateStr);
-    if (isNaN(start.getTime())) {
-      start = new Date(referenceDate);
-    }
-
-    const now = new Date(referenceDate);
-    let due = new Date(start);
-
-    while (due <= now) {
-      due.setMonth(due.getMonth() + 1);
-    }
-
-    const diffMs = due.getTime() - now.getTime();
-    const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-
-    const iso = due.toISOString().split('T')[0];
-    const formatted = due.toLocaleDateString('id-ID', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-
-    let paymentStatus = 'Lunas (Periode Berjalan)';
-    if (daysRemaining <= 3) {
-      paymentStatus = 'Menjelang Jatuh Tempo';
-    } else if (daysRemaining === 0) {
-      paymentStatus = 'Menunggu Pembayaran';
-    }
-
-    return {
-      nextPaymentDate: formatted,
-      nextPaymentDateISO: iso,
-      daysRemaining,
-      paymentStatus
-    };
-  }
-
   await t.test('computes next monthly billing date from start date for active rental', () => {
     const ref = new Date('2026-08-17T12:00:00Z');
     const schedule = computePaymentSchedule('2026-08-01', 'active', ref);
@@ -219,10 +173,30 @@ test('Next payment schedule and billing computation', async (t) => {
     assert.equal(schedule.paymentStatus, 'Penyewaan Selesai');
   });
 
-  await t.test('flags Menjelang Jatuh Tempo when daysRemaining is 3 or less', () => {
+  await t.test('flags Menjelang Jatuh Tempo when daysRemaining is between 1 and 3', () => {
     const ref = new Date('2026-08-29T12:00:00Z');
     const schedule = computePaymentSchedule('2026-08-01', 'active', ref);
     assert.equal(schedule.nextPaymentDateISO, '2026-09-01');
     assert.equal(schedule.paymentStatus, 'Menjelang Jatuh Tempo');
+  });
+
+  await t.test('flags Menunggu Pembayaran when daysRemaining is 0 (due today)', () => {
+    const ref = new Date('2026-09-01T08:00:00Z');
+    const schedule = computePaymentSchedule('2026-08-01', 'active', ref);
+    assert.equal(schedule.nextPaymentDateISO, '2026-09-01');
+    assert.equal(schedule.daysRemaining, 0);
+    assert.equal(schedule.paymentStatus, 'Menunggu Pembayaran');
+  });
+
+  await t.test('handles month-end 31st dates without drifting anniversary day across months', () => {
+    const refFeb = new Date('2026-02-15T00:00:00Z');
+    const schedFeb = computePaymentSchedule('2026-01-31', 'active', refFeb);
+    // February 2026 has 28 days -> clamps to Feb 28
+    assert.equal(schedFeb.nextPaymentDateISO, '2026-02-28');
+
+    const refMar = new Date('2026-03-01T00:00:00Z');
+    const schedMar = computePaymentSchedule('2026-01-31', 'active', refMar);
+    // March 2026 has 31 days -> restores to Mar 31!
+    assert.equal(schedMar.nextPaymentDateISO, '2026-03-31');
   });
 });

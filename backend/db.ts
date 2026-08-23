@@ -63,12 +63,22 @@ let activePool: mysql.Pool | null = null;
 
 export function getPool(): mysql.Pool {
   if (!activePool) {
+    const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
     activePool = mysql.createPool({
       ...dbConfig,
-      connectionLimit: 10,
-      maxIdle: 10,
-      idleTimeout: 60000,
+      connectionLimit: isServerless ? 2 : parseInt(process.env.DB_CONNECTION_LIMIT || '10', 10),
+      maxIdle: isServerless ? 1 : 5,
+      idleTimeout: isServerless ? 10000 : 60000,
       queueLimit: 0
+    });
+
+    const rawPool = (activePool as unknown as { pool?: { on?: (event: string, cb: (err: Error) => void) => void } })?.pool;
+    rawPool?.on?.('error', (err: Error) => {
+      console.error('MySQL/TiDB Pool Error Event:', err?.message || err);
+      const code = (err as { code?: string })?.code;
+      if (code === 'PROTOCOL_CONNECTION_LOST' || code === 'ECONNRESET') {
+        activePool = null;
+      }
     });
   }
   return activePool;
@@ -84,6 +94,7 @@ export async function ensureDbReady(): Promise<void> {
   await initDb();
 }
 async function ensureIndexes(): Promise<void> {
+  if (process.env.VERCEL) return;
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
@@ -264,7 +275,7 @@ export async function initDb(): Promise<void> {
           propertyName VARCHAR(100) NOT NULL,
           price INT NOT NULL,
           startDate VARCHAR(50) NOT NULL,
-          status ENUM('pending','active','terminated','cancelled') DEFAULT 'active',
+          status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'active',
           document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
           FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
           FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
@@ -272,7 +283,7 @@ export async function initDb(): Promise<void> {
       `);
 
       try {
-        await pool.query("ALTER TABLE rentals MODIFY status ENUM('pending','active','terminated','cancelled') DEFAULT 'pending'");
+        await pool.query("ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'");
       } catch (e) {}
       try {
         await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''");

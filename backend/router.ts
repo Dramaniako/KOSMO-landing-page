@@ -1305,7 +1305,7 @@ router.post('/admin/withdrawals/:id/process', authenticateToken, requireRole(['a
     const processedAt = new Date().toISOString();
 
     // Increment totalWithdrawn upon successful completion
-    if (targetStatus === 'completed' && withdrawal.status !== 'completed') {
+    if (targetStatus === 'completed') {
       await connection.query(
         'UPDATE users SET totalWithdrawn = totalWithdrawn + ? WHERE id = ?',
         [withdrawal.amount, withdrawal.userId]
@@ -1726,22 +1726,35 @@ export function computePaymentSchedule(startDateStr: string, status: string, ref
     };
   }
 
-  let start = new Date(startDateStr);
-  if (isNaN(start.getTime())) {
-    start = new Date(referenceDate);
-  }
-
   const now = new Date(referenceDate);
-  let due = new Date(start);
+  now.setHours(0, 0, 0, 0);
 
-  while (due <= now) {
-    due.setMonth(due.getMonth() + 1);
+  const rawStart = new Date(startDateStr);
+  const start = isNaN(rawStart.getTime()) ? new Date(now) : new Date(rawStart);
+  start.setHours(0, 0, 0, 0);
+
+  const startDay = start.getDate();
+  let addedMonths = 1;
+
+  const getClampedDate = (months: number): Date => {
+    const totalMonths = start.getMonth() + months;
+    const year = start.getFullYear() + Math.floor(totalMonths / 12);
+    const month = (totalMonths % 12 + 12) % 12;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    return new Date(year, month, Math.min(startDay, daysInMonth), 0, 0, 0, 0);
+  };
+
+  let due = getClampedDate(addedMonths);
+  while (due < now) {
+    addedMonths += 1;
+    due = getClampedDate(addedMonths);
   }
 
   const diffMs = due.getTime() - now.getTime();
-  const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+  const daysRemaining = Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
 
-  const iso = due.toISOString().split('T')[0];
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const iso = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`;
   const formatted = due.toLocaleDateString('id-ID', {
     day: 'numeric',
     month: 'long',
@@ -1749,10 +1762,10 @@ export function computePaymentSchedule(startDateStr: string, status: string, ref
   });
 
   let paymentStatus: PaymentSchedule['paymentStatus'] = 'Lunas (Periode Berjalan)';
-  if (daysRemaining <= 3) {
-    paymentStatus = 'Menjelang Jatuh Tempo';
-  } else if (daysRemaining === 0) {
+  if (daysRemaining === 0) {
     paymentStatus = 'Menunggu Pembayaran';
+  } else if (daysRemaining <= 3) {
+    paymentStatus = 'Menjelang Jatuh Tempo';
   }
 
   return {
@@ -1858,12 +1871,15 @@ router.post('/rentals', authenticateToken, async (req: AuthenticatedRequest, res
   // Optional: Verify Midtrans status if configured
   if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes('placeholder') && !process.env.MIDTRANS_SERVER_KEY.includes('your-server-key')) {
     try {
-      const statusResponse = await snap.transaction.status(rentalId);
-      const isValidPayment = 
-        statusResponse.transaction_status === 'settlement' || 
-        (statusResponse.transaction_status === 'capture' && statusResponse.fraud_status === 'accept');
-      if (!isValidPayment) {
-        return res.status(402).json({ message: "Pembayaran belum diselesaikan pada payment gateway Midtrans." });
+      const snapApi = snap as unknown as { transaction?: { status: (orderId: string) => Promise<{ transaction_status: string; fraud_status?: string; gross_amount: string }> } };
+      if (snapApi.transaction?.status) {
+        const statusResponse = await snapApi.transaction.status(rentalId);
+        const isValidPayment = 
+          statusResponse.transaction_status === 'settlement' || 
+          (statusResponse.transaction_status === 'capture' && statusResponse.fraud_status === 'accept');
+        if (!isValidPayment) {
+          return res.status(402).json({ message: "Pembayaran belum diselesaikan pada payment gateway Midtrans." });
+        }
       }
     } catch (midtransErr) {
       // In development or simulation environments, allow proceeding if token was minted

@@ -582,9 +582,9 @@ export default function TenantDashboard() {
                             className="badge"
                             style={{
                               fontSize: '11px',
-                              backgroundColor: activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '#fef3c7' : '#dcfce7',
-                              color: activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '#92400e' : '#166534',
-                              border: activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '1px solid #fde68a' : '1px solid #bbf7d0'
+                              backgroundColor: activeRental.daysRemaining === 0 ? '#fee2e2' : activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '#fef3c7' : '#dcfce7',
+                              color: activeRental.daysRemaining === 0 ? '#b91c1c' : activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '#92400e' : '#166534',
+                              border: activeRental.daysRemaining === 0 ? '1px solid #fca5a5' : activeRental.daysRemaining !== undefined && activeRental.daysRemaining <= 3 ? '1px solid #fde68a' : '1px solid #bbf7d0'
                             }}
                           >
                             {activeRental.paymentStatus}
