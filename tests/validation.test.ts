@@ -155,6 +155,17 @@ test('Zod request body validation middleware & schemas', async (t) => {
     });
     assert.equal(nonIntegerRooms.success, false);
 
+    const zeroPrice = propertySchema.safeParse({
+      name: 'KOSMO Sunset Deluxe',
+      district: 'Badung',
+      address: 'Jl. Sunset No. 10',
+      price: 0,
+      totalRooms: 5,
+      ownerId: 'landlord-10'
+    });
+    assert.equal(zeroPrice.success, false);
+  });
+
   await t.test('withdrawalSchema validates positive amount and required banking details', () => {
     const valid = withdrawalSchema.safeParse({
       amount: 1500000,
