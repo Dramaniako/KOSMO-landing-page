@@ -22,6 +22,19 @@ export const propertySchema = z.object({
   ownerId: z.string().min(1, 'ownerId wajib diisi')
 });
 
+export const withdrawalSchema = z.object({
+  amount: z.number().positive('Jumlah penarikan harus lebih besar dari 0'),
+  bankName: z.string().min(1, 'Nama bank wajib diisi'),
+  accountNumber: z.string().min(1, 'Nomor rekening wajib diisi'),
+  accountHolder: z.string().optional()
+});
+
+export const reviewSchema = z.object({
+  propertyId: z.string().min(1, 'propertyId wajib diisi'),
+  comment: z.string().min(1, 'Komentar ulasan wajib diisi'),
+  rating: z.number().int().min(1, 'Rating minimal 1').max(5, 'Rating maksimal 5')
+});
+
 export function validateBody<T extends z.ZodTypeAny>(schema: T) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body);

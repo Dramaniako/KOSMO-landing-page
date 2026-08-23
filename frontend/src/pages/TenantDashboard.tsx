@@ -598,14 +598,20 @@ export default function TenantDashboard() {
 
                       {/* Next Payment Due Date & Countdown */}
                       {activeRental.nextPaymentDate && (
-                        <div style={{ marginTop: '12px', padding: '10px 14px', backgroundColor: 'rgba(255, 255, 255, 0.85)', border: '1px solid #86efac', borderRadius: 'var(--radius-sm)', display: 'inline-flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                          <div style={{ fontSize: '12px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <Calendar size={14} className="text-blue-600" />
-                            <span style={{ color: '#64748b', fontWeight: 500 }}>{t('tenant.nextDue')}:</span>{' '}
-                            <strong style={{ color: '#0f172a' }}>{activeRental.nextPaymentDate}</strong>
+                        <div className="mt-3 p-2.5 px-3.5 bg-white/90 dark:bg-slate-800/90 border border-emerald-300 dark:border-emerald-700/50 rounded-lg inline-flex items-center gap-3 flex-wrap">
+                          <div className="text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                            <Calendar size={14} className="text-blue-600 dark:text-blue-400" />
+                            <span className="text-slate-500 dark:text-slate-400 font-medium">{t('tenant.nextDue')}:</span>{' '}
+                            <strong className="text-slate-900 dark:text-slate-100">{activeRental.nextPaymentDate}</strong>
                           </div>
                           {activeRental.daysRemaining !== undefined && (
-                            <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '12px', backgroundColor: activeRental.daysRemaining <= 3 ? '#fee2e2' : '#dbeafe', color: activeRental.daysRemaining <= 3 ? '#b91c1c' : '#1d4ed8' }}>
+                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                              activeRental.daysRemaining === 0 
+                                ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800' 
+                                : activeRental.daysRemaining <= 3 
+                                  ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800' 
+                                  : 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                            }`}>
                               {t('tenant.daysLeft', { days: activeRental.daysRemaining })}
                             </span>
                           )}

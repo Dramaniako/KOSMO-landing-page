@@ -31,11 +31,11 @@ export default function KosCard({ property, onOpenDetail, renderFacilityIcon }: 
 
   return (
     <div
-      className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col overflow-hidden group cursor-pointer property-card kos-card"
+      className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col overflow-hidden group cursor-pointer property-card kos-card"
       onClick={() => onOpenDetail(property)}
     >
       {/* Image Clamping Container */}
-      <div className="relative w-full h-48 sm:h-52 bg-slate-100 overflow-hidden property-img-wrapper">
+      <div className="relative w-full h-48 sm:h-52 bg-slate-100 dark:bg-slate-800 overflow-hidden property-img-wrapper">
         <img
           src={image}
           alt={property.name || 'Kosmo Property'}
@@ -43,7 +43,9 @@ export default function KosCard({ property, onOpenDetail, renderFacilityIcon }: 
           loading="lazy"
           decoding="async"
           onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
+            const target = e.currentTarget as HTMLImageElement;
+            target.onerror = null;
+            target.src = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
           }}
         />
 

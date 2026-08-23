@@ -147,11 +147,18 @@ export default function LandingPage() {
     if (district && district !== 'Semua') {
       params.append('district', district);
     }
-    if (priceMin > 0) {
-      params.append('minPrice', priceMin.toString());
+    let effectiveMin = priceMin;
+    let effectiveMax = priceMax;
+    if (effectiveMin > 0 && effectiveMax > 0 && effectiveMin > effectiveMax) {
+      const temp = effectiveMin;
+      effectiveMin = effectiveMax;
+      effectiveMax = temp;
     }
-    if (priceMax < 10000000) {
-      params.append('maxPrice', priceMax.toString());
+    if (effectiveMin > 0) {
+      params.append('minPrice', effectiveMin.toString());
+    }
+    if (effectiveMax > 0 && effectiveMax < 10000000) {
+      params.append('maxPrice', effectiveMax.toString());
     }
 
     const selectedFacilities = Object.keys(facilities).filter(

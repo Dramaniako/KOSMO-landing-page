@@ -5,7 +5,9 @@ import {
   validateBody,
   loginSchema,
   registerSchema,
-  propertySchema
+  propertySchema,
+  withdrawalSchema,
+  reviewSchema
 } from '../backend/middleware/validation';
 import type { Request, Response, NextFunction } from 'express';
 
@@ -153,14 +155,50 @@ test('Zod request body validation middleware & schemas', async (t) => {
     });
     assert.equal(nonIntegerRooms.success, false);
 
-    const zeroPrice = propertySchema.safeParse({
-      name: 'KOSMO Sunset Deluxe',
-      district: 'Badung',
-      address: 'Jl. Sunset No. 10',
-      price: 0,
-      totalRooms: 5,
-      ownerId: 'landlord-10'
+  await t.test('withdrawalSchema validates positive amount and required banking details', () => {
+    const valid = withdrawalSchema.safeParse({
+      amount: 1500000,
+      bankName: 'BCA',
+      accountNumber: '1234567890',
+      accountHolder: 'Budi Santoso'
     });
-    assert.equal(zeroPrice.success, false);
+    assert.equal(valid.success, true);
+
+    const negativeAmount = withdrawalSchema.safeParse({
+      amount: -500000,
+      bankName: 'BCA',
+      accountNumber: '1234567890'
+    });
+    assert.equal(negativeAmount.success, false);
+
+    const missingBank = withdrawalSchema.safeParse({
+      amount: 500000,
+      bankName: '',
+      accountNumber: '1234567890'
+    });
+    assert.equal(missingBank.success, false);
+  });
+
+  await t.test('reviewSchema validates rating between 1 and 5 and non-empty comments', () => {
+    const valid = reviewSchema.safeParse({
+      propertyId: 'prop-101',
+      comment: 'Tempat kos sangat nyaman dan bersih!',
+      rating: 5
+    });
+    assert.equal(valid.success, true);
+
+    const outOfBoundsRating = reviewSchema.safeParse({
+      propertyId: 'prop-101',
+      comment: 'Bagus',
+      rating: 6
+    });
+    assert.equal(outOfBoundsRating.success, false);
+
+    const emptyComment = reviewSchema.safeParse({
+      propertyId: 'prop-101',
+      comment: '',
+      rating: 4
+    });
+    assert.equal(emptyComment.success, false);
   });
 });
