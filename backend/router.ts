@@ -133,7 +133,11 @@ router.post('/upload', upload.single('image'), async (req: MulterRequest, res: R
 });
 
 // ID Generator
-const generateId = (prefix: string): string => `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
+const generateId = (prefix: string): string => {
+  // 🛡️ SECURITY: Use cryptographically secure random numbers instead of weak Math.random()
+  // Math.random() is predictable and can lead to ID collision or guessing attacks
+  return `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
+};
 
 // ==========================================
 // Authentication Endpoints
