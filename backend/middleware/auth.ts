@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import type { SignOptions } from 'jsonwebtoken';
 import type { UserRole } from '../types/index';
+import { randomBytes } from 'crypto';
 
 export interface JWTPayload {
   id: string;
@@ -9,12 +10,20 @@ export interface JWTPayload {
   role: UserRole;
 }
 
+let defaultSecret: string | null = null;
+
 export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
-  if (!secret && process.env.NODE_ENV === 'production') {
+  if (secret) {
+    return secret;
+  }
+  if (process.env.NODE_ENV === 'production') {
     throw new Error('FATAL: JWT_SECRET environment variable is missing in production.');
   }
-  return secret || 'super-secret-jwt-key-with-high-entropy-minimum-32-chars';
+  if (!defaultSecret) {
+    defaultSecret = randomBytes(32).toString('hex');
+  }
+  return defaultSecret;
 }
 
 export function generateJwtToken(
