@@ -152,7 +152,7 @@ test('Landlord withdrawals and financial calculations', async (t) => {
     const resCompleted = processAdminDisbursement(withdrawal, account, 'completed');
     assert.equal(resCompleted.success, true);
     assert.equal(withdrawal.status, 'completed');
-    assert.equal(account.totalTotalWithdrawn || account.totalWithdrawn, 4000000);
+    assert.equal(account.totalWithdrawn, 4000000);
   });
 
   await t.test('admin rejection reverses deducted funds and leaves totalWithdrawn intact', () => {

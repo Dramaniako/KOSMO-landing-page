@@ -7,17 +7,18 @@ echo "=========================================="
 npx tsc --noEmit
 
 echo "=========================================="
-echo " 2. Testing Frontend Production Build     "
+echo " 2. Testing Frontend & Backend Build      "
 echo "=========================================="
 if [ -d "frontend" ]; then
   npm --prefix frontend run build
 fi
+npm run build:backend
 
 echo "=========================================="
 echo " 3. Running Backend Test Suite            "
 echo "=========================================="
 if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
-  npm test || node --experimental-strip-types --test tests/*.test.*
+  npm test
 fi
 
 echo "=========================================="
