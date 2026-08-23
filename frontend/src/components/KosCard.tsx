@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { MapPin, Star, Sparkles } from 'lucide-react';
 import { Property } from '../types/index';
 
@@ -131,4 +131,6 @@ export default function KosCard({ property, onOpenDetail, renderFacilityIcon }: 
       </div>
     </div>
   );
-}
+});
+
+export default KosCard;

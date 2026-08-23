@@ -39,10 +39,10 @@ jobs:
           cache: 'npm'
 
       - name: Install Root Dependencies
-        run: npm ci
+        run: npm install --no-audit
 
       - name: Install Frontend Dependencies
-        run: npm --prefix frontend ci
+        run: npm --prefix frontend install --no-audit
 
       - name: Install Playwright Browsers & OS Dependencies
         run: npx playwright install --with-deps chromium
