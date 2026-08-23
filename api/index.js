@@ -337,7 +337,7 @@ import express from "express";
 import XLSX from "xlsx";
 import multer from "multer";
 import bcrypt2 from "bcryptjs";
-import crypto from "crypto";
+import crypto2 from "crypto";
 import rateLimit from "express-rate-limit";
 import midtransClient from "midtrans-client";
 
@@ -580,6 +580,7 @@ function validateBody(schema) {
 }
 
 // backend/services/cloudinary.ts
+import crypto from "crypto";
 import { v2 as cloudinary } from "cloudinary";
 import { Readable } from "stream";
 cloudinary.config({
@@ -591,7 +592,7 @@ cloudinary.config({
 function uploadImageStream(buffer, folder = "kosmo_properties") {
   return new Promise((resolve, reject) => {
     if (!process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME === "kosmo-bali" || !process.env.CLOUDINARY_API_SECRET || process.env.CLOUDINARY_API_SECRET.includes("sample")) {
-      const mockPublicId = `${folder}/prop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
       return resolve({
         secure_url: mockUrl,
@@ -699,7 +700,9 @@ router.post("/upload", upload.single("image"), async (req, res) => {
     res.status(500).json({ message: "Gagal mengunggah gambar ke Cloudinary." });
   }
 });
-var generateId = (prefix) => `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
+var generateId = (prefix) => {
+  return `${prefix}-${crypto2.randomBytes(4).toString("hex")}`;
+};
 router.post("/auth/login", authLimiter, validateBody(loginSchema), async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -2206,14 +2209,14 @@ function verifyMidtransSignature(orderId, statusCode, grossAmount, serverKey, si
   }
   const normalizedAmount = grossAmount.includes(".") ? parseFloat(grossAmount).toFixed(2) : grossAmount;
   const payload = `${orderId}${statusCode}${normalizedAmount}${serverKey}`;
-  const calculatedHash = crypto.createHash("sha512").update(payload).digest("hex").toLowerCase();
+  const calculatedHash = crypto2.createHash("sha512").update(payload).digest("hex").toLowerCase();
   const targetSig = signatureKey.toLowerCase();
   const calculatedBuffer = Buffer.from(calculatedHash, "utf8");
   const targetBuffer = Buffer.from(targetSig, "utf8");
   if (calculatedBuffer.length !== targetBuffer.length) {
     return false;
   }
-  return crypto.timingSafeEqual(calculatedBuffer, targetBuffer);
+  return crypto2.timingSafeEqual(calculatedBuffer, targetBuffer);
 }
 router.post("/payment/token", authenticateToken, async (req, res) => {
   const { propertyId, tenantId, durationMonths } = req.body;
