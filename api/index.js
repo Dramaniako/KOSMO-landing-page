@@ -58,12 +58,21 @@ var dbConfig = {
 var activePool = null;
 function getPool() {
   if (!activePool) {
+    const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
     activePool = mysql.createPool({
       ...dbConfig,
-      connectionLimit: 10,
-      maxIdle: 10,
-      idleTimeout: 6e4,
+      connectionLimit: isServerless ? 2 : parseInt(process.env.DB_CONNECTION_LIMIT || "10", 10),
+      maxIdle: isServerless ? 1 : 5,
+      idleTimeout: isServerless ? 1e4 : 6e4,
       queueLimit: 0
+    });
+    const rawPool = activePool?.pool;
+    rawPool?.on?.("error", (err) => {
+      console.error("MySQL/TiDB Pool Error Event:", err?.message || err);
+      const code = err?.code;
+      if (code === "PROTOCOL_CONNECTION_LOST" || code === "ECONNRESET") {
+        activePool = null;
+      }
     });
   }
   return activePool;
@@ -76,6 +85,7 @@ async function ensureDbReady() {
   await initDb();
 }
 async function ensureIndexes() {
+  if (process.env.VERCEL) return;
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
@@ -230,14 +240,14 @@ async function initDb() {
           propertyName VARCHAR(100) NOT NULL,
           price INT NOT NULL,
           startDate VARCHAR(50) NOT NULL,
-          status ENUM('pending','active','terminated','cancelled') DEFAULT 'active',
+          status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'active',
           document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
           FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
           FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
       try {
-        await pool.query("ALTER TABLE rentals MODIFY status ENUM('pending','active','terminated','cancelled') DEFAULT 'pending'");
+        await pool.query("ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'");
       } catch (e) {
       }
       try {
@@ -469,15 +479,24 @@ var apiCache = new InMemoryCache();
 
 // backend/middleware/auth.ts
 import jwt from "jsonwebtoken";
-function generateJwtToken(payload, secret = process.env.JWT_SECRET || "super-secret-jwt-key-with-high-entropy-minimum-32-chars", expiresIn = "7d") {
-  const options = {};
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") {
+    throw new Error("FATAL: JWT_SECRET environment variable is missing in production.");
+  }
+  return secret || "super-secret-jwt-key-with-high-entropy-minimum-32-chars";
+}
+function generateJwtToken(payload, secret = getJwtSecret(), expiresIn = "7d") {
+  const options = {
+    algorithm: "HS256"
+  };
   if (expiresIn !== void 0) {
     options.expiresIn = expiresIn;
   }
   return jwt.sign(payload, secret, options);
 }
-function verifyJwtToken(token, secret = process.env.JWT_SECRET || "super-secret-jwt-key-with-high-entropy-minimum-32-chars") {
-  const decoded = jwt.verify(token, secret);
+function verifyJwtToken(token, secret = getJwtSecret()) {
+  const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] });
   if (!decoded || typeof decoded !== "object") {
     throw new Error("Invalid token payload");
   }
@@ -536,6 +555,17 @@ var propertySchema = z.object({
   price: z.number().positive("Harga harus lebih besar dari 0"),
   totalRooms: z.number().int().positive("Total kamar harus lebih besar dari 0"),
   ownerId: z.string().min(1, "ownerId wajib diisi")
+});
+var withdrawalSchema = z.object({
+  amount: z.number().positive("Jumlah penarikan harus lebih besar dari 0"),
+  bankName: z.string().min(1, "Nama bank wajib diisi"),
+  accountNumber: z.string().min(1, "Nomor rekening wajib diisi"),
+  accountHolder: z.string().optional()
+});
+var reviewSchema = z.object({
+  propertyId: z.string().min(1, "propertyId wajib diisi"),
+  comment: z.string().min(1, "Komentar ulasan wajib diisi"),
+  rating: z.number().int().min(1, "Rating minimal 1").max(5, "Rating maksimal 5")
 });
 function validateBody(schema) {
   return (req, res, next) => {
@@ -802,7 +832,7 @@ router.put("/auth/profile", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Gagal memperbarui profil." });
   }
 });
-router.get("/users", async (_req, res) => {
+router.get("/users", authenticateToken, requireRole(["admin"]), async (_req, res) => {
   try {
     const [rows] = await pool.query(
       "SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT 50"
@@ -824,7 +854,7 @@ router.get("/admin/users", authenticateToken, requireRole(["admin"]), async (_re
     res.status(500).json({ message: "Gagal mengambil data user admin." });
   }
 });
-router.post("/users", async (req, res) => {
+router.post("/users", authenticateToken, requireRole(["admin"]), validateBody(registerSchema), async (req, res) => {
   const { email, password, name, role, phone, paymentMethod } = req.body;
   if (!email || !password || !name || !role) {
     return res.status(400).json({ message: "Nama, email, password, dan role wajib diisi." });
@@ -846,7 +876,7 @@ router.post("/users", async (req, res) => {
     res.status(500).json({ message: "Gagal membuat user." });
   }
 });
-router.put("/users/:id", async (req, res) => {
+router.put("/users/:id", authenticateToken, requireRole(["admin"]), async (req, res) => {
   const { id } = req.params;
   const { name, email, role, phone, paymentMethod, password } = req.body;
   try {
@@ -871,7 +901,7 @@ router.put("/users/:id", async (req, res) => {
     res.status(500).json({ message: "Gagal memperbarui user." });
   }
 });
-router.delete("/users/:id", async (req, res) => {
+router.delete("/users/:id", authenticateToken, requireRole(["admin"]), async (req, res) => {
   const { id } = req.params;
   if (id === "user-admin") {
     return res.status(400).json({ message: "Admin utama tidak dapat dihapus." });
@@ -1031,14 +1061,20 @@ router.post("/properties", authenticateToken, requireRole(["admin", "landlord", 
 router.put("/properties/:id", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
   const { id } = req.params;
   const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, occupiedRooms, image } = req.body;
+  const authUser = req.user;
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [rows] = await connection.query("SELECT * FROM properties WHERE id = ?", [id]);
+    const [rows] = await connection.query("SELECT * FROM properties WHERE id = ? FOR UPDATE", [id]);
     if (rows.length === 0) {
+      await connection.rollback();
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
     const existing = rows[0];
+    if (authUser?.role !== "admin" && existing.ownerId !== authUser?.id) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+    }
     const updatedName = name !== void 0 ? name : existing.name;
     const updatedDistrict = district !== void 0 ? district : existing.district;
     const updatedAddress = address !== void 0 ? address : existing.address;
@@ -1089,29 +1125,51 @@ router.put("/properties/:id", authenticateToken, requireRole(["admin", "landlord
 router.delete("/properties/:id", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
   const { id } = req.params;
   const { password, landlordId } = req.body;
-  if (!password || !landlordId) {
-    return res.status(400).json({ message: "Password dan landlordId diperlukan." });
+  const authUser = req.user;
+  const callerId = authUser?.id;
+  const callerRole = authUser?.role;
+  if (!password) {
+    return res.status(400).json({ message: "Password konfirmasi diperlukan." });
   }
+  const connection = await pool.getConnection();
   try {
-    const [propRows] = await pool.query("SELECT * FROM properties WHERE id = ?", [id]);
+    await connection.beginTransaction();
+    const [propRows] = await connection.query("SELECT * FROM properties WHERE id = ? FOR UPDATE", [id]);
     const property = propRows[0];
     if (!property) {
+      await connection.rollback();
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
-    if (property.ownerId !== landlordId) {
+    if (callerRole !== "admin" && property.ownerId !== callerId) {
+      await connection.rollback();
       return res.status(403).json({ message: "Anda bukan pemilik properti ini." });
     }
-    const [userRows] = await pool.query("SELECT password FROM users WHERE id = ?", [landlordId]);
-    const user = userRows[0];
-    if (!user || !user.password || !bcrypt2.compareSync(password, user.password)) {
+    const [activeRentals] = await connection.query(
+      "SELECT COUNT(*) as activeCount FROM rentals WHERE propertyId = ? AND status = 'active'",
+      [id]
+    );
+    if (Number(activeRentals[0]?.activeCount || 0) > 0) {
+      await connection.rollback();
+      return res.status(409).json({
+        message: "Properti tidak dapat dihapus karena masih memiliki sewa aktif berjalan."
+      });
+    }
+    const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [callerId]);
+    const caller = userRows[0];
+    if (!caller || !caller.password || !bcrypt2.compareSync(password, caller.password)) {
+      await connection.rollback();
       return res.status(401).json({ message: "Password salah." });
     }
-    await pool.query("DELETE FROM properties WHERE id = ?", [id]);
+    await connection.query("DELETE FROM properties WHERE id = ?", [id]);
+    await connection.commit();
     apiCache.invalidatePattern("properties");
     res.json({ message: "Properti berhasil dihapus!" });
   } catch (err) {
+    await connection.rollback();
     console.error("Delete property error:", err);
     res.status(500).json({ message: "Gagal menghapus properti." });
+  } finally {
+    connection.release();
   }
 });
 router.get("/reviews", async (req, res) => {
@@ -1400,12 +1458,16 @@ router.get("/landlord/rentals", authenticateToken, requireRole(["admin", "landlo
     res.status(500).json({ message: "Gagal mengambil data sewa landlord." });
   }
 });
-router.post("/withdraw", authenticateToken, async (req, res) => {
+router.post("/withdraw", authenticateToken, requireRole(["admin", "landlord"]), async (req, res) => {
   const { amount, bankName, accountNumber, accountHolder, userId } = req.body;
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
   if (!amount || !bankName || !accountNumber) {
     return res.status(400).json({ message: "Jumlah, nama bank, dan nomor rekening wajib diisi." });
   }
-  const targetUserId = userId || "user-landlord";
+  const targetUserId = authUser.role === "admin" && userId ? userId : authUser.id;
   const withdrawAmount = parseFloat(String(amount));
   if (withdrawAmount <= 0 || isNaN(withdrawAmount)) {
     return res.status(400).json({ message: "Jumlah penarikan harus lebih besar dari 0." });
@@ -1424,10 +1486,10 @@ router.post("/withdraw", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Saldo tidak mencukupi." });
     }
     const newBalance = parseFloat(String(user.balance || 0)) - withdrawAmount;
-    const newWithdrawn = parseFloat(String(user.totalWithdrawn || 0)) + withdrawAmount;
+    const currentWithdrawn = parseFloat(String(user.totalWithdrawn || 0));
     await connection.query(
-      "UPDATE users SET balance = ?, totalWithdrawn = ? WHERE id = ?",
-      [newBalance, newWithdrawn, targetUserId]
+      "UPDATE users SET balance = ? WHERE id = ?",
+      [newBalance, targetUserId]
     );
     const withdrawalId = generateId("w");
     const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
@@ -1442,7 +1504,7 @@ router.post("/withdraw", authenticateToken, async (req, res) => {
       message: "Permintaan penarikan dana berhasil diajukan dan sedang menunggu proses.",
       withdrawalId,
       balance: newBalance,
-      totalWithdrawn: newWithdrawn,
+      totalWithdrawn: currentWithdrawn,
       status: "pending"
     });
   } catch (err) {
@@ -1498,6 +1560,12 @@ router.post("/admin/withdrawals/:id/process", authenticateToken, requireRole(["a
     }
     const refId = req.body?.referenceId || withdrawal.referenceId || `REF-${Date.now().toString(36).toUpperCase()}`;
     const processedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (targetStatus === "completed") {
+      await connection.query(
+        "UPDATE users SET totalWithdrawn = totalWithdrawn + ? WHERE id = ?",
+        [withdrawal.amount, withdrawal.userId]
+      );
+    }
     await connection.query(
       "UPDATE withdrawals SET status = ?, referenceId = ?, processedAt = ? WHERE id = ?",
       [targetStatus, refId, processedAt, id]
@@ -1540,8 +1608,8 @@ router.post("/admin/withdrawals/:id/reject", authenticateToken, requireRole(["ad
     }
     const withdrawAmount = parseFloat(String(withdrawal.amount));
     await connection.query(
-      "UPDATE users SET balance = balance + ?, totalWithdrawn = GREATEST(0, totalWithdrawn - ?) WHERE id = ?",
-      [withdrawAmount, withdrawAmount, withdrawal.userId]
+      "UPDATE users SET balance = balance + ? WHERE id = ?",
+      [withdrawAmount, withdrawal.userId]
     );
     const rejectionReason = reason || "Pencairan dana ditolak oleh administrator";
     const processedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -1560,7 +1628,7 @@ router.post("/admin/withdrawals/:id/reject", authenticateToken, requireRole(["ad
   } catch (err) {
     await connection.rollback();
     console.error("Reject withdrawal error:", err);
-    res.status(500).json({ message: "Gagal menolak dan mereverse penarikan dana." });
+    res.status(500).json({ message: "Gagal menolak penarikan dana." });
   } finally {
     connection.release();
   }
@@ -1779,13 +1847,15 @@ router.get("/reports/landlord/excel", authenticateToken, requireRole(["admin", "
     res.status(500).json({ message: "Gagal menghasilkan laporan Excel." });
   }
 });
-router.post("/auth/verify-password", async (req, res) => {
-  const { userId, password } = req.body;
-  if (!userId || !password) {
-    return res.status(400).json({ message: "userId dan password wajib diisi." });
+router.post("/auth/verify-password", authLimiter, authenticateToken, async (req, res) => {
+  const { password, userId } = req.body;
+  if (!password) {
+    return res.status(400).json({ message: "password wajib diisi." });
   }
+  const authUser = req.user;
+  const targetUserId = authUser?.role === "admin" && userId ? userId : authUser?.id || userId;
   try {
-    const [rows] = await pool.query("SELECT password FROM users WHERE id = ?", [userId]);
+    const [rows] = await pool.query("SELECT password FROM users WHERE id = ?", [targetUserId]);
     const user = rows[0];
     if (!user || !user.password) {
       return res.status(404).json({ message: "User tidak ditemukan." });
@@ -1806,28 +1876,39 @@ function computePaymentSchedule(startDateStr, status, referenceDate = /* @__PURE
       paymentStatus: "Penyewaan Selesai"
     };
   }
-  let start = new Date(startDateStr);
-  if (isNaN(start.getTime())) {
-    start = new Date(referenceDate);
-  }
   const now = new Date(referenceDate);
-  let due = new Date(start);
-  while (due <= now) {
-    due.setMonth(due.getMonth() + 1);
+  now.setHours(0, 0, 0, 0);
+  const rawStart = new Date(startDateStr);
+  const start = isNaN(rawStart.getTime()) ? new Date(now) : new Date(rawStart);
+  start.setHours(0, 0, 0, 0);
+  const startDay = start.getDate();
+  let addedMonths = 1;
+  const getClampedDate = (months) => {
+    const totalMonths = start.getMonth() + months;
+    const year = start.getFullYear() + Math.floor(totalMonths / 12);
+    const month = (totalMonths % 12 + 12) % 12;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    return new Date(year, month, Math.min(startDay, daysInMonth), 0, 0, 0, 0);
+  };
+  let due = getClampedDate(addedMonths);
+  while (due < now) {
+    addedMonths += 1;
+    due = getClampedDate(addedMonths);
   }
   const diffMs = due.getTime() - now.getTime();
-  const daysRemaining = Math.max(0, Math.ceil(diffMs / (1e3 * 60 * 60 * 24)));
-  const iso = due.toISOString().split("T")[0];
+  const daysRemaining = Math.max(0, Math.round(diffMs / (1e3 * 60 * 60 * 24)));
+  const pad = (n) => n.toString().padStart(2, "0");
+  const iso = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`;
   const formatted = due.toLocaleDateString("id-ID", {
     day: "numeric",
     month: "long",
     year: "numeric"
   });
   let paymentStatus = "Lunas (Periode Berjalan)";
-  if (daysRemaining <= 3) {
-    paymentStatus = "Menjelang Jatuh Tempo";
-  } else if (daysRemaining === 0) {
+  if (daysRemaining === 0) {
     paymentStatus = "Menunggu Pembayaran";
+  } else if (daysRemaining <= 3) {
+    paymentStatus = "Menjelang Jatuh Tempo";
   }
   return {
     nextPaymentDate: formatted,
@@ -1898,17 +1979,51 @@ router.get("/tenant/rentals", authenticateToken, async (req, res) => {
 });
 router.post("/rentals", authenticateToken, async (req, res) => {
   const { tenantId, propertyId, propertyName, price, durationMonths, signature } = req.body;
+  const authUser = req.user;
   if (!tenantId || !propertyId) {
     return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
+  }
+  if (authUser?.role !== "admin" && authUser?.id !== tenantId) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat memesan atas nama akun lain." });
+  }
+  const rentalId = req.body.rentalId && typeof req.body.rentalId === "string" && req.body.rentalId.trim() !== "" ? req.body.rentalId : generateId("rent");
+  if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes("placeholder") && !process.env.MIDTRANS_SERVER_KEY.includes("your-server-key")) {
+    try {
+      const snapApi = snap;
+      if (snapApi.transaction?.status) {
+        const statusResponse = await snapApi.transaction.status(rentalId);
+        const isValidPayment = statusResponse.transaction_status === "settlement" || statusResponse.transaction_status === "capture" && statusResponse.fraud_status === "accept";
+        if (!isValidPayment) {
+          return res.status(402).json({ message: "Pembayaran belum diselesaikan pada payment gateway Midtrans." });
+        }
+      }
+    } catch (midtransErr) {
+      console.warn("Midtrans status check warning:", midtransErr);
+    }
   }
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [propRows] = await connection.query("SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ?", [propertyId]);
+    const [propRows] = await connection.query(
+      "SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ? FOR UPDATE",
+      [propertyId]
+    );
     const property = propRows[0];
     if (!property) {
       await connection.rollback();
       return res.status(404).json({ message: "Properti tidak ditemukan." });
+    }
+    const [existingRentals] = await connection.query(
+      "SELECT id, status, document FROM rentals WHERE id = ? FOR UPDATE",
+      [rentalId]
+    );
+    if (existingRentals.length > 0 && existingRentals[0].status === "active") {
+      await connection.commit();
+      return res.status(200).json({
+        message: "Penyewaan kos sudah aktif!",
+        rentalId,
+        document: existingRentals[0].document || "sertifikat_kepemilikan.pdf"
+      });
     }
     if (property.occupiedRooms >= property.totalRooms) {
       await connection.rollback();
@@ -1917,8 +2032,8 @@ router.post("/rentals", authenticateToken, async (req, res) => {
     const [userRows] = await connection.query("SELECT * FROM users WHERE id = ?", [tenantId]);
     const tenant = userRows[0];
     const [activeRentals] = await connection.query(
-      "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' LIMIT 1",
-      [tenantId]
+      "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? LIMIT 1",
+      [tenantId, rentalId]
     );
     if (activeRentals.length > 0) {
       await connection.rollback();
@@ -1926,7 +2041,6 @@ router.post("/rentals", authenticateToken, async (req, res) => {
         message: "Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
       });
     }
-    const rentalId = req.body.rentalId && typeof req.body.rentalId === "string" && req.body.rentalId.trim() !== "" ? req.body.rentalId : generateId("rent");
     const startDate = (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
     const rentalPrice = price || property.price;
     const rentalName = propertyName || property.name;
@@ -1948,11 +2062,7 @@ router.post("/rentals", authenticateToken, async (req, res) => {
     } catch (contractErr) {
       console.warn("PDF contract generation warning:", contractErr);
     }
-    const [existingRentals] = await connection.query(
-      "SELECT id, status FROM rentals WHERE id = ?",
-      [rentalId]
-    );
-    if (existingRentals.length > 0 && existingRentals[0].status === "pending") {
+    if (existingRentals.length > 0) {
       await connection.query(
         `UPDATE rentals 
          SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ? 
@@ -1967,7 +2077,7 @@ router.post("/rentals", authenticateToken, async (req, res) => {
       );
     }
     await connection.query(
-      "UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?",
+      "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
       [propertyId]
     );
     if (property.ownerId) {
@@ -1977,6 +2087,7 @@ router.post("/rentals", authenticateToken, async (req, res) => {
       );
     }
     await connection.commit();
+    apiCache.invalidatePattern("properties");
     res.status(201).json({
       message: "Penyewaan kos berhasil diproses!",
       rentalId,
@@ -1993,13 +2104,14 @@ router.post("/rentals", authenticateToken, async (req, res) => {
 router.post("/rentals/:id/terminate", authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { password } = req.body;
+  const authUser = req.user;
   if (!password) {
     return res.status(400).json({ message: "Password wajib dimasukkan." });
   }
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [rentalRows] = await connection.query("SELECT * FROM rentals WHERE id = ?", [id]);
+    const [rentalRows] = await connection.query("SELECT * FROM rentals WHERE id = ? FOR UPDATE", [id]);
     const rental = rentalRows[0];
     if (!rental) {
       await connection.rollback();
@@ -2009,9 +2121,18 @@ router.post("/rentals/:id/terminate", authenticateToken, async (req, res) => {
       await connection.rollback();
       return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
     }
-    const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [rental.tenantId]);
-    const user = userRows[0];
-    if (!user || !user.password || !bcrypt2.compareSync(password, user.password)) {
+    const [propRows] = await connection.query("SELECT ownerId FROM properties WHERE id = ?", [rental.propertyId]);
+    const property = propRows[0];
+    const isTenant = authUser?.id === rental.tenantId;
+    const isOwner = property && authUser?.id === property.ownerId;
+    const isAdmin = authUser?.role === "admin";
+    if (!isTenant && !isOwner && !isAdmin) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Akses ditolak. Anda tidak berhak memberhentikan sewa ini." });
+    }
+    const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
+    const caller = userRows[0];
+    if (!caller || !caller.password || !bcrypt2.compareSync(password, caller.password)) {
       await connection.rollback();
       return res.status(401).json({ message: "Password salah." });
     }
@@ -2019,11 +2140,14 @@ router.post("/rentals/:id/terminate", authenticateToken, async (req, res) => {
       "UPDATE rentals SET status = 'terminated' WHERE id = ?",
       [id]
     );
-    await connection.query(
-      "UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?",
-      [rental.propertyId]
-    );
+    if (rental.status === "active") {
+      await connection.query(
+        "UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?",
+        [rental.propertyId]
+      );
+    }
     await connection.commit();
+    apiCache.invalidatePattern("properties");
     res.json({ message: "Sewa kos berhasil diberhentikan." });
   } catch (err) {
     await connection.rollback();
@@ -2033,18 +2157,25 @@ router.post("/rentals/:id/terminate", authenticateToken, async (req, res) => {
     connection.release();
   }
 });
-router.get("/rentals/:id/contract", async (req, res) => {
+router.get("/rentals/:id/contract", authenticateToken, async (req, res) => {
   const { id } = req.params;
+  const authUser = req.user;
   try {
     const [rentalRows] = await pool.query("SELECT * FROM rentals WHERE id = ?", [id]);
     const rental = rentalRows[0];
     if (!rental) {
       return res.status(404).json({ message: "Data sewa tidak ditemukan." });
     }
-    const [userRows] = await pool.query("SELECT * FROM users WHERE id = ?", [rental.tenantId]);
-    const tenant = userRows[0];
     const [propRows] = await pool.query("SELECT * FROM properties WHERE id = ?", [rental.propertyId]);
     const property = propRows[0];
+    const isTenant = authUser?.id === rental.tenantId;
+    const isOwner = property && authUser?.id === property.ownerId;
+    const isAdmin = authUser?.role === "admin";
+    if (!isTenant && !isOwner && !isAdmin) {
+      return res.status(403).json({ message: "Akses ditolak ke dokumen kontrak ini." });
+    }
+    const [userRows] = await pool.query("SELECT * FROM users WHERE id = ?", [rental.tenantId]);
+    const tenant = userRows[0];
     const { buffer, fileName } = await generateRentalContractPdf({
       rentalId: rental.id,
       tenantName: tenant ? tenant.name : "Penghuni KOSMO",
@@ -2073,14 +2204,25 @@ function verifyMidtransSignature(orderId, statusCode, grossAmount, serverKey, si
   if (!orderId || !statusCode || !grossAmount || !serverKey || !signatureKey) {
     return false;
   }
-  const payload = `${orderId}${statusCode}${grossAmount}${serverKey}`;
-  const calculatedHash = crypto.createHash("sha512").update(payload).digest("hex");
-  return calculatedHash.toLowerCase() === signatureKey.toLowerCase();
+  const normalizedAmount = grossAmount.includes(".") ? parseFloat(grossAmount).toFixed(2) : grossAmount;
+  const payload = `${orderId}${statusCode}${normalizedAmount}${serverKey}`;
+  const calculatedHash = crypto.createHash("sha512").update(payload).digest("hex").toLowerCase();
+  const targetSig = signatureKey.toLowerCase();
+  const calculatedBuffer = Buffer.from(calculatedHash, "utf8");
+  const targetBuffer = Buffer.from(targetSig, "utf8");
+  if (calculatedBuffer.length !== targetBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(calculatedBuffer, targetBuffer);
 }
 router.post("/payment/token", authenticateToken, async (req, res) => {
   const { propertyId, tenantId, durationMonths } = req.body;
+  const authUser = req.user;
   if (!propertyId || !tenantId) {
     return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
+  }
+  if (authUser?.role !== "admin" && authUser?.id !== tenantId) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat membuat token atas nama akun lain." });
   }
   const duration = durationMonths && durationMonths > 0 ? durationMonths : 1;
   try {
@@ -2135,7 +2277,7 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
     };
     let transactionToken = `snap-token-${rentalId}`;
     let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${rentalId}`;
-    if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes("your-server-key")) {
+    if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes("your-server-key") && !process.env.MIDTRANS_SERVER_KEY.includes("placeholder")) {
       try {
         const transaction = await snap.createTransaction(parameter);
         transactionToken = transaction.token;
@@ -2193,17 +2335,29 @@ router.post("/payment/webhook", async (req, res) => {
         await connection.rollback();
         return res.status(404).json({ message: "Data sewa tidak ditemukan." });
       }
+      const paidAmount = parseFloat(gross_amount);
+      const expectedPrice = Number(rental.price || 0);
+      if (isNaN(paidAmount) || Math.abs(paidAmount - expectedPrice) > 1) {
+        await connection.rollback();
+        console.error(`Midtrans gross_amount mismatch: expected ${expectedPrice}, got ${paidAmount}`);
+        return res.status(400).json({ message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa." });
+      }
       if (rental.status !== "active") {
-        await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [order_id]);
-        await connection.query(
-          "UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?",
-          [rental.propertyId]
-        );
         const [propRows] = await connection.query(
-          "SELECT ownerId FROM properties WHERE id = ?",
+          "SELECT totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
           [rental.propertyId]
         );
         const property = propRows[0];
+        if (property && property.occupiedRooms >= property.totalRooms) {
+          await connection.rollback();
+          console.error(`Overbooking conflict detected for property ${property.id}, rental ${order_id}`);
+          return res.status(409).json({ message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." });
+        }
+        await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [order_id]);
+        await connection.query(
+          "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
+          [rental.propertyId]
+        );
         if (property && property.ownerId) {
           const rentalPrice = rental.price || 0;
           await connection.query(
@@ -2213,6 +2367,7 @@ router.post("/payment/webhook", async (req, res) => {
         }
       }
       await connection.commit();
+      apiCache.invalidatePattern("properties");
       return res.json({ message: "Pembayaran berhasil diproses dan status rental diaktifkan." });
     } catch (err) {
       await connection.rollback();
@@ -2225,6 +2380,7 @@ router.post("/payment/webhook", async (req, res) => {
   if (transaction_status === "cancel" || transaction_status === "deny" || transaction_status === "expire") {
     try {
       await pool.query("UPDATE rentals SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [order_id]);
+      apiCache.invalidatePattern("properties");
       return res.json({ message: `Status transaksi dibatalkan (${transaction_status}).` });
     } catch (err) {
       console.error("Cancel rental error:", err);
@@ -2285,7 +2441,7 @@ app.use((err, _req, res, _next) => {
   const errorMsg = err instanceof Error ? err.message : "Internal Server Error";
   res.status(500).json({ message: errorMsg, error: errorMsg });
 });
-if (process.env.NODE_ENV !== "production" && !process.env.VERCEL && process.env.NODE_ENV !== "test") {
+if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });
