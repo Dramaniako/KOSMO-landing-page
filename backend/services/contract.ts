@@ -16,6 +16,14 @@ export interface RentalContractData {
   signatureBase64?: string;
 }
 
+export function sanitizeRentalId(id: string): string {
+  if (!id || typeof id !== 'string') return 'contract';
+  const normalized = id.replace(/\\/g, '/');
+  const base = path.basename(normalized);
+  const sanitized = base.replace(/[^a-zA-Z0-9_-]/g, '');
+  return sanitized || 'contract';
+}
+
 export function generateRentalContractPdf(
   data: RentalContractData,
   outputDir?: string
@@ -23,16 +31,24 @@ export function generateRentalContractPdf(
   return new Promise((resolve, reject) => {
     try {
       const targetDir = outputDir || (process.env.VERCEL ? path.join(os.tmpdir(), 'kosmo_uploads') : path.join(process.cwd(), 'backend', 'uploads'));
+      const resolvedTargetDir = path.resolve(targetDir);
       try {
-        if (!fs.existsSync(targetDir)) {
-          fs.mkdirSync(targetDir, { recursive: true });
+        if (!fs.existsSync(resolvedTargetDir)) {
+          fs.mkdirSync(resolvedTargetDir, { recursive: true });
         }
       } catch {
         // Read-only filesystem in serverless
       }
 
-      const fileName = `contract_${data.rentalId}.pdf`;
-      const fullFilePath = path.join(targetDir, fileName);
+      const sanitizedId = sanitizeRentalId(data.rentalId);
+      const fileName = `contract_${sanitizedId}.pdf`;
+      const fullFilePath = path.join(resolvedTargetDir, fileName);
+
+      // Guard against directory traversal
+      const resolvedFilePath = path.resolve(fullFilePath);
+      if (!resolvedFilePath.startsWith(resolvedTargetDir)) {
+        return reject(new Error('Invalid file path: path traversal detected'));
+      }
 
       const doc = new PDFDocument({ margin: 50, size: 'A4' });
       const buffers: Buffer[] = [];

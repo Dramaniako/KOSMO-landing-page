@@ -346,18 +346,31 @@ import PDFDocument from "pdfkit";
 import fs2 from "fs";
 import path2 from "path";
 import os from "os";
+function sanitizeRentalId(id) {
+  if (!id || typeof id !== "string") return "contract";
+  const normalized = id.replace(/\\/g, "/");
+  const base = path2.basename(normalized);
+  const sanitized = base.replace(/[^a-zA-Z0-9_-]/g, "");
+  return sanitized || "contract";
+}
 function generateRentalContractPdf(data, outputDir) {
   return new Promise((resolve, reject) => {
     try {
       const targetDir = outputDir || (process.env.VERCEL ? path2.join(os.tmpdir(), "kosmo_uploads") : path2.join(process.cwd(), "backend", "uploads"));
+      const resolvedTargetDir = path2.resolve(targetDir);
       try {
-        if (!fs2.existsSync(targetDir)) {
-          fs2.mkdirSync(targetDir, { recursive: true });
+        if (!fs2.existsSync(resolvedTargetDir)) {
+          fs2.mkdirSync(resolvedTargetDir, { recursive: true });
         }
       } catch {
       }
-      const fileName = `contract_${data.rentalId}.pdf`;
-      const fullFilePath = path2.join(targetDir, fileName);
+      const sanitizedId = sanitizeRentalId(data.rentalId);
+      const fileName = `contract_${sanitizedId}.pdf`;
+      const fullFilePath = path2.join(resolvedTargetDir, fileName);
+      const resolvedFilePath = path2.resolve(fullFilePath);
+      if (!resolvedFilePath.startsWith(resolvedTargetDir)) {
+        return reject(new Error("Invalid file path: path traversal detected"));
+      }
       const doc = new PDFDocument({ margin: 50, size: "A4" });
       const buffers = [];
       doc.on("data", (chunk) => buffers.push(chunk));

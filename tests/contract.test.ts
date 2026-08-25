@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
-import { generateRentalContractPdf } from '../backend/services/contract';
+import { generateRentalContractPdf, sanitizeRentalId } from '../backend/services/contract';
 import type { RentalContractData } from '../backend/services/contract';
 
 test('PDF Rental Contract Generator', async (t) => {
@@ -70,5 +70,32 @@ test('PDF Rental Contract Generator', async (t) => {
 
     assert.ok(Buffer.isBuffer(result.buffer));
     assert.equal(result.buffer.subarray(0, 4).toString('ascii'), '%PDF');
+  });
+
+  await t.test('sanitizeRentalId strips path traversal sequences and invalid characters', () => {
+    assert.equal(sanitizeRentalId('../../etc/passwd'), 'passwd');
+    assert.equal(sanitizeRentalId('..\\..\\windows\\system32\\malicious'), 'malicious');
+    assert.equal(sanitizeRentalId('rent-123_abc'), 'rent-123_abc');
+    assert.equal(sanitizeRentalId('../../../evil.sh'), 'evilsh');
+    assert.equal(sanitizeRentalId(''), 'contract');
+    assert.equal(sanitizeRentalId('   '), 'contract');
+    assert.equal(sanitizeRentalId('!@#$%^&*()'), 'contract');
+  });
+
+  await t.test('generateRentalContractPdf neutralizes directory traversal in rentalId', async () => {
+    const maliciousRentalData: RentalContractData = {
+      ...baseRentalData,
+      rentalId: '../../../../traversal_attempt_test'
+    };
+
+    const result = await generateRentalContractPdf(maliciousRentalData, testOutputDir);
+
+    assert.ok(Buffer.isBuffer(result.buffer));
+    assert.equal(result.fileName, 'contract_traversal_attempt_test.pdf');
+    assert.equal(result.filePath, '/uploads/contract_traversal_attempt_test.pdf');
+    
+    // Ensure the generated file exists strictly inside testOutputDir
+    const expectedFilePath = path.join(path.resolve(testOutputDir), 'contract_traversal_attempt_test.pdf');
+    assert.equal(fs.existsSync(expectedFilePath), true);
   });
 });
