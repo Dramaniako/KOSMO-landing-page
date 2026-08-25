@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import router from '../backend/router';
+import { isOriginAllowed, corsOptions } from '../backend/server';
 
 interface RouterLayer {
   route?: {
@@ -72,5 +73,45 @@ test('Express router endpoints registration', async (t) => {
         `Expected endpoint [${expected.method.toUpperCase()}] ${expected.path} to be registered in router`
       );
     }
+  });
+
+  await t.test('CORS policy allows trusted origins, localhost and non-browser requests', () => {
+    // Non-browser / server-to-server (origin undefined)
+    assert.equal(isOriginAllowed(undefined), true);
+    assert.equal(isOriginAllowed(''), true);
+
+    // Default localhost development origins
+    assert.equal(isOriginAllowed('http://localhost:5173'), true);
+    assert.equal(isOriginAllowed('http://localhost:3000'), true);
+    assert.equal(isOriginAllowed('http://127.0.0.1:5173'), true);
+    assert.equal(isOriginAllowed('http://localhost:5173/'), true);
+
+    // Untrusted / malicious origins
+    assert.equal(isOriginAllowed('http://attacker.com'), false);
+    assert.equal(isOriginAllowed('https://evil-phishing-site.org'), false);
+    assert.equal(isOriginAllowed('http://localhost.evil.com'), false);
+  });
+
+  await t.test('CORS policy respects ALLOWED_ORIGINS environment variable', () => {
+    const envObj = process.env as Record<string, string | undefined>;
+    const originalEnv = envObj.ALLOWED_ORIGINS;
+    try {
+      envObj.ALLOWED_ORIGINS = 'https://kosmo-bali.vercel.app, https://kosmo.id';
+      assert.equal(isOriginAllowed('https://kosmo-bali.vercel.app'), true);
+      assert.equal(isOriginAllowed('https://kosmo.id'), true);
+      assert.equal(isOriginAllowed('https://unauthorized-domain.com'), false);
+    } finally {
+      envObj.ALLOWED_ORIGINS = originalEnv;
+    }
+  });
+
+  await t.test('corsOptions defines allowed methods, headers, and credentials', () => {
+    assert.ok(corsOptions);
+    assert.equal(corsOptions.credentials, true);
+    assert.ok(Array.isArray(corsOptions.methods));
+    assert.ok(corsOptions.methods.includes('GET'));
+    assert.ok(corsOptions.methods.includes('POST'));
+    assert.ok(corsOptions.methods.includes('PUT'));
+    assert.ok(corsOptions.methods.includes('DELETE'));
   });
 });

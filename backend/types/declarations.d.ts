@@ -107,6 +107,7 @@ declare namespace NodeJS {
     readonly MIDTRANS_SERVER_KEY?: string;
     readonly MIDTRANS_CLIENT_KEY?: string;
     readonly MIDTRANS_IS_PRODUCTION?: string;
+    readonly ALLOWED_ORIGINS?: string;
   }
 }
 

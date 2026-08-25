@@ -2449,6 +2449,38 @@ try {
 var app = express2();
 var PORT = parseInt(process.env.PORT || "5000", 10);
 app.use(compression());
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  const envAllowed = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) : [];
+  const defaultAllowed = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5000"
+  ];
+  const allowedOrigins = [...defaultAllowed, ...envAllowed];
+  const normalizedOrigin = origin.toLowerCase().replace(/\/$/, "");
+  return allowedOrigins.some((allowed) => {
+    const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, "");
+    if (normalizedAllowed === "*" && process.env.NODE_ENV !== "production") return true;
+    return normalizedAllowed === normalizedOrigin;
+  });
+}
+var corsOptions = {
+  origin: (origin, callback) => {
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS origin blocked: ${origin} is not allowed`));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  credentials: true,
+  maxAge: 86400
+};
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -2456,7 +2488,7 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" }
   })
 );
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(bodyParser.json({ limit: "5mb" }));
 app.use(bodyParser.urlencoded({ limit: "5mb", extended: true }));
 app.use(morgan("dev"));

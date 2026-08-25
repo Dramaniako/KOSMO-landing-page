@@ -2,6 +2,7 @@ import express from 'express';
 import type { Request, Response, NextFunction, Application } from 'express';
 import compression from 'compression';
 import cors from 'cors';
+type CorsOptions = NonNullable<Parameters<typeof cors>[0]>;
 import helmet from 'helmet';
 import bodyParser from 'body-parser';
 import morgan from 'morgan';
@@ -35,6 +36,48 @@ const PORT: number = parseInt(process.env.PORT || '5000', 10);
 // Performance & Compression Middleware (Mounted first)
 app.use(compression());
 
+// Security: Whitelist-based CORS Origin Validation
+export function isOriginAllowed(origin: string | undefined): boolean {
+  // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
+  if (!origin) return true;
+
+  const envAllowed = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  const defaultAllowed = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:5000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5000'
+  ];
+
+  const allowedOrigins = [...defaultAllowed, ...envAllowed];
+  const normalizedOrigin = origin.toLowerCase().replace(/\/$/, '');
+
+  return allowedOrigins.some((allowed: string) => {
+    const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, '');
+    if (normalizedAllowed === '*' && process.env.NODE_ENV !== 'production') return true;
+    return normalizedAllowed === normalizedOrigin;
+  });
+}
+
+export const corsOptions: CorsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS origin blocked: ${origin} is not allowed`));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  credentials: true,
+  maxAge: 86400
+};
+
 // Security & Parsing Middleware
 app.use(
   helmet({
@@ -43,7 +86,7 @@ app.use(
     crossOriginResourcePolicy: { policy: 'cross-origin' }
   })
 );
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ limit: '5mb', extended: true }));
 app.use(morgan('dev'));
