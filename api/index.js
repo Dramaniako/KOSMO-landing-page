@@ -1210,25 +1210,30 @@ router.get("/reviews", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error", message: "Gagal mengambil data review." });
   }
 });
-router.post("/reviews", async (req, res) => {
-  const { propertyId, userId, userName, rating, comment } = req.body;
-  if (!propertyId || !userId || !rating || !comment) {
-    return res.status(400).json({ message: "Property ID, User ID, rating, dan komentar wajib diisi." });
+router.post("/reviews", authenticateToken, validateBody(reviewSchema), async (req, res) => {
+  const { propertyId, rating, comment } = req.body;
+  const authUser = req.user;
+  if (!authUser?.id) {
+    return res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
   }
+  const userId = authUser.id;
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     const [propRows] = await connection.query("SELECT * FROM properties WHERE id = ?", [propertyId]);
     const property = propRows[0];
     if (!property) {
+      await connection.rollback();
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
+    const [userRows] = await connection.query("SELECT name FROM users WHERE id = ?", [userId]);
+    const userName = userRows[0]?.name || authUser.email.split("@")[0] || "Anonim";
     const revId = generateId("rev");
     const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
     await connection.query(
       `INSERT INTO reviews (id, propertyId, propertyName, userId, userName, rating, comment, date) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [revId, propertyId, property.name, userId, userName || "Anonim", parseInt(String(rating), 10), comment, dateStr]
+      [revId, propertyId, property.name, userId, userName, parseInt(String(rating), 10), comment, dateStr]
     );
     const [revRows] = await connection.query("SELECT rating FROM reviews WHERE propertyId = ?", [propertyId]);
     const avgRating = revRows.reduce((sum, r) => sum + r.rating, 0) / revRows.length;
@@ -1245,20 +1250,28 @@ router.post("/reviews", async (req, res) => {
     connection.release();
   }
 });
-router.put("/reviews/:id", async (req, res) => {
+router.put("/reviews/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { rating, comment } = req.body;
+  const authUser = req.user;
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     const [rows] = await connection.query("SELECT * FROM reviews WHERE id = ?", [id]);
     const review = rows[0];
     if (!review) {
+      await connection.rollback();
       return res.status(404).json({ message: "Review tidak ditemukan." });
     }
+    if (authUser?.role !== "admin" && review.userId !== authUser?.id) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk mengubah ulasan ini." });
+    }
+    const updatedRating = rating !== void 0 ? parseInt(String(rating), 10) : review.rating;
+    const updatedComment = comment !== void 0 ? comment : review.comment;
     await connection.query(
       "UPDATE reviews SET rating = ?, comment = ? WHERE id = ?",
-      [parseInt(String(rating || 0), 10), comment, id]
+      [updatedRating, updatedComment, id]
     );
     const [revRows] = await connection.query("SELECT rating FROM reviews WHERE propertyId = ?", [review.propertyId]);
     const avgRating = revRows.reduce((sum, r) => sum + r.rating, 0) / revRows.length;
@@ -1275,15 +1288,21 @@ router.put("/reviews/:id", async (req, res) => {
     connection.release();
   }
 });
-router.delete("/reviews/:id", async (req, res) => {
+router.delete("/reviews/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
+  const authUser = req.user;
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     const [rows] = await connection.query("SELECT * FROM reviews WHERE id = ?", [id]);
     const review = rows[0];
     if (!review) {
+      await connection.rollback();
       return res.status(404).json({ message: "Review tidak ditemukan." });
+    }
+    if (authUser?.role !== "admin" && review.userId !== authUser?.id) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk menghapus ulasan ini." });
     }
     await connection.query("DELETE FROM reviews WHERE id = ?", [id]);
     const [revRows] = await connection.query("SELECT rating FROM reviews WHERE propertyId = ?", [review.propertyId]);
@@ -1298,6 +1317,7 @@ router.delete("/reviews/:id", async (req, res) => {
     res.json({ message: "Review berhasil dihapus!" });
   } catch (err) {
     await connection.rollback();
+    console.error("Delete review error:", err);
     res.status(500).json({ message: "Gagal menghapus review." });
   } finally {
     connection.release();

@@ -1,5 +1,5 @@
 import express from 'express';
-import type { Request, Response, Router, NextFunction } from 'express';
+import type { Request, Response, Router } from 'express';
 import { pool } from './db';
 import XLSX from 'xlsx';
 import multer from 'multer';
@@ -24,6 +24,7 @@ import {
   loginSchema,
   registerSchema,
   propertySchema,
+  reviewSchema,
   validateBody
 } from './middleware/validation';
 import type {
@@ -841,12 +842,13 @@ router.get('/reviews', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/reviews', async (req: Request<Record<string, never>, unknown, CreateReviewBody>, res: Response) => {
-  const { propertyId, userId, userName, rating, comment } = req.body;
-
-  if (!propertyId || !userId || !rating || !comment) {
-    return res.status(400).json({ message: "Property ID, User ID, rating, dan komentar wajib diisi." });
+router.post('/reviews', authenticateToken, validateBody(reviewSchema), async (req: AuthenticatedRequest, res: Response) => {
+  const { propertyId, rating, comment } = req.body as { propertyId: string; rating: number | string; comment: string };
+  const authUser = req.user;
+  if (!authUser?.id) {
+    return res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
   }
+  const userId = authUser.id;
 
   const connection = await pool.getConnection();
   try {
@@ -855,8 +857,13 @@ router.post('/reviews', async (req: Request<Record<string, never>, unknown, Crea
     const [propRows] = await connection.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [propertyId]);
     const property = propRows[0];
     if (!property) {
+      await connection.rollback();
       return res.status(404).json({ message: "Properti tidak ditemukan." });
     }
+
+    // Fetch user name from database or fallback to user email
+    const [userRows] = await connection.query<UserRow[]>('SELECT name FROM users WHERE id = ?', [userId]);
+    const userName = userRows[0]?.name || authUser.email.split('@')[0] || "Anonim";
 
     const revId = generateId("rev");
     const dateStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -864,7 +871,7 @@ router.post('/reviews', async (req: Request<Record<string, never>, unknown, Crea
     await connection.query(
       `INSERT INTO reviews (id, propertyId, propertyName, userId, userName, rating, comment, date) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [revId, propertyId, property.name, userId, userName || "Anonim", parseInt(String(rating), 10), comment, dateStr]
+      [revId, propertyId, property.name, userId, userName, parseInt(String(rating), 10), comment, dateStr]
     );
 
     // Recalculate average rating
@@ -886,9 +893,10 @@ router.post('/reviews', async (req: Request<Record<string, never>, unknown, Crea
   }
 });
 
-router.put('/reviews/:id', async (req: Request<{ id: string }, unknown, { rating?: number | string; comment?: string }>, res: Response) => {
+router.put('/reviews/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const { rating, comment } = req.body;
+  const authUser = req.user;
 
   const connection = await pool.getConnection();
   try {
@@ -897,12 +905,21 @@ router.put('/reviews/:id', async (req: Request<{ id: string }, unknown, { rating
     const [rows] = await connection.query<ReviewRow[]>('SELECT * FROM reviews WHERE id = ?', [id]);
     const review = rows[0];
     if (!review) {
+      await connection.rollback();
       return res.status(404).json({ message: "Review tidak ditemukan." });
     }
 
+    if (authUser?.role !== 'admin' && review.userId !== authUser?.id) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk mengubah ulasan ini." });
+    }
+
+    const updatedRating = rating !== undefined ? parseInt(String(rating), 10) : review.rating;
+    const updatedComment = comment !== undefined ? comment : review.comment;
+
     await connection.query(
       'UPDATE reviews SET rating = ?, comment = ? WHERE id = ?',
-      [parseInt(String(rating || 0), 10), comment, id]
+      [updatedRating, updatedComment, id]
     );
 
     // Recalculate average rating for property
@@ -924,8 +941,9 @@ router.put('/reviews/:id', async (req: Request<{ id: string }, unknown, { rating
   }
 });
 
-router.delete('/reviews/:id', async (req: Request<{ id: string }>, res: Response) => {
+router.delete('/reviews/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
+  const authUser = req.user;
 
   const connection = await pool.getConnection();
   try {
@@ -934,7 +952,13 @@ router.delete('/reviews/:id', async (req: Request<{ id: string }>, res: Response
     const [rows] = await connection.query<ReviewRow[]>('SELECT * FROM reviews WHERE id = ?', [id]);
     const review = rows[0];
     if (!review) {
+      await connection.rollback();
       return res.status(404).json({ message: "Review tidak ditemukan." });
+    }
+
+    if (authUser?.role !== 'admin' && review.userId !== authUser?.id) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk menghapus ulasan ini." });
     }
 
     await connection.query('DELETE FROM reviews WHERE id = ?', [id]);
@@ -954,6 +978,7 @@ router.delete('/reviews/:id', async (req: Request<{ id: string }>, res: Response
     res.json({ message: "Review berhasil dihapus!" });
   } catch (err) {
     await connection.rollback();
+    console.error("Delete review error:", err);
     res.status(500).json({ message: "Gagal menghapus review." });
   } finally {
     connection.release();

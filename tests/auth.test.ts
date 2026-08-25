@@ -247,4 +247,16 @@ test('Authentication logic, password security gates & JWT', async (t) => {
     assert.equal(isTerminationPermitted({ id: 'tenant-2', role: 'tenant' }, 'tenant-1', 'landlord-1'), false);
     assert.equal(isTerminationPermitted({ id: 'landlord-2', role: 'landlord' }, 'tenant-1', 'landlord-1'), false);
   });
+
+  await t.test('review modification & deletion ownership guard allows review author or admin and blocks others', () => {
+    const isReviewPermitted = (caller: { id: string; role: string }, reviewAuthorId: string): boolean => {
+      if (caller.role === 'admin') return true;
+      return caller.id === reviewAuthorId;
+    };
+
+    assert.equal(isReviewPermitted({ id: 'user-tenant-1', role: 'tenant' }, 'user-tenant-1'), true);
+    assert.equal(isReviewPermitted({ id: 'user-admin', role: 'admin' }, 'user-tenant-1'), true);
+    assert.equal(isReviewPermitted({ id: 'user-tenant-2', role: 'tenant' }, 'user-tenant-1'), false);
+    assert.equal(isReviewPermitted({ id: 'user-landlord-1', role: 'landlord' }, 'user-tenant-1'), false);
+  });
 });
