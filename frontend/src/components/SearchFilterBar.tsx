@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Search, RotateCcw, SlidersHorizontal, MapPin, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 import { FacilityFilterState } from '../types/index';
 import { useTranslation } from '../context/LanguageContext';
@@ -22,7 +22,12 @@ export interface Props {
 // Performance impact: Reduces formatting time from ~800ms to ~10ms per 10k calls.
 const NumberFormatter = new Intl.NumberFormat('id-ID');
 
-export default function SearchFilterBar({
+// ⚡ Bolt Performance Optimization:
+// Wrapped SearchFilterBar in React.memo to prevent unnecessary re-renders.
+// Why: The SearchFilterBar has many internal DOM elements and re-renders frequently when parent
+// component state updates for unrelated reasons.
+// Impact: Reduces main thread blocking during renders and improves typing responsiveness.
+const SearchFilterBar = memo(function SearchFilterBar({
   district,
   setDistrict,
   priceMin,
@@ -181,4 +186,6 @@ export default function SearchFilterBar({
       </form>
     </div>
   );
-}
+});
+
+export default SearchFilterBar;
