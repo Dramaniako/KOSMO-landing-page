@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { Property, User } from '../types/index';
 import { useTranslation } from '../context/LanguageContext';
+import { formatRupiah } from '../utils/format';
 
 export interface Props {
   property: Property | null;
@@ -24,14 +25,6 @@ export interface Props {
   hasActiveRental?: boolean;
   activeRentalError?: string | null;
 }
-
-// Cache Intl.NumberFormat instance outside component to prevent expensive re-instantiations on each render.
-// Performance impact: Reduces formatting time from ~800ms to ~10ms per 10k calls.
-const IDRFormatter = new Intl.NumberFormat('id-ID', {
-  style: 'currency',
-  currency: 'IDR',
-  maximumFractionDigits: 0
-});
 
 export default function BookingModal({
   property,
@@ -55,10 +48,6 @@ export default function BookingModal({
   const { t } = useTranslation();
 
   if (!property) return null;
-
-  const formatRupiah = (val: number): string => {
-    return IDRFormatter.format(val);
-  };
 
   const price = Number(property.price) || 0;
   const totalRooms = Number(property.totalRooms) || 0;

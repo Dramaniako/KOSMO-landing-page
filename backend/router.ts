@@ -13,6 +13,8 @@ import { Readable } from 'stream';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { generateRentalContractPdf } from './services/contract';
 import { apiCache } from './services/cache';
+import { normalizeProperty, normalizePropertySummary } from './services/transformers';
+import type { PropertyRow } from './services/transformers';
 import {
   generateJwtToken,
   verifyJwtToken,
@@ -457,24 +459,6 @@ router.delete('/users/:id', authenticateToken, requireRole(['admin']), async (re
 // ==========================================
 // Properties API (CRUD)
 // ==========================================
-interface PropertyRow extends RowDataPacket {
-  id: string;
-  name: string;
-  district: string;
-  address: string;
-  price: number;
-  rating: number;
-  image: string;
-  description: string;
-  latitude: string;
-  longitude: string;
-  totalRooms: number;
-  occupiedRooms: number;
-  ownerId: string | null;
-  document: string;
-  facilities?: Amenity[] | string[];
-}
-
 interface FacilityRow extends RowDataPacket {
   facility: string;
 }
@@ -492,29 +476,6 @@ interface CreatePropertyBody {
   occupiedRooms?: number | string;
   image?: string;
   ownerId?: string;
-}
-
-function normalizeProperty(p: PropertyRow): PropertyRow {
-  return {
-    ...p,
-    price: Number(p.price) || 0,
-    totalRooms: Number(p.totalRooms) || 0,
-    occupiedRooms: Number(p.occupiedRooms) || 0,
-    rating: Number(p.rating) || 0,
-    image: p.image && p.image.trim() !== ''
-      ? p.image
-      : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80',
-    facilities: Array.isArray(p.facilities) ? p.facilities : []
-  };
-}
-
-function normalizePropertySummary(p: PropertyRow): PropertyRow {
-  const norm = normalizeProperty(p);
-  // Sanitize heavy inline Base64 strings in list responses so catalog payloads stay under 50 KB
-  if (norm.image && norm.image.startsWith('data:image') && norm.image.length > 2048) {
-    norm.image = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
-  }
-  return norm;
 }
 
 router.get('/properties', async (req: Request, res: Response) => {

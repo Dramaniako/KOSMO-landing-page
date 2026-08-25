@@ -8,6 +8,7 @@ import {
 import { User, Property, Review, Rental, LandlordStats, FacilityFilterState } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
+import { formatRupiah } from '../utils/format';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -424,10 +425,6 @@ export default function LandlordDashboard() {
   const handleDeleteProperty = (id: string): void => {
     setDeletingPropertyId(id);
     setShowDeleteModal(true);
-  };
-
-  const formatRupiah = (num: number | string): string => {
-    return 'Rp ' + parseFloat(String(num)).toLocaleString('id-ID');
   };
 
   return (

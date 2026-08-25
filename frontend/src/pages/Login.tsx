@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Mail, Lock, User as UserIcon, Phone, ArrowLeft } from 'lucide-react';
-import { User, UserRole } from '../types/index';
+import { User } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
 

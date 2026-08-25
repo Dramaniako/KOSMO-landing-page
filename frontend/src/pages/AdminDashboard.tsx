@@ -12,6 +12,7 @@ import {
 } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
+import { formatRupiah } from '../utils/format';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -700,11 +701,6 @@ export default function AdminDashboard() {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
     }
-  };
-
-  const formatRupiah = (num: number | string | undefined): string => {
-    if (num === undefined || num === null) return 'Rp 0';
-    return 'Rp ' + parseFloat(String(num)).toLocaleString('id-ID');
   };
 
   return (

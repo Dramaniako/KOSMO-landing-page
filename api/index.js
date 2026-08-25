@@ -104,6 +104,185 @@ async function ensureIndexes() {
     }
   }
 }
+async function createSchemaTables(p) {
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id VARCHAR(50) PRIMARY KEY,
+      email VARCHAR(100) UNIQUE NOT NULL,
+      password VARCHAR(100) NOT NULL,
+      name VARCHAR(100) NOT NULL,
+      role ENUM('admin', 'landlord', 'tenant') NOT NULL,
+      phone VARCHAR(20) DEFAULT '',
+      paymentMethod VARCHAR(100) DEFAULT 'Virtual Account',
+      avatar LONGTEXT,
+      notifications BOOLEAN DEFAULT TRUE,
+      language VARCHAR(20) DEFAULT 'Indonesia',
+      balance DECIMAL(15, 2) DEFAULT 0.00,
+      totalRevenue DECIMAL(15, 2) DEFAULT 0.00,
+      totalWithdrawn DECIMAL(15, 2) DEFAULT 0.00,
+      bankName VARCHAR(50) DEFAULT '',
+      bankAccountNumber VARCHAR(50) DEFAULT '',
+      bankAccountHolder VARCHAR(100) DEFAULT ''
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS properties (
+      id VARCHAR(50) PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      district VARCHAR(50) NOT NULL,
+      address TEXT NOT NULL,
+      price INT NOT NULL,
+      rating DECIMAL(3, 1) DEFAULT 0.0,
+      image LONGTEXT,
+      description LONGTEXT,
+      latitude VARCHAR(50) DEFAULT '-8.6500',
+      longitude VARCHAR(50) DEFAULT '115.2166',
+      totalRooms INT NOT NULL,
+      occupiedRooms INT DEFAULT 0,
+      ownerId VARCHAR(50),
+      document VARCHAR(100) DEFAULT 'sertifikat_kepemilikan.pdf',
+      FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS property_facilities (
+      propertyId VARCHAR(50),
+      facility VARCHAR(50),
+      PRIMARY KEY (propertyId, facility),
+      FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS reviews (
+      id VARCHAR(50) PRIMARY KEY,
+      propertyId VARCHAR(50) NOT NULL,
+      propertyName VARCHAR(100) NOT NULL,
+      userId VARCHAR(50) NOT NULL,
+      userName VARCHAR(100) NOT NULL,
+      rating INT NOT NULL,
+      comment TEXT NOT NULL,
+      date VARCHAR(50) NOT NULL,
+      FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS withdrawals (
+      id VARCHAR(50) PRIMARY KEY,
+      userId VARCHAR(50) NOT NULL,
+      bankName VARCHAR(50) NOT NULL,
+      accountNumber VARCHAR(50) NOT NULL,
+      accountHolder VARCHAR(100) DEFAULT '',
+      amount DECIMAL(15, 2) NOT NULL,
+      date VARCHAR(50) NOT NULL,
+      status ENUM('pending','processing','completed','rejected') DEFAULT 'pending',
+      referenceId VARCHAR(100) DEFAULT '',
+      rejectionReason TEXT,
+      processedAt VARCHAR(50) DEFAULT '',
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS visitor_tracking (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      ip_address VARCHAR(50),
+      user_agent VARCHAR(255),
+      visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS rentals (
+      id VARCHAR(50) PRIMARY KEY,
+      tenantId VARCHAR(50) NOT NULL,
+      propertyId VARCHAR(50) NOT NULL,
+      propertyName VARCHAR(100) NOT NULL,
+      price INT NOT NULL,
+      startDate VARCHAR(50) NOT NULL,
+      status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'active',
+      document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
+      FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+}
+async function applyTableMigrations(p) {
+  const alterQueries = [
+    "ALTER TABLE properties MODIFY image LONGTEXT",
+    "ALTER TABLE properties MODIFY description LONGTEXT",
+    "ALTER TABLE users MODIFY avatar LONGTEXT",
+    "ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''"
+  ];
+  for (const query of alterQueries) {
+    try {
+      await p.query(query);
+    } catch {
+    }
+  }
+  await ensureIndexes();
+}
+async function seedDefaultUsers(p) {
+  const [userRows] = await p.query("SELECT COUNT(*) as count FROM users");
+  if (userRows[0].count === 0) {
+    const adminHash = bcrypt.hashSync("admin", 10);
+    const landlordHash = bcrypt.hashSync("landlord", 10);
+    const tenantHash = bcrypt.hashSync("tenant", 10);
+    await p.query(`
+      INSERT INTO users (id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder)
+      VALUES 
+        ('user-admin', 'admin@kosmo.com', ?, 'Admin Super', 'admin', '+62 888-8888-8888', 'Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', ''),
+        ('user-landlord', 'landlord@kosmo.com', ?, 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord'),
+        ('user-tenant', 'tenant@kosmo.com', ?, 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '');
+    `, [adminHash, landlordHash, tenantHash]);
+    await p.query(`
+      INSERT INTO withdrawals (id, userId, bankName, accountNumber, amount, date, status)
+      VALUES ('w-01', 'user-landlord', 'BCA', '1234567890', 1000000.0, '3 Jun 2026', 'completed');
+    `);
+  } else {
+    const [existing] = await p.query("SELECT id, password FROM users");
+    for (const u of existing) {
+      if (u.password) {
+        const isHashed = u.password.startsWith("$2a$") || u.password.startsWith("$2b$") || u.password.startsWith("$2y$");
+        if (!isHashed) {
+          const hashed = bcrypt.hashSync(u.password, 10);
+          await p.query("UPDATE users SET password = ? WHERE id = ?", [hashed, u.id]);
+        }
+      }
+    }
+  }
+}
+async function seedDefaultPropertiesAndReviews(p) {
+  const [propRows] = await p.query("SELECT COUNT(*) as count FROM properties");
+  if (propRows[0].count === 0) {
+    await p.query(`
+      INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document)
+      VALUES 
+        ('prop-01', 'KOSMO Hub Denpasar', 'Denpasar', 'Jl. Teuku Umar No. 14, Denpasar, Bali', 3500000, 4.7, 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=800&q=80', 'Modern co-living space di Denpasar dengan konsep smart home. Dilengkapi dengan communal area luas, rooftop area, cafe, gym kecil, dan coworking space untuk penghuni. Fasilitas listrik, air, wifi, kebersihan, keamanan, dan parkir.', '-8.6725', '115.2166', 10, 8, 'user-landlord', 'sertifikat_denpasar.pdf'),
+        ('prop-02', 'KOSMO Hub Seminyak', 'Badung', 'Jl. Sunset Road No. 88, Badung, Bali', 4500000, 4.8, 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=800&q=80', 'Premium co-living space di Seminyak dekat pantai. Sangat cocok untuk digital nomad dengan internet super cepat, area kerja nyaman, kolam renang, dan parkir luas.', '-8.6913', '115.1682', 8, 5, 'user-landlord', 'sertifikat_seminyak.pdf'),
+        ('prop-03', 'KOSMO Hub Ubud', 'Gianyar', 'Jl. Raya Ubud No. 12, Gianyar, Bali', 2500000, 4.5, 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=800&q=80', 'Co-living asri di Ubud yang dikelilingi sawah. Dilengkapi dengan kitchen bersama, yoga shala, dan suasana tenang untuk fokus bekerja atau bersantai.', '-8.5069', '115.2625', 12, 6, 'user-landlord', 'sertifikat_ubud.pdf');
+    `);
+    await p.query(`
+      INSERT INTO property_facilities (propertyId, facility)
+      VALUES 
+        ('prop-01', 'Listrik'), ('prop-01', 'Air'), ('prop-01', 'Wifi'), ('prop-01', 'Kebersihan'), ('prop-01', 'Keamanan'), ('prop-01', 'Parkir'),
+        ('prop-02', 'Wifi'), ('prop-02', 'Air'), ('prop-02', 'Keamanan'), ('prop-02', 'Parkir'), ('prop-02', 'Listrik'),
+        ('prop-03', 'Wifi'), ('prop-03', 'Kebersihan'), ('prop-03', 'Air'), ('prop-03', 'Keamanan');
+    `);
+  }
+  const [revRows] = await p.query("SELECT COUNT(*) as count FROM reviews");
+  if (revRows[0].count === 0) {
+    await p.query(`
+      INSERT INTO reviews (id, propertyId, propertyName, userId, userName, rating, comment, date)
+      VALUES 
+        ('rev-01', 'prop-01', 'KOSMO Hub Denpasar', 'user-tenant', 'Bayu', 5, 'Sangat nyaman dan lokasinya sangat strategis di Denpasar! Internetnya cepat banget cocok buat WFH.', '15 Jun 2026'),
+        ('rev-02', 'prop-01', 'KOSMO Hub Denpasar', 'user-landlord', 'Admin Landlord', 4, 'Fasilitas lengkap dan bersih, parkirannya luas. Hanya saja jalan di depan agak macet kalau sore.', '10 Jun 2026'),
+        ('rev-03', 'prop-02', 'KOSMO Hub Seminyak', 'user-tenant', 'Bayu', 5, 'Keren banget kolam renangnya! Kamar bersih dan smart lock-nya aman sekali.', '18 Jun 2026');
+    `);
+  }
+}
 async function initDb() {
   if (isInitialized) return;
   if (initPromise) return initPromise;
@@ -141,187 +320,10 @@ async function initDb() {
         return;
       }
       console.log(`Database tables missing: ${missingTables.join(", ")}. Initializing...`);
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS users (
-          id VARCHAR(50) PRIMARY KEY,
-          email VARCHAR(100) UNIQUE NOT NULL,
-          password VARCHAR(100) NOT NULL,
-          name VARCHAR(100) NOT NULL,
-          role ENUM('admin', 'landlord', 'tenant') NOT NULL,
-          phone VARCHAR(20) DEFAULT '',
-          paymentMethod VARCHAR(100) DEFAULT 'Virtual Account',
-          avatar LONGTEXT,
-          notifications BOOLEAN DEFAULT TRUE,
-          language VARCHAR(20) DEFAULT 'Indonesia',
-          balance DECIMAL(15, 2) DEFAULT 0.00,
-          totalRevenue DECIMAL(15, 2) DEFAULT 0.00,
-          totalWithdrawn DECIMAL(15, 2) DEFAULT 0.00,
-          bankName VARCHAR(50) DEFAULT '',
-          bankAccountNumber VARCHAR(50) DEFAULT '',
-          bankAccountHolder VARCHAR(100) DEFAULT ''
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      `);
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS properties (
-          id VARCHAR(50) PRIMARY KEY,
-          name VARCHAR(100) NOT NULL,
-          district VARCHAR(50) NOT NULL,
-          address TEXT NOT NULL,
-          price INT NOT NULL,
-          rating DECIMAL(3, 1) DEFAULT 0.0,
-          image LONGTEXT,
-          description LONGTEXT,
-          latitude VARCHAR(50) DEFAULT '-8.6500',
-          longitude VARCHAR(50) DEFAULT '115.2166',
-          totalRooms INT NOT NULL,
-          occupiedRooms INT DEFAULT 0,
-          ownerId VARCHAR(50),
-          document VARCHAR(100) DEFAULT 'sertifikat_kepemilikan.pdf',
-          FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      `);
-      try {
-        await pool.query("ALTER TABLE properties MODIFY image LONGTEXT");
-        await pool.query("ALTER TABLE properties MODIFY description LONGTEXT");
-        await pool.query("ALTER TABLE users MODIFY avatar LONGTEXT");
-      } catch (e) {
-      }
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS property_facilities (
-          propertyId VARCHAR(50),
-          facility VARCHAR(50),
-          PRIMARY KEY (propertyId, facility),
-          FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      `);
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS reviews (
-          id VARCHAR(50) PRIMARY KEY,
-          propertyId VARCHAR(50) NOT NULL,
-          propertyName VARCHAR(100) NOT NULL,
-          userId VARCHAR(50) NOT NULL,
-          userName VARCHAR(100) NOT NULL,
-          rating INT NOT NULL,
-          comment TEXT NOT NULL,
-          date VARCHAR(50) NOT NULL,
-          FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
-          FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      `);
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS withdrawals (
-          id VARCHAR(50) PRIMARY KEY,
-          userId VARCHAR(50) NOT NULL,
-          bankName VARCHAR(50) NOT NULL,
-          accountNumber VARCHAR(50) NOT NULL,
-          accountHolder VARCHAR(100) DEFAULT '',
-          amount DECIMAL(15, 2) NOT NULL,
-          date VARCHAR(50) NOT NULL,
-          status ENUM('pending','processing','completed','rejected') DEFAULT 'pending',
-          referenceId VARCHAR(100) DEFAULT '',
-          rejectionReason TEXT,
-          processedAt VARCHAR(50) DEFAULT '',
-          FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      `);
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS visitor_tracking (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          ip_address VARCHAR(50),
-          user_agent VARCHAR(255),
-          visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      `);
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS rentals (
-          id VARCHAR(50) PRIMARY KEY,
-          tenantId VARCHAR(50) NOT NULL,
-          propertyId VARCHAR(50) NOT NULL,
-          propertyName VARCHAR(100) NOT NULL,
-          price INT NOT NULL,
-          startDate VARCHAR(50) NOT NULL,
-          status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'active',
-          document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
-          FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
-          FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      `);
-      try {
-        await pool.query("ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'");
-      } catch (e) {
-      }
-      try {
-        await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''");
-      } catch (e) {
-      }
-      try {
-        await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''");
-      } catch (e) {
-      }
-      try {
-        await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT");
-      } catch (e) {
-      }
-      try {
-        await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''");
-      } catch (e) {
-      }
-      await ensureIndexes();
-      const [userRows] = await pool.query("SELECT COUNT(*) as count FROM users");
-      if (userRows[0].count === 0) {
-        const adminHash = bcrypt.hashSync("admin", 10);
-        const landlordHash = bcrypt.hashSync("landlord", 10);
-        const tenantHash = bcrypt.hashSync("tenant", 10);
-        await pool.query(`
-          INSERT INTO users (id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder)
-          VALUES 
-            ('user-admin', 'admin@kosmo.com', ?, 'Admin Super', 'admin', '+62 888-8888-8888', 'Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', ''),
-            ('user-landlord', 'landlord@kosmo.com', ?, 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord'),
-            ('user-tenant', 'tenant@kosmo.com', ?, 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '');
-        `, [adminHash, landlordHash, tenantHash]);
-        await pool.query(`
-          INSERT INTO withdrawals (id, userId, bankName, accountNumber, amount, date, status)
-          VALUES ('w-01', 'user-landlord', 'BCA', '1234567890', 1000000.0, '3 Jun 2026', 'completed');
-        `);
-      } else {
-        const [existing] = await pool.query("SELECT id, password FROM users");
-        for (const u of existing) {
-          if (u.password) {
-            const isHashed = u.password.startsWith("$2a$") || u.password.startsWith("$2b$") || u.password.startsWith("$2y$");
-            if (!isHashed) {
-              const hashed = bcrypt.hashSync(u.password, 10);
-              await pool.query("UPDATE users SET password = ? WHERE id = ?", [hashed, u.id]);
-            }
-          }
-        }
-      }
-      const [propRows] = await pool.query("SELECT COUNT(*) as count FROM properties");
-      if (propRows[0].count === 0) {
-        await pool.query(`
-          INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document)
-          VALUES 
-            ('prop-01', 'KOSMO Hub Denpasar', 'Denpasar', 'Jl. Teuku Umar No. 14, Denpasar, Bali', 3500000, 4.7, 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=800&q=80', 'Modern co-living space di Denpasar dengan konsep smart home. Dilengkapi dengan communal area luas, rooftop area, cafe, gym kecil, dan coworking space untuk penghuni. Fasilitas listrik, air, wifi, kebersihan, keamanan, dan parkir.', '-8.6725', '115.2166', 10, 8, 'user-landlord', 'sertifikat_denpasar.pdf'),
-            ('prop-02', 'KOSMO Hub Seminyak', 'Badung', 'Jl. Sunset Road No. 88, Badung, Bali', 4500000, 4.8, 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=800&q=80', 'Premium co-living space di Seminyak dekat pantai. Sangat cocok untuk digital nomad dengan internet super cepat, area kerja nyaman, kolam renang, dan parkir luas.', '-8.6913', '115.1682', 8, 5, 'user-landlord', 'sertifikat_seminyak.pdf'),
-            ('prop-03', 'KOSMO Hub Ubud', 'Gianyar', 'Jl. Raya Ubud No. 12, Gianyar, Bali', 2500000, 4.5, 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=800&q=80', 'Co-living asri di Ubud yang dikelilingi sawah. Dilengkapi dengan kitchen bersama, yoga shala, dan suasana tenang untuk fokus bekerja atau bersantai.', '-8.5069', '115.2625', 12, 6, 'user-landlord', 'sertifikat_ubud.pdf');
-        `);
-        await pool.query(`
-          INSERT INTO property_facilities (propertyId, facility)
-          VALUES 
-            ('prop-01', 'Listrik'), ('prop-01', 'Air'), ('prop-01', 'Wifi'), ('prop-01', 'Kebersihan'), ('prop-01', 'Keamanan'), ('prop-01', 'Parkir'),
-            ('prop-02', 'Wifi'), ('prop-02', 'Air'), ('prop-02', 'Keamanan'), ('prop-02', 'Parkir'), ('prop-02', 'Listrik'),
-            ('prop-03', 'Wifi'), ('prop-03', 'Kebersihan'), ('prop-03', 'Air'), ('prop-03', 'Keamanan');
-        `);
-      }
-      const [revRows] = await pool.query("SELECT COUNT(*) as count FROM reviews");
-      if (revRows[0].count === 0) {
-        await pool.query(`
-          INSERT INTO reviews (id, propertyId, propertyName, userId, userName, rating, comment, date)
-          VALUES 
-            ('rev-01', 'prop-01', 'KOSMO Hub Denpasar', 'user-tenant', 'Bayu', 5, 'Sangat nyaman dan lokasinya sangat strategis di Denpasar! Internetnya cepat banget cocok buat WFH.', '15 Jun 2026'),
-            ('rev-02', 'prop-01', 'KOSMO Hub Denpasar', 'user-landlord', 'Admin Landlord', 4, 'Fasilitas lengkap dan bersih, parkirannya luas. Hanya saja jalan di depan agak macet kalau sore.', '10 Jun 2026'),
-            ('rev-03', 'prop-02', 'KOSMO Hub Seminyak', 'user-tenant', 'Bayu', 5, 'Keren banget kolam renangnya! Kamar bersih dan smart lock-nya aman sekali.', '18 Jun 2026');
-        `);
-      }
+      await createSchemaTables(pool);
+      await applyTableMigrations(pool);
+      await seedDefaultUsers(pool);
+      await seedDefaultPropertiesAndReviews(pool);
       isInitialized = true;
       console.log("MySQL Database Kosmo initialized, tables created, and seeded successfully!");
     } catch (err) {
@@ -489,6 +491,27 @@ var InMemoryCache = class {
   }
 };
 var apiCache = new InMemoryCache();
+
+// backend/services/transformers.ts
+var DEFAULT_PROPERTY_IMAGE = "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80";
+function normalizeProperty(p) {
+  return {
+    ...p,
+    price: Number(p.price) || 0,
+    totalRooms: Number(p.totalRooms) || 0,
+    occupiedRooms: Number(p.occupiedRooms) || 0,
+    rating: Number(p.rating) || 0,
+    image: p.image && p.image.trim() !== "" ? p.image : DEFAULT_PROPERTY_IMAGE,
+    facilities: Array.isArray(p.facilities) ? p.facilities : []
+  };
+}
+function normalizePropertySummary(p) {
+  const norm = normalizeProperty(p);
+  if (norm.image && norm.image.startsWith("data:image") && norm.image.length > 2048) {
+    norm.image = DEFAULT_PROPERTY_IMAGE;
+  }
+  return norm;
+}
 
 // backend/middleware/auth.ts
 import jwt from "jsonwebtoken";
@@ -937,24 +960,6 @@ router.delete("/users/:id", authenticateToken, requireRole(["admin"]), async (re
     res.status(500).json({ message: "Gagal menghapus user." });
   }
 });
-function normalizeProperty(p) {
-  return {
-    ...p,
-    price: Number(p.price) || 0,
-    totalRooms: Number(p.totalRooms) || 0,
-    occupiedRooms: Number(p.occupiedRooms) || 0,
-    rating: Number(p.rating) || 0,
-    image: p.image && p.image.trim() !== "" ? p.image : "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80",
-    facilities: Array.isArray(p.facilities) ? p.facilities : []
-  };
-}
-function normalizePropertySummary(p) {
-  const norm = normalizeProperty(p);
-  if (norm.image && norm.image.startsWith("data:image") && norm.image.length > 2048) {
-    norm.image = "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80";
-  }
-  return norm;
-}
 router.get("/properties", async (req, res) => {
   const { district, priceMin, priceMax, minPrice, maxPrice, facility, ownerId, owner } = req.query;
   const targetOwner = ownerId || owner;

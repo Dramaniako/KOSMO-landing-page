@@ -228,3 +228,44 @@ test('Review schema validation & rating boundaries', async (t) => {
     assert.ok(result.errors.some(err => err.includes('comment')));
   });
 });
+
+test('Property row transformer functions', async (t) => {
+  const { normalizeProperty, normalizePropertySummary, DEFAULT_PROPERTY_IMAGE } = await import('../backend/services/transformers');
+
+  const rawPropertyRow = {
+    id: 'prop-200',
+    name: 'KOSMO Canggu',
+    district: 'Badung',
+    address: 'Jl. Batu Bolong No. 12',
+    price: '2500000' as unknown as number,
+    rating: '4.7' as unknown as number,
+    image: '',
+    description: 'Kos aesthetic di Canggu',
+    latitude: '-8.6500',
+    longitude: '115.1300',
+    totalRooms: '8' as unknown as number,
+    occupiedRooms: '3' as unknown as number,
+    ownerId: 'user-landlord-1',
+    document: '',
+    facilities: ['Wifi', 'AC']
+  } as any;
+
+  await t.test('normalizeProperty sanitizes numbers and assigns fallback image', () => {
+    const normalized = normalizeProperty(rawPropertyRow);
+    assert.equal(normalized.price, 2500000);
+    assert.equal(normalized.rating, 4.7);
+    assert.equal(normalized.totalRooms, 8);
+    assert.equal(normalized.occupiedRooms, 3);
+    assert.equal(normalized.image, DEFAULT_PROPERTY_IMAGE);
+  });
+
+  await t.test('normalizePropertySummary sanitizes large base64 image strings', () => {
+    const heavyBase64 = 'data:image/png;base64,' + 'A'.repeat(4000);
+    const withHeavyImage = {
+      ...rawPropertyRow,
+      image: heavyBase64
+    };
+    const summary = normalizePropertySummary(withHeavyImage);
+    assert.equal(summary.image, DEFAULT_PROPERTY_IMAGE);
+  });
+});
