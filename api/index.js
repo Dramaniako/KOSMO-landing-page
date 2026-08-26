@@ -812,8 +812,13 @@ router.post("/auth/register", authLimiter, validateBody(registerSchema), async (
   }
 });
 router.get("/users/profile/:id", authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const authUser = req.user;
+  if (authUser?.role !== "admin" && authUser?.id !== id) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk melihat profil ini." });
+  }
   try {
-    const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [req.params.id]);
+    const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [id]);
     const user = rows[0];
     if (!user) {
       return res.status(404).json({ message: "User tidak ditemukan." });
@@ -827,7 +832,11 @@ router.get("/users/profile/:id", authenticateToken, async (req, res) => {
 });
 router.put("/users/profile/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
+  const authUser = req.user;
   const { name, phone, paymentMethod, notifications, language } = req.body;
+  if (authUser?.role !== "admin" && authUser?.id !== id) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat mengubah profil pengguna lain." });
+  }
   try {
     const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [id]);
     if (rows.length === 0) {

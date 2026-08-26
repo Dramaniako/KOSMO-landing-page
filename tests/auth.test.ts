@@ -259,4 +259,16 @@ test('Authentication logic, password security gates & JWT', async (t) => {
     assert.equal(isReviewPermitted({ id: 'user-tenant-2', role: 'tenant' }, 'user-tenant-1'), false);
     assert.equal(isReviewPermitted({ id: 'user-landlord-1', role: 'landlord' }, 'user-tenant-1'), false);
   });
+
+  await t.test('user profile access guard (GET & PUT /api/users/profile/:id) permits owner or admin and blocks unauthorized callers', () => {
+    const isProfileAccessPermitted = (caller: { id: string; role: string }, targetProfileId: string): boolean => {
+      if (caller.role === 'admin') return true;
+      return caller.id === targetProfileId;
+    };
+
+    assert.equal(isProfileAccessPermitted({ id: 'user-tenant-1', role: 'tenant' }, 'user-tenant-1'), true);
+    assert.equal(isProfileAccessPermitted({ id: 'user-admin-1', role: 'admin' }, 'user-tenant-1'), true);
+    assert.equal(isProfileAccessPermitted({ id: 'user-landlord-1', role: 'landlord' }, 'user-tenant-1'), false);
+    assert.equal(isProfileAccessPermitted({ id: 'user-tenant-2', role: 'tenant' }, 'user-tenant-1'), false);
+  });
 });

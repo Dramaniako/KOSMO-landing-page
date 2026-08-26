@@ -280,9 +280,16 @@ interface AdminUpdateUserBody {
   password?: string;
 }
 
-router.get('/users/profile/:id', authenticateToken, async (req: Request<{ id: string }>, res: Response) => {
+router.get('/users/profile/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const authUser = req.user;
+
+  if (authUser?.role !== 'admin' && authUser?.id !== id) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk melihat profil ini." });
+  }
+
   try {
-    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [id]);
     const user = rows[0];
     if (!user) {
       return res.status(404).json({ message: "User tidak ditemukan." });
@@ -295,9 +302,14 @@ router.get('/users/profile/:id', authenticateToken, async (req: Request<{ id: st
   }
 });
 
-router.put('/users/profile/:id', authenticateToken, async (req: Request<{ id: string }, unknown, UserProfileBody>, res: Response) => {
+router.put('/users/profile/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
+  const authUser = req.user;
   const { name, phone, paymentMethod, notifications, language } = req.body;
+
+  if (authUser?.role !== 'admin' && authUser?.id !== id) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat mengubah profil pengguna lain." });
+  }
 
   try {
     const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [id]);
