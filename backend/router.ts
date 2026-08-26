@@ -994,8 +994,15 @@ interface MonthlyRevenueAgg extends RowDataPacket {
   transactions: number;
 }
 
-const handleLandlordStats = async (req: Request, res: Response) => {
-  const landlordId = String(req.query.landlordId || 'user-landlord');
+const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => {
+  const landlordId = String(req.query.landlordId || req.user?.id || 'user-landlord');
+  const authUser = req.user;
+
+  // 🛡️ SECURITY: Prevent Insecure Direct Object Reference (IDOR)
+  // Ensure that landlords can only access their own statistics, while admins retain full access.
+  if (authUser?.role !== 'admin' && authUser?.id !== landlordId) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk melihat statistik ini." });
+  }
 
   try {
     const [
@@ -1056,8 +1063,8 @@ const handleLandlordStats = async (req: Request, res: Response) => {
   }
 };
 
-router.get('/stats', handleLandlordStats);
-router.get('/landlord/stats', handleLandlordStats);
+router.get('/stats', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordStats);
+router.get('/landlord/stats', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordStats);
 
 router.get('/landlord/financials', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
   const landlordId = String(req.query.landlordId || req.user?.id || 'user-landlord');
