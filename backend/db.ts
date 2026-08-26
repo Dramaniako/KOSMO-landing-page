@@ -33,10 +33,12 @@ const isSSLFalse = process.env.DB_SSL === 'false' || (!isTiDB && process.env.DB_
 
 const sslOption = isSSLFalse
   ? undefined
-  : {
-      minVersion: 'TLSv1.2',
-      rejectUnauthorized: false
-    };
+  : isTiDB
+    ? {
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: false
+      }
+    : { rejectUnauthorized: false };
 
 export const dbConfig: ConnectionOptions = {
   host,
