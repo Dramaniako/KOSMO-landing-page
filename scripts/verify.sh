@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eu
+set -o pipefail || true
 
 echo "=========================================="
 echo " 1. Checking Backend TypeScript (Strict)  "

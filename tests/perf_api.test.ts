@@ -12,9 +12,16 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
   });
 
   const tenantToken = generateJwtToken({ id: 'user-tenant', email: 'tenant@kosmo.local', role: 'tenant' });
+  const landlordToken = generateJwtToken({ id: 'user-landlord', email: 'landlord@kosmo.local', role: 'landlord' });
 
-  // Warmup request to ensure database & caches are ready
-  await fetch(`http://localhost:${PORT}/api/properties`);
+  // Warmup requests to ensure database pool connections & caches are ready
+  await Promise.all([
+    fetch(`http://localhost:${PORT}/api/properties`),
+    fetch(`http://localhost:${PORT}/api/reviews`),
+    fetch(`http://localhost:${PORT}/api/rentals`, { headers: { Authorization: `Bearer ${tenantToken}` } }),
+    fetch(`http://localhost:${PORT}/api/landlord/stats?landlordId=user-landlord`, { headers: { Authorization: `Bearer ${landlordToken}` } }),
+    fetch(`http://localhost:${PORT}/api/landlord/financials?landlordId=user-landlord`, { headers: { Authorization: `Bearer ${landlordToken}` } })
+  ]);
 
   await t.test('GET /api/properties responds within 400ms SLA and has Cache-Control', async () => {
     const start = performance.now();
@@ -50,8 +57,6 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
     assert.equal(res.status, 200);
     assert.ok(duration < 350, `Expected latency < 350ms, got ${duration.toFixed(2)}ms`);
   });
-
-  const landlordToken = generateJwtToken({ id: 'user-landlord', email: 'landlord@kosmo.local', role: 'landlord' });
 
   await t.test('GET /api/landlord/stats responds within 350ms with SQL aggregations', async () => {
     const start = performance.now();
