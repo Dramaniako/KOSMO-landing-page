@@ -29,7 +29,7 @@ try {
 
 const host = process.env.DB_HOST || 'localhost';
 const isTiDB = host.includes('tidbcloud.com');
-const isSSLFalse = process.env.DB_SSL === 'false';
+const isSSLFalse = process.env.DB_SSL === 'false' || (!isTiDB && process.env.DB_SSL === undefined);
 
 const sslOption = isSSLFalse
   ? undefined

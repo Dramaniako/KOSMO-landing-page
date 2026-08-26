@@ -34,7 +34,7 @@ try {
 }
 var host = process.env.DB_HOST || "localhost";
 var isTiDB = host.includes("tidbcloud.com");
-var isSSLFalse = process.env.DB_SSL === "false";
+var isSSLFalse = process.env.DB_SSL === "false" || !isTiDB && process.env.DB_SSL === void 0;
 var sslOption = isSSLFalse ? void 0 : {
   minVersion: "TLSv1.2",
   rejectUnauthorized: false
@@ -1351,7 +1351,11 @@ router.delete("/reviews/:id", authenticateToken, async (req, res) => {
   }
 });
 var handleLandlordStats = async (req, res) => {
-  const landlordId = String(req.query.landlordId || "user-landlord");
+  const landlordId = String(req.query.landlordId || req.user?.id || "user-landlord");
+  const authUser = req.user;
+  if (authUser?.role !== "admin" && authUser?.id !== landlordId) {
+    return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk melihat statistik ini." });
+  }
   try {
     const [
       [userRows],
@@ -1407,8 +1411,8 @@ var handleLandlordStats = async (req, res) => {
     res.status(500).json({ message: "Gagal memuat statistik dasbor." });
   }
 };
-router.get("/stats", handleLandlordStats);
-router.get("/landlord/stats", handleLandlordStats);
+router.get("/stats", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordStats);
+router.get("/landlord/stats", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordStats);
 router.get("/landlord/financials", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
   const landlordId = String(req.query.landlordId || req.user?.id || "user-landlord");
   try {
