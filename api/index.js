@@ -3195,19 +3195,22 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
     }
     const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
     const startDate = (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-    const totalPrice = property.price * duration;
+    const monthlyRent = Number(property.price);
+    const adminFee = 5e3;
+    const totalAmount = monthlyRent * duration + adminFee;
     const [existingRental] = await pool.query("SELECT id FROM rentals WHERE id = ?", [rentalId]);
     if (existingRental.length === 0) {
       await pool.query(
-        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status) 
-         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-        [rentalId, tenantId, propertyId, property.name, totalPrice, startDate]
+        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        [rentalId, tenantId, propertyId, property.name, monthlyRent, startDate, adminFee, duration]
       );
     }
+    const attemptOrderId = `${rentalId}-${Date.now()}`;
     const parameter = {
       transaction_details: {
-        order_id: rentalId,
-        gross_amount: totalPrice
+        order_id: attemptOrderId,
+        gross_amount: totalAmount
       },
       customer_details: {
         first_name: tenant.name,
@@ -3217,11 +3220,18 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
       item_details: [
         {
           id: property.id,
-          price: property.price,
+          price: monthlyRent,
           quantity: duration,
           name: property.name.substring(0, 50)
+        },
+        {
+          id: "ADMIN_FEE",
+          price: adminFee,
+          quantity: 1,
+          name: "Biaya Administrasi & Meterai"
         }
-      ]
+      ],
+      custom_field1: rentalId
     };
     let transactionToken = `snap-token-${rentalId}`;
     let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${rentalId}`;
@@ -3231,33 +3241,44 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
         transactionToken = transaction.token;
         redirectUrl = transaction.redirect_url;
       } catch (snapErr) {
-        console.warn("Midtrans API call warning:", snapErr);
+        console.error("Midtrans createTransaction error:", snapErr);
+        const errMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
+        return res.status(502).json({
+          message: `Gagal membuat transaksi di Midtrans: ${errMsg}`
+        });
       }
     }
     res.json({
       message: "Token pembayaran berhasil dibuat.",
       token: transactionToken,
       redirect_url: redirectUrl,
-      rentalId
+      rentalId,
+      orderId: attemptOrderId
     });
   } catch (err) {
     console.error("Create payment token error:", err);
     res.status(500).json({ message: "Gagal membuat token pembayaran Midtrans." });
   }
 });
-async function settleRentalPayment(rentalId, paidAmount) {
+async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
+  let targetRentalId = orderIdOrRentalId.trim();
+  const rentMatch = targetRentalId.match(/^(rent-[a-zA-Z0-9]+)(?:-\d+)?$/);
+  if (rentMatch && rentMatch[1]) {
+    targetRentalId = rentMatch[1];
+  }
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     const [rentalRows] = await connection.query(
-      "SELECT * FROM rentals WHERE id = ? FOR UPDATE",
-      [rentalId]
+      "SELECT * FROM rentals WHERE id = ? OR id = ? FOR UPDATE",
+      [targetRentalId, orderIdOrRentalId.trim()]
     );
     const rental = rentalRows[0];
     if (!rental) {
       await connection.rollback();
       return { success: false, statusCode: 404, message: "Data sewa tidak ditemukan." };
     }
+    const resolvedRentalId = rental.id;
     const monthlyPrice = Number(rental.price || 0);
     const durationMonths = Number(rental.duration_months || 1);
     const adminFee = Number(
@@ -3281,10 +3302,10 @@ async function settleRentalPayment(rentalId, paidAmount) {
       const property = propRows[0];
       if (property && property.occupiedRooms >= property.totalRooms) {
         await connection.rollback();
-        console.error(`Overbooking conflict detected for property ${property.id}, rental ${rentalId}`);
+        console.error(`Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`);
         return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
       }
-      await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [rentalId]);
+      await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [resolvedRentalId]);
       await connection.query(
         "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
         [rental.propertyId]
@@ -3346,7 +3367,12 @@ var handlePaymentNotification = async (req, res) => {
   }
   if (transaction_status === "cancel" || transaction_status === "deny" || transaction_status === "expire") {
     try {
-      await pool.query("UPDATE rentals SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [order_id]);
+      let targetRentalId = order_id.trim();
+      const rentMatch = targetRentalId.match(/^(rent-[a-zA-Z0-9]+)(?:-\d+)?$/);
+      if (rentMatch && rentMatch[1]) {
+        targetRentalId = rentMatch[1];
+      }
+      await pool.query("UPDATE rentals SET status = 'cancelled' WHERE (id = ? OR id = ?) AND status = 'pending'", [targetRentalId, order_id.trim()]);
       apiCache.invalidatePattern("properties");
       apiCache.invalidatePattern("rentals");
       return res.json({ message: `Status transaksi dibatalkan (${transaction_status}).` });

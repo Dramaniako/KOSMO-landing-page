@@ -2840,23 +2840,28 @@ router.post('/payment/token', authenticateToken, async (req: AuthenticatedReques
       ? customRentalId.trim()
       : generateId("rent");
     const startDate = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-    const totalPrice = property.price * duration;
+    const monthlyRent = Number(property.price);
+    const adminFee = 5000.0;
+    const totalAmount = (monthlyRent * duration) + adminFee;
 
     // If rental record was not pre-created via /rentals/contract/sign, insert pending rental record
     const [existingRental] = await pool.query<RentalRow[]>('SELECT id FROM rentals WHERE id = ?', [rentalId]);
     if (existingRental.length === 0) {
       await pool.query(
-        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status) 
-         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-        [rentalId, tenantId, propertyId, property.name, totalPrice, startDate]
+        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        [rentalId, tenantId, propertyId, property.name, monthlyRent, startDate, adminFee, duration]
       );
     }
+
+    // Generate unique Midtrans attempt order_id to prevent "order_id has already been taken" error on retries/resumptions
+    const attemptOrderId = `${rentalId}-${Date.now()}`;
 
     // Create Snap transaction parameters
     const parameter = {
       transaction_details: {
-        order_id: rentalId,
-        gross_amount: totalPrice
+        order_id: attemptOrderId,
+        gross_amount: totalAmount
       },
       customer_details: {
         first_name: tenant.name,
@@ -2866,11 +2871,18 @@ router.post('/payment/token', authenticateToken, async (req: AuthenticatedReques
       item_details: [
         {
           id: property.id,
-          price: property.price,
+          price: monthlyRent,
           quantity: duration,
           name: property.name.substring(0, 50)
+        },
+        {
+          id: 'ADMIN_FEE',
+          price: adminFee,
+          quantity: 1,
+          name: 'Biaya Administrasi & Meterai'
         }
-      ]
+      ],
+      custom_field1: rentalId
     };
 
     let transactionToken = `snap-token-${rentalId}`;
@@ -2882,7 +2894,11 @@ router.post('/payment/token', authenticateToken, async (req: AuthenticatedReques
         transactionToken = transaction.token;
         redirectUrl = transaction.redirect_url;
       } catch (snapErr) {
-        console.warn("Midtrans API call warning:", snapErr);
+        console.error("Midtrans createTransaction error:", snapErr);
+        const errMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
+        return res.status(502).json({
+          message: `Gagal membuat transaksi di Midtrans: ${errMsg}`
+        });
       }
     }
 
@@ -2890,7 +2906,8 @@ router.post('/payment/token', authenticateToken, async (req: AuthenticatedReques
       message: "Token pembayaran berhasil dibuat.",
       token: transactionToken,
       redirect_url: redirectUrl,
-      rentalId
+      rentalId,
+      orderId: attemptOrderId
     });
   } catch (err: unknown) {
     console.error("Create payment token error:", err);
@@ -2909,16 +2926,23 @@ interface MidtransWebhookBody {
 }
 
 export async function settleRentalPayment(
-  rentalId: string,
+  orderIdOrRentalId: string,
   paidAmount?: number
 ): Promise<{ success: boolean; statusCode?: number; message: string; rental?: RentalRow }> {
+  // Extract target rentalId if orderId has attempt timestamp suffix (e.g. 'rent-abc12345-1724783921000' -> 'rent-abc12345')
+  let targetRentalId = orderIdOrRentalId.trim();
+  const rentMatch = targetRentalId.match(/^(rent-[a-zA-Z0-9]+)(?:-\d+)?$/);
+  if (rentMatch && rentMatch[1]) {
+    targetRentalId = rentMatch[1];
+  }
+
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
     const [rentalRows] = await connection.query<RentalRow[]>(
-      'SELECT * FROM rentals WHERE id = ? FOR UPDATE',
-      [rentalId]
+      'SELECT * FROM rentals WHERE id = ? OR id = ? FOR UPDATE',
+      [targetRentalId, orderIdOrRentalId.trim()]
     );
     const rental = rentalRows[0];
 
@@ -2927,6 +2951,7 @@ export async function settleRentalPayment(
       return { success: false, statusCode: 404, message: "Data sewa tidak ditemukan." };
     }
 
+    const resolvedRentalId = rental.id;
     const monthlyPrice = Number(rental.price || 0);
     const durationMonths = Number(rental.duration_months || 1);
     const adminFee = Number(
@@ -2960,11 +2985,11 @@ export async function settleRentalPayment(
 
       if (property && property.occupiedRooms >= property.totalRooms) {
         await connection.rollback();
-        console.error(`Overbooking conflict detected for property ${property.id}, rental ${rentalId}`);
+        console.error(`Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`);
         return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
       }
 
-      await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [rentalId]);
+      await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [resolvedRentalId]);
 
       await connection.query(
         'UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?',
@@ -3038,7 +3063,12 @@ const handlePaymentNotification = async (req: Request<Record<string, never>, unk
   // Handle cancel, deny, or expire
   if (transaction_status === 'cancel' || transaction_status === 'deny' || transaction_status === 'expire') {
     try {
-      await pool.query("UPDATE rentals SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [order_id]);
+      let targetRentalId = order_id.trim();
+      const rentMatch = targetRentalId.match(/^(rent-[a-zA-Z0-9]+)(?:-\d+)?$/);
+      if (rentMatch && rentMatch[1]) {
+        targetRentalId = rentMatch[1];
+      }
+      await pool.query("UPDATE rentals SET status = 'cancelled' WHERE (id = ? OR id = ?) AND status = 'pending'", [targetRentalId, order_id.trim()]);
       apiCache.invalidatePattern('properties');
       apiCache.invalidatePattern('rentals');
       return res.json({ message: `Status transaksi dibatalkan (${transaction_status}).` });

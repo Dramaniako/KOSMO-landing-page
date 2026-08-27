@@ -185,13 +185,12 @@ export default function TenantDashboard() {
         setSelectedPendingRental(null);
       };
 
-      if (typeof window === 'undefined' || !window.snap || !snapToken || snapToken.startsWith('snap-token-')) {
-        await finishPayment();
-        return;
-      }
-
       if (!snapToken) {
         throw new Error('Token pembayaran tidak ditemukan dari server.');
+      }
+
+      if (typeof window === 'undefined' || !window.snap) {
+        throw new Error('Midtrans Payment Gateway belum siap. Silakan muat ulang halaman.');
       }
 
       window.snap.pay(snapToken, {

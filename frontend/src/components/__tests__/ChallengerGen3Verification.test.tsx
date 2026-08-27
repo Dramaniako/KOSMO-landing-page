@@ -749,6 +749,13 @@ describe('Empirical Verification: Challenger Gen 3 Suite (R1, R2, R3)', () => {
         }) as Promise<Response>;
       });
 
+      const originalSnap = (window as unknown as { snap?: unknown }).snap;
+      (window as unknown as { snap: unknown }).snap = {
+        pay: vi.fn((_token: string, callbacks?: { onSuccess?: (res: unknown) => void }) => {
+          callbacks?.onSuccess?.({ status_code: '200', transaction_status: 'settlement' });
+        })
+      };
+
       render(
         <MemoryRouter>
           <ThemeProvider>
@@ -791,7 +798,13 @@ describe('Empirical Verification: Challenger Gen 3 Suite (R1, R2, R3)', () => {
           expect.stringContaining('/payment/token'),
           expect.objectContaining({ method: 'POST' })
         );
+        expect(fetchSpy).toHaveBeenCalledWith(
+          expect.stringContaining('/payment/finish'),
+          expect.objectContaining({ method: 'POST' })
+        );
       });
+
+      (window as unknown as { snap: unknown }).snap = originalSnap;
     });
   });
 });

@@ -230,4 +230,20 @@ test('Midtrans Snap payment & webhook signature verification', async (t) => {
     assert.equal(overbookResult.statusCode, 409);
     assert.equal(overbookRental.status, 'pending');
   });
+
+  await t.test('extracts root rentalId from timestamped Midtrans attempt order_id', () => {
+    function extractRentalId(orderIdOrRentalId: string): string {
+      let targetRentalId = orderIdOrRentalId.trim();
+      const rentMatch = targetRentalId.match(/^(rent-[a-zA-Z0-9]+)(?:-\d+)?$/);
+      if (rentMatch && rentMatch[1]) {
+        targetRentalId = rentMatch[1];
+      }
+      return targetRentalId;
+    }
+
+    assert.equal(extractRentalId('rent-123456'), 'rent-123456');
+    assert.equal(extractRentalId('rent-abcde123-1724783921000'), 'rent-abcde123');
+    assert.equal(extractRentalId('rent-xyz999-1692837482'), 'rent-xyz999');
+    assert.equal(extractRentalId('custom-order-id'), 'custom-order-id');
+  });
 });

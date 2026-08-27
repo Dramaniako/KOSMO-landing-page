@@ -343,25 +343,12 @@ export default function LandingPage() {
 
       const snapToken = data.snapToken || data.token;
 
-      // Step 2: Validate Snap readiness or execute fallback
-      if (typeof window === 'undefined' || !window.snap || !snapToken || snapToken.startsWith('snap-token-')) {
-        try {
-          await fetch(`${API_BASE}/payment/finish`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ rentalId: signedContractData.rentalId })
-          });
-        } catch (fallbackErr) {
-          console.warn("Fallback payment finish warning:", fallbackErr);
-        }
-        setShowPayment(false);
-        setSelectedProperty(null);
-        navigate('/tenant');
-        return;
-      }
-
       if (!snapToken) {
         throw new Error("Token pembayaran tidak ditemukan dari respons server.");
+      }
+
+      if (typeof window === 'undefined' || !window.snap) {
+        throw new Error("Midtrans Payment Gateway belum siap. Silakan muat ulang halaman.");
       }
 
       // Step 3: Launch Midtrans Snap Popup
