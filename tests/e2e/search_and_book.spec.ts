@@ -144,9 +144,32 @@ test.describe('Search, Filter, and Rental Booking Flow', () => {
     }
 
     // Look for contract signature step or confirm button
-    const signBtn = page.locator('button:has-text("Tandatangani"), button:has-text("Setuju & Tanda Tangan"), button:has-text("Konfirmasi")').first();
-    if (await signBtn.isVisible()) {
-      await signBtn.click();
+    const nikInput = page.locator('#tenant-id-input');
+    if (await nikInput.isVisible()) {
+      await nikInput.fill('5171012304950001');
+
+      const termsRegion = page.locator('[role="region"]').first();
+      await termsRegion.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await termsRegion.dispatchEvent('scroll');
+
+      const consentCheckbox = page.locator('input[type="checkbox"]');
+      await consentCheckbox.check();
+
+      const canvas = page.locator('canvas');
+      await canvas.dispatchEvent('pointerdown', { clientX: 50, clientY: 50, pointerId: 1 });
+      await canvas.dispatchEvent('pointermove', { clientX: 100, clientY: 80, pointerId: 1 });
+      await canvas.dispatchEvent('pointerup', { clientX: 100, clientY: 80, pointerId: 1 });
+
+      const confirmSigBtn = page.locator('button:has-text("Konfirmasi Tanda Tangan")');
+      await confirmSigBtn.click();
+
+      const signBtn = page.locator('button:has-text("Setujui & Tanda Tangan"), button:has-text("Setuju & Tanda Tangan")').first();
+      if (await signBtn.isVisible()) {
+        await expect(signBtn).toBeEnabled();
+        await signBtn.click();
+      }
     }
   });
 });

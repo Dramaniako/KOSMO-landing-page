@@ -47,6 +47,8 @@ export interface Review {
   date: string;
 }
 
+export type RentalStatus = 'pending' | 'active' | 'completed' | 'terminated' | 'cancelled';
+
 export interface Rental {
   id: string;
   tenantId: string;
@@ -54,12 +56,137 @@ export interface Rental {
   propertyName: string;
   price: number;
   startDate: string;
-  status: 'active' | 'terminated' | 'pending' | 'cancelled';
+  status: RentalStatus;
+  document?: string;
+  contract_url?: string | null;
+  contract_hash?: string | null;
+  contract_signed_at?: string | Date | null;
+  signer_ip?: string | null;
+  signer_user_agent?: string | null;
+  tenant_nik_passport?: string | null;
+  tenant_signature_data?: string | null;
+  admin_fee_amount?: number;
   nextPaymentDate?: string;
   nextPaymentDateISO?: string;
   daysRemaining?: number;
   paymentStatus?: string;
 }
+
+export interface UtilityQuotas {
+  electricityKwh?: number | string;
+  water?: string;
+  wifiMbps?: number | string;
+  security?: string;
+  waste?: string;
+}
+
+export interface RentalContractData {
+  rentalId?: string;
+  propertyName: string;
+  propertyAddress?: string;
+  landlordName?: string;
+  landlordEmail?: string;
+  landlordPhone?: string;
+  tenantName: string;
+  tenantEmail: string;
+  tenantPhone?: string;
+  tenantNikPassport?: string;
+  startDate: string;
+  durationMonths?: number;
+  monthlyPrice?: number;
+  pricePerMonth?: number;
+  totalPrice?: number;
+  adminFee?: number;
+  signatureBase64?: string;
+  signerIp?: string;
+  signerUserAgent?: string;
+  signedAt?: string | Date;
+  utilityQuotas?: UtilityQuotas;
+}
+
+export interface ContractPreviewRequest {
+  propertyId: string;
+  durationMonths?: number;
+  startDate?: string;
+  tenantNikPassport?: string;
+  signatureBase64?: string;
+  rentalId?: string;
+}
+
+export interface ContractPreviewResponse {
+  success: boolean;
+  contractData: RentalContractData;
+  contractHash: string;
+  previewUrl?: string;
+  monthlyPrice: number;
+  adminFee: number;
+  totalPrice: number;
+  totalAmount: number;
+}
+
+export interface ContractSignRequest {
+  propertyId: string;
+  durationMonths: number;
+  startDate: string;
+  tenantNikPassport: string;
+  signatureBase64: string;
+  affirmativeConsent: boolean;
+  rentalId?: string;
+}
+
+export interface ContractSignResponse {
+  success: boolean;
+  message: string;
+  rentalId: string;
+  contractUrl: string;
+  contractHash: string;
+  adminFee: number;
+  totalAmount: number;
+  signedAt: string;
+}
+
+export interface BookingRequest {
+  propertyId: string;
+  propertyName: string;
+  price: number;
+  tenantId: string;
+  tenantName: string;
+  tenantEmail: string;
+  durationMonths?: number;
+  rentalId?: string;
+  contractSigned?: boolean;
+  tenantNikPassport?: string;
+  adminFee?: number;
+}
+
+export interface SignedContractData {
+  rentalId: string;
+  contractUrl: string;
+  contractHash: string;
+  adminFee: number;
+  totalAmount: number;
+  signedAt: string;
+}
+
+export interface ContractSignPayload {
+  propertyId: string;
+  durationMonths: number;
+  startDate: string;
+  tenantNikPassport: string;
+  signatureBase64: string;
+  affirmativeConsent: boolean;
+}
+
+export interface RentalAgreement extends Rental {
+  propertyAddress?: string;
+  landlordName?: string;
+  landlordEmail?: string;
+  landlordPhone?: string;
+  tenantName?: string;
+  tenantEmail?: string;
+  tenantPhone?: string;
+}
+
 
 export interface Withdrawal {
   id: string;

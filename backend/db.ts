@@ -100,6 +100,8 @@ async function ensureIndexes(): Promise<void> {
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_contract_hash (contract_hash)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_signed_at (contract_signed_at)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
@@ -223,8 +225,16 @@ async function createSchemaTables(p: typeof pool): Promise<void> {
       propertyName VARCHAR(100) NOT NULL,
       price INT NOT NULL,
       startDate VARCHAR(50) NOT NULL,
-      status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'active',
+      status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending',
       document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
+      contract_url VARCHAR(500),
+      contract_hash VARCHAR(64),
+      contract_signed_at DATETIME,
+      signer_ip VARCHAR(50),
+      signer_user_agent VARCHAR(255),
+      tenant_nik_passport VARCHAR(50),
+      tenant_signature_data LONGTEXT,
+      admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
       FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -240,7 +250,15 @@ async function applyTableMigrations(p: typeof pool): Promise<void> {
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT",
-    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''"
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_url VARCHAR(500)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_hash VARCHAR(64)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_signed_at DATETIME",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_ip VARCHAR(50)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_user_agent VARCHAR(255)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00"
   ];
 
   for (const query of alterQueries) {
@@ -362,8 +380,9 @@ export async function initDb(): Promise<void> {
       const missingTables = requiredTables.filter(t => !existingTables.includes(t));
       
       if (missingTables.length === 0) {
+        await applyTableMigrations(pool);
         isInitialized = true;
-        console.log("MySQL Database Kosmo tables already initialized.");
+        console.log("MySQL Database Kosmo tables already initialized and migrations applied.");
         return;
       }
       

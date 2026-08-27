@@ -1,9 +1,12 @@
-process.env.NO_LISTEN = 'true';
+(process.env as Record<string, string | undefined>).NO_LISTEN = 'true';
+(process.env as Record<string, string | undefined>).NODE_ENV = 'test';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import app from '../backend/server';
-import { pool } from '../backend/db';
-import { generateJwtToken } from '../backend/middleware/auth';
+
+const { default: app } = await import('../backend/server');
+const { pool } = await import('../backend/db');
+const { generateJwtToken } = await import('../backend/middleware/auth');
 
 test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
   const PORT = 5088;

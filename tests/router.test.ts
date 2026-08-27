@@ -1,7 +1,11 @@
+(process.env as Record<string, string | undefined>).NO_LISTEN = 'true';
+(process.env as Record<string, string | undefined>).NODE_ENV = 'test';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import router from '../backend/router';
-import { isOriginAllowed, corsOptions } from '../backend/server';
+
+const { default: router } = await import('../backend/router');
+const { isOriginAllowed, corsOptions } = await import('../backend/server');
 
 interface RouterLayer {
   route?: {
@@ -56,6 +60,8 @@ test('Express router endpoints registration', async (t) => {
       { path: '/admin/tracking-history', method: 'get' },
       { path: '/reports/tracking/excel', method: 'get' },
       { path: '/reports/landlord/excel', method: 'get' },
+      { path: '/rentals/contract/preview', method: 'post' },
+      { path: '/rentals/contract/sign', method: 'post' },
       { path: '/rentals', method: 'get' },
       { path: '/rentals', method: 'post' },
       { path: '/rentals/:id/terminate', method: 'post' },
@@ -113,5 +119,22 @@ test('Express router endpoints registration', async (t) => {
     assert.ok(corsOptions.methods.includes('POST'));
     assert.ok(corsOptions.methods.includes('PUT'));
     assert.ok(corsOptions.methods.includes('DELETE'));
+  });
+
+  await t.test('verifies contract preview, sign, and download routes are mounted on router stack', () => {
+    const routePaths = (router.stack as unknown as RouterLayer[])
+      .filter((layer): layer is RouterLayer & { route: { path: string; methods: Record<string, boolean> } } => Boolean(layer.route))
+      .map((layer) => ({
+        path: layer.route.path,
+        methods: Object.keys(layer.route.methods)
+      }));
+
+    const previewRoute = routePaths.find((r) => r.path === '/rentals/contract/preview' && r.methods.includes('post'));
+    const signRoute = routePaths.find((r) => r.path === '/rentals/contract/sign' && r.methods.includes('post'));
+    const getContractRoute = routePaths.find((r) => r.path === '/rentals/:id/contract' && r.methods.includes('get'));
+
+    assert.ok(previewRoute, 'POST /rentals/contract/preview must be registered');
+    assert.ok(signRoute, 'POST /rentals/contract/sign must be registered');
+    assert.ok(getContractRoute, 'GET /rentals/:id/contract must be registered');
   });
 });

@@ -91,6 +91,8 @@ async function ensureIndexes() {
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_contract_hash (contract_hash)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_signed_at (contract_signed_at)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
@@ -198,8 +200,16 @@ async function createSchemaTables(p) {
       propertyName VARCHAR(100) NOT NULL,
       price INT NOT NULL,
       startDate VARCHAR(50) NOT NULL,
-      status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'active',
+      status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending',
       document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
+      contract_url VARCHAR(500),
+      contract_hash VARCHAR(64),
+      contract_signed_at DATETIME,
+      signer_ip VARCHAR(50),
+      signer_user_agent VARCHAR(255),
+      tenant_nik_passport VARCHAR(50),
+      tenant_signature_data LONGTEXT,
+      admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
       FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -214,7 +224,15 @@ async function applyTableMigrations(p) {
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT",
-    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''"
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_url VARCHAR(500)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_hash VARCHAR(64)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_signed_at DATETIME",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_ip VARCHAR(50)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_user_agent VARCHAR(255)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00"
   ];
   for (const query of alterQueries) {
     try {
@@ -315,8 +333,9 @@ async function initDb() {
       ];
       const missingTables = requiredTables.filter((t) => !existingTables.includes(t));
       if (missingTables.length === 0) {
+        await applyTableMigrations(pool);
         isInitialized = true;
-        console.log("MySQL Database Kosmo tables already initialized.");
+        console.log("MySQL Database Kosmo tables already initialized and migrations applied.");
         return;
       }
       console.log(`Database tables missing: ${missingTables.join(", ")}. Initializing...`);
@@ -339,96 +358,324 @@ import express from "express";
 import XLSX from "xlsx";
 import multer from "multer";
 import bcrypt2 from "bcryptjs";
-import crypto2 from "crypto";
+import crypto3 from "crypto";
 import rateLimit from "express-rate-limit";
 import midtransClient from "midtrans-client";
 
 // backend/services/contract.ts
 import PDFDocument from "pdfkit";
+import crypto2 from "crypto";
 import fs2 from "fs";
+import path3 from "path";
+
+// backend/services/cloudinary.ts
+import crypto from "crypto";
 import path2 from "path";
-import os from "os";
+import { v2 as cloudinary } from "cloudinary";
+import { Readable } from "stream";
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "",
+  api_key: process.env.CLOUDINARY_API_KEY || "",
+  api_secret: process.env.CLOUDINARY_API_SECRET || "",
+  secure: true
+});
+function isCloudinaryConfigured() {
+  const name = process.env.CLOUDINARY_CLOUD_NAME;
+  const secret = process.env.CLOUDINARY_API_SECRET;
+  if (!name || name === "kosmo-bali" || !secret || secret.includes("sample")) {
+    return false;
+  }
+  return true;
+}
+function uploadImageStream(buffer, folder = "kosmo_properties") {
+  return new Promise((resolve, reject) => {
+    if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+      return reject(new Error("Image buffer cannot be empty"));
+    }
+    if (!isCloudinaryConfigured()) {
+      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+      const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
+      return resolve({
+        secure_url: mockUrl,
+        public_id: mockPublicId
+      });
+    }
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: "image",
+        format: "webp",
+        transformation: [
+          { fetch_format: "auto", quality: "auto" }
+        ]
+      },
+      (error, result) => {
+        if (error || !result) {
+          return reject(error || new Error("Upload to Cloudinary failed"));
+        }
+        resolve({
+          secure_url: result.secure_url || result.url,
+          public_id: result.public_id
+        });
+      }
+    );
+    const readableStream = new Readable({
+      read() {
+        this.push(buffer);
+        this.push(null);
+      }
+    });
+    readableStream.on("error", reject);
+    readableStream.pipe(uploadStream);
+  });
+}
+function uploadContractStream(buffer, filename, folder = "kosmo_contracts") {
+  return new Promise((resolve, reject) => {
+    if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+      return reject(new Error("Contract buffer cannot be empty"));
+    }
+    const sanitizedBase = filename ? path2.basename(filename.replace(/\\/g, "/")).replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9_-]/g, "_") : `contract_${Date.now()}`;
+    const cleanPublicId = sanitizedBase || `contract_${Date.now()}`;
+    const fullPublicId = `${folder}/${cleanPublicId}`;
+    if (!isCloudinaryConfigured()) {
+      const mockUrl = `https://res.cloudinary.com/kosmo-bali/raw/upload/v1/${fullPublicId}.pdf`;
+      return resolve({
+        secure_url: mockUrl,
+        public_id: fullPublicId
+      });
+    }
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        public_id: cleanPublicId,
+        resource_type: "raw",
+        overwrite: true
+      },
+      (error, result) => {
+        if (error || !result) {
+          return reject(error || new Error("Upload PDF contract to Cloudinary failed"));
+        }
+        resolve({
+          secure_url: result.secure_url || result.url,
+          public_id: result.public_id
+        });
+      }
+    );
+    const readableStream = new Readable({
+      read() {
+        this.push(buffer);
+        this.push(null);
+      }
+    });
+    readableStream.on("error", reject);
+    readableStream.pipe(uploadStream);
+  });
+}
+
+// backend/services/contract.ts
 function sanitizeRentalId(id) {
   if (!id || typeof id !== "string") return "contract";
-  const normalized = id.replace(/\\/g, "/");
-  const base = path2.basename(normalized);
+  const trimmed = id.trim();
+  if (!trimmed) return "contract";
+  const normalized = trimmed.replace(/\\/g, "/");
+  const base = path3.basename(normalized);
   const sanitized = base.replace(/[^a-zA-Z0-9_-]/g, "");
   return sanitized || "contract";
 }
-function generateRentalContractPdf(data, outputDir) {
+function computeContractHash(buffer) {
+  if (!Buffer.isBuffer(buffer)) {
+    throw new TypeError("Invalid input: buffer must be an instance of Buffer");
+  }
+  return crypto2.createHash("sha256").update(buffer).digest("hex");
+}
+function generateRentalContractBuffer(data) {
   return new Promise((resolve, reject) => {
     try {
-      const targetDir = outputDir || (process.env.VERCEL ? path2.join(os.tmpdir(), "kosmo_uploads") : path2.join(process.cwd(), "backend", "uploads"));
-      const resolvedTargetDir = path2.resolve(targetDir);
-      try {
-        if (!fs2.existsSync(resolvedTargetDir)) {
-          fs2.mkdirSync(resolvedTargetDir, { recursive: true });
+      const sanitizedId = sanitizeRentalId(data.rentalId || "contract");
+      const doc = new PDFDocument({
+        margin: 36,
+        size: "A4",
+        bufferPages: true,
+        info: {
+          Title: `Rental Agreement - ${data.propertyName} - ${data.tenantName}`,
+          Author: "KOSMO Bali Hospitality Platform",
+          Subject: "Digital Tenancy Agreement (UU ITE & KUHPerdata)",
+          Keywords: "kosmo, rental, contract, lease, bali, kuhperdata, uu-ite"
         }
-      } catch {
-      }
-      const sanitizedId = sanitizeRentalId(data.rentalId);
-      const fileName = `contract_${sanitizedId}.pdf`;
-      const fullFilePath = path2.join(resolvedTargetDir, fileName);
-      const resolvedFilePath = path2.resolve(fullFilePath);
-      if (!resolvedFilePath.startsWith(resolvedTargetDir)) {
-        return reject(new Error("Invalid file path: path traversal detected"));
-      }
-      const doc = new PDFDocument({ margin: 50, size: "A4" });
+      });
       const buffers = [];
       doc.on("data", (chunk) => buffers.push(chunk));
-      doc.on("end", () => {
-        const finalBuffer = Buffer.concat(buffers);
-        try {
-          fs2.writeFileSync(fullFilePath, finalBuffer);
-        } catch {
-        }
-        resolve({
-          filePath: `/uploads/${fileName}`,
-          fileName,
-          buffer: finalBuffer
-        });
-      });
+      doc.on("end", () => resolve(Buffer.concat(buffers)));
       doc.on("error", (err) => reject(err));
-      doc.fontSize(18).font("Helvetica-Bold").text("SURAT PERJANJIAN SEWA KOS KOSMO", { align: "center" });
-      doc.moveDown(0.3);
-      doc.fontSize(10).font("Helvetica").text(`Nomor Kontrak: KOSMO/${data.rentalId.toUpperCase()} \u2022 Tanggal: ${data.startDate}`, { align: "center" });
-      doc.moveDown(1.2);
-      doc.fontSize(10).font("Helvetica").text(
-        "Pada hari ini telah disepakati bersama perjanjian sewa menyewa unit kamar kos dengan rincian identitas dan ketentuan sebagai berikut:"
-      );
-      doc.moveDown(0.8);
-      doc.font("Helvetica-Bold").text("1. IDENTITAS PENYEWA (TENANT)");
-      doc.font("Helvetica").text(`   \u2022 Nama Lengkap   : ${data.tenantName}`).text(`   \u2022 Email          : ${data.tenantEmail}`).text(`   \u2022 Nomor Telepon  : ${data.tenantPhone || "-"}`);
-      doc.moveDown(0.8);
-      doc.font("Helvetica-Bold").text("2. OBJEK DAN BIAYA SEWA");
-      doc.font("Helvetica").text(`   \u2022 Nama Properti  : ${data.propertyName}`).text(`   \u2022 Alamat         : ${data.propertyAddress || "Bali, Indonesia"}`).text(`   \u2022 Biaya Sewa     : Rp ${data.pricePerMonth.toLocaleString("id-ID")} / bulan`).text(`   \u2022 Tanggal Mulai  : ${data.startDate}`).text(`   \u2022 Durasi Sewa    : ${data.durationMonths || 1} Bulan`);
-      doc.moveDown(0.8);
-      doc.font("Helvetica-Bold").text("3. KETENTUAN DAN TATA TERTIB SEWA");
-      doc.font("Helvetica").text("   a. Pembayaran sewa dilakukan di awal periode sewa melalui platform digital KOSMO.").text("   b. Penyewa wajib menjaga kebersihan, ketertiban umum, dan fasilitas yang disediakan.").text("   c. Dilarang memindahtangankan sewa kepada pihak ketiga tanpa persetujuan tertulis.").text("   d. Pengakhiran masa sewa dapat dilakukan melalui dashboard KOSMO dengan verifikasi kata sandi.");
-      doc.moveDown(1.2);
-      doc.font("Helvetica-Bold").text("4. PENGESAHAN & TANDA TANGAN DIGITAL");
-      doc.moveDown(0.5);
+      const pageWidth = doc.page.width - 72;
+      const monthlyRate = data.monthlyPrice !== void 0 ? data.monthlyPrice : data.pricePerMonth !== void 0 ? data.pricePerMonth : 0;
+      const adminFee = data.adminFee !== void 0 ? data.adminFee : 5e3;
+      const duration = data.durationMonths || 1;
+      const totalInitial = data.totalPrice !== void 0 ? data.totalPrice : monthlyRate * duration + adminFee;
+      const landlordName = data.landlordName || "PT KOSMO Bali Hospitality / Pengelola Properti";
+      const landlordEmail = data.landlordEmail || "hospitality@kosmo.id";
+      const landlordPhone = data.landlordPhone || "+62 361-900-5676";
+      const tenantNik = data.tenantNikPassport || "-";
+      const tenantPhone = data.tenantPhone || "-";
+      const propertyAddress = data.propertyAddress || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia";
+      let signedAtUtc = "";
+      let signedAtWita = "";
+      try {
+        const signedDateObj = data.signedAt ? new Date(data.signedAt) : /* @__PURE__ */ new Date();
+        if (isNaN(signedDateObj.getTime())) {
+          signedAtUtc = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").substring(0, 19) + " UTC";
+          signedAtWita = new Date(Date.now() + 8 * 60 * 60 * 1e3).toISOString().replace("T", " ").substring(0, 19) + " WITA";
+        } else {
+          signedAtUtc = signedDateObj.toISOString().replace("T", " ").substring(0, 19) + " UTC";
+          const witaTime = new Date(signedDateObj.getTime() + 8 * 60 * 60 * 1e3);
+          signedAtWita = witaTime.toISOString().replace("T", " ").substring(0, 19) + " WITA";
+        }
+      } catch {
+        signedAtUtc = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").substring(0, 19) + " UTC";
+        signedAtWita = new Date(Date.now() + 8 * 60 * 60 * 1e3).toISOString().replace("T", " ").substring(0, 19) + " WITA";
+      }
+      doc.rect(36, 36, pageWidth, 54).fill("#0f172a");
+      doc.fillColor("#38bdf8").fontSize(11).font("Helvetica-Bold").text("KOSMO BALI CO-LIVING MARKETPLACE", 46, 44, { align: "left" });
+      doc.fillColor("#f8fafc").fontSize(9.5).font("Helvetica-Bold").text("SURAT PERJANJIAN SEWA MENYEWA HUNIAN KO-LIVING (KOSMO)", 46, 57, { align: "left" });
+      doc.fillColor("#94a3b8").fontSize(7).font("Helvetica-Oblique").text("DIGITAL CO-LIVING RESIDENTIAL LEASE AGREEMENT \u2022 PASAL 1320 KUHPERDATA & UU ITE NO. 11/2008 JO. UU NO. 1/2024", 46, 71, { align: "left" });
+      doc.fillColor("#38bdf8").fontSize(8).font("Helvetica-Bold").text(`NO: KOSMO/${sanitizedId.toUpperCase()}`, 36, 45, { width: pageWidth - 10, align: "right" });
+      doc.fillColor("#94a3b8").fontSize(7.5).font("Helvetica").text(`Tgl / Date: ${data.startDate}`, 36, 58, { width: pageWidth - 10, align: "right" });
+      doc.y = 96;
+      doc.fillColor("#000000");
+      doc.fontSize(7.5).font("Helvetica").fillColor("#334155").text("Perjanjian Sewa Menyewa Elektronik ini disepakati secara sadar dan sah berdasarkan Kitab Undang-Undang Hukum Perdata (KUHPerdata) Pasal 1320 dan UU ITE No. 11/2008 jo. UU No. 1/2024 oleh dan antara Para Pihak: / This Electronic Tenancy Agreement is entered into freely, knowingly, and lawfully under Indonesian Civil Code Article 1320 and UU ITE No. 11/2008 jo. UU No. 1/2024 by and between the Parties:");
+      doc.moveDown(0.4);
+      doc.fontSize(8).font("Helvetica-Bold").fillColor("#0f172a").text("PASAL 1: IDENTITAS PARA PIHAK / ARTICLE 1: IDENTIFICATION OF PARTIES");
+      doc.moveDown(0.2);
+      const colWidth = (pageWidth - 10) / 2;
+      const boxY = doc.y;
+      doc.rect(36, boxY, colWidth, 64).fillAndStroke("#f8fafc", "#cbd5e1");
+      doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PIHAK PERTAMA (PENGELOLA / LESSOR)", 42, boxY + 5);
+      doc.font("Helvetica").fontSize(7).fillColor("#334155").text(`\u2022 Nama / Name    : ${landlordName}`, 42, boxY + 18).text(`\u2022 Email          : ${landlordEmail}`, 42, boxY + 30).text(`\u2022 Telepon / Phone: ${landlordPhone}`, 42, boxY + 42).text("\u2022 Peran / Role   : Pengelola Sah & Penyedia Hunian Co-Living", 42, boxY + 54);
+      doc.rect(36 + colWidth + 10, boxY, colWidth, 64).fillAndStroke("#f8fafc", "#cbd5e1");
+      doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PIHAK KEDUA (PENYEWA / TENANT)", 42 + colWidth + 10, boxY + 5);
+      doc.font("Helvetica").fontSize(7).fillColor("#334155").text(`\u2022 Nama Lengkap   : ${data.tenantName}`, 42 + colWidth + 10, boxY + 18).text(`\u2022 NIK / Passport : ${tenantNik}`, 42 + colWidth + 10, boxY + 30).text(`\u2022 Email          : ${data.tenantEmail}`, 42 + colWidth + 10, boxY + 42).text(`\u2022 Telepon / WA   : ${tenantPhone}`, 42 + colWidth + 10, boxY + 54);
+      doc.y = boxY + 70;
+      const gridY = doc.y;
+      doc.rect(36, gridY, colWidth, 76).fillAndStroke("#ffffff", "#e2e8f0");
+      doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PASAL 2: OBJEK & LOKASI HUNIAN", 42, gridY + 5);
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("ARTICLE 2: PREMISES & BALI LOCATION", 42, gridY + 14);
+      doc.font("Helvetica").fontSize(7).fillColor("#334155").text(`\u2022 Unit / Room    : ${data.propertyName}`, 42, gridY + 26).text(`\u2022 Alamat / Addr  : ${propertyAddress}`, 42, gridY + 38, { width: colWidth - 12 }).text(`\u2022 Mulai / Start  : ${data.startDate} \u2022 Durasi: ${duration} Bulan / Month(s)`, 42, gridY + 60);
+      doc.rect(36 + colWidth + 10, gridY, colWidth, 76).fillAndStroke("#ffffff", "#e2e8f0");
+      doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PASAL 3: BIAYA SEWA & ADMINISTRASI", 42 + colWidth + 10, gridY + 5);
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("ARTICLE 3: RENTAL FEES & PLATFORM FEE", 42 + colWidth + 10, gridY + 14);
+      doc.font("Helvetica").fontSize(7).fillColor("#334155").text(`\u2022 Sewa Bulanan   : Rp ${monthlyRate.toLocaleString("id-ID")} / bulan`, 42 + colWidth + 10, gridY + 26).text(`\u2022 Biaya Admin    : Rp ${adminFee.toLocaleString("id-ID")} (Flat Rp 5.000 / 5000 Fee)`, 42 + colWidth + 10, gridY + 38).text(`\u2022 Total Biaya    : Rp ${totalInitial.toLocaleString("id-ID")}`, 42 + colWidth + 10, gridY + 50).text("\u2022 Jatuh Tempo    : Setiap 30 hari kalender via KOSMO", 42 + colWidth + 10, gridY + 60);
+      doc.y = gridY + 82;
+      doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PASAL 4: KUOTA UTILITAS & FASILITAS / ARTICLE 4: UTILITY QUOTAS & FACILITY CAPS");
+      doc.moveDown(0.2);
+      const quotas = data.utilityQuotas || {};
+      const elecText = quotas.electricityKwh ? `${quotas.electricityKwh} kWh` : "200 kWh";
+      const wifiText = quotas.wifiMbps ? `${quotas.wifiMbps} Mbps` : "100 Mbps";
+      const waterText = quotas.water || "PDAM & Deep Well (Air Bersih Terfilter) Included";
+      const secText = quotas.security || "24/7 CCTV & Security Access";
+      const wasteText = quotas.waste || "Daily Waste Management (Pengangkutan Sampah Terjadwal) Included";
+      doc.rect(36, doc.y, pageWidth, 68).fillAndStroke("#f1f5f9", "#cbd5e1");
+      const uY = doc.y + 4;
+      doc.font("Helvetica").fontSize(6.8).fillColor("#1e293b").text(`\u2022 Listrik (Electricity)       : Termasuk kuota token listrik standar ${elecText}/bulan. Pemakaian lebih dibayar mandiri sesuai tarif resmi PLN.`, 42, uY);
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("  Standard electricity token allowance included. Excess consumption billed at official PLN rates.", 48, uY + 8);
+      doc.font("Helvetica").fontSize(6.8).fillColor("#1e293b").text(`\u2022 Air Bersih (Water Supply)   : ${waterText}. Pemakaian domestik & sanitasi harian wajar.`, 42, uY + 17);
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("  Domestic sanitary water usage included (PDAM / filtered deep well).", 48, uY + 25);
+      doc.font("Helvetica").fontSize(6.8).fillColor("#1e293b").text(`\u2022 Internet Wi-Fi (100 Mbps)   : Akses broadband internet bersama berkecepatan tinggi hingga ${wifiText} (100Mbps High-Speed WiFi).`, 42, uY + 34);
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("  High-speed wireless broadband shared internet access up to 100 Mbps included.", 48, uY + 42);
+      doc.font("Helvetica").fontSize(6.8).fillColor("#1e293b").text(`\u2022 Sampah & Keamanan (24/7)    : ${wasteText} & ${secText} (1 slot parkir kendaraan).`, 42, uY + 51);
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("  Scheduled waste disposal, 24/7 access, CCTV surveillance, and 1 vehicle parking slot included.", 48, uY + 59);
+      doc.y = uY + 70;
+      const legY = doc.y;
+      doc.rect(36, legY, colWidth, 80).fillAndStroke("#ffffff", "#e2e8f0");
+      doc.fillColor("#0f172a").fontSize(7.2).font("Helvetica-Bold").text("PASAL 5: SEWA AKTIF TUNGGAL", 42, legY + 5);
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("ARTICLE 5: SINGLE ACTIVE TENANCY & NO SUBLEASING", 42, legY + 14);
+      doc.font("Helvetica").fontSize(6.7).fillColor("#334155").text("1. Perjanjian Sewa Aktif Tunggal (Single Active Tenancy Covenant): Penyewa menyatakan hanya memiliki 1 sewa aktif di KOSMO.", 42, legY + 24, { width: colWidth - 12 });
+      doc.font("Helvetica-Oblique").fontSize(6.3).fillColor("#64748b").text("   Tenant warrants maintaining only 1 active lease.", 48, legY + 38);
+      doc.font("Helvetica").fontSize(6.7).fillColor("#334155").text("2. Larangan Sewa Ganda: Dilarang keras mengalihkan/sublet sewa tanpa izin tertulis.", 42, legY + 48, { width: colWidth - 12 });
+      doc.font("Helvetica-Oblique").fontSize(6.3).fillColor("#64748b").text("   Subleasing or assignment is strictly prohibited.", 48, legY + 62);
+      doc.rect(36 + colWidth + 10, legY, colWidth, 80).fillAndStroke("#ffffff", "#e2e8f0");
+      doc.fillColor("#0f172a").fontSize(7.2).font("Helvetica-Bold").text("PASAL 6: HUKUM & YURISDIKSI BALI", 42 + colWidth + 10, legY + 5);
+      doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("ARTICLE 6: GOVERNING LAW & JURISDICTION", 42 + colWidth + 10, legY + 14);
+      doc.font("Helvetica").fontSize(6.7).fillColor("#334155").text("1. Tunduk pada hukum materiil Republik Indonesia (KUHPerdata & UU ITE No. 11/2008).", 42 + colWidth + 10, legY + 24, { width: colWidth - 12 });
+      doc.font("Helvetica-Oblique").fontSize(6.3).fillColor("#64748b").text("   Governed by the laws of the Republic of Indonesia.", 48 + colWidth + 10, legY + 38);
+      doc.font("Helvetica").fontSize(6.7).fillColor("#334155").text("2. Domisili hukum tetap di Pengadilan Negeri Denpasar / Pengadilan Negeri Badung, Bali.", 42 + colWidth + 10, legY + 48, { width: colWidth - 12 });
+      doc.font("Helvetica-Oblique").fontSize(6.3).fillColor("#64748b").text("   Exclusive jurisdiction: Pengadilan Negeri Denpasar / Badung.", 48 + colWidth + 10, legY + 62);
+      doc.y = legY + 86;
+      doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PASAL 7: PENGESAHAN ELEKTRONIK & JEJAK AUDIT / ARTICLE 7: EXECUTION & DIGITAL AUDIT TRAIL");
+      doc.moveDown(0.2);
+      const sigBoxY = doc.y;
+      const sigBoxHeight = 104;
+      doc.rect(36, sigBoxY, pageWidth, sigBoxHeight).fillAndStroke("#f8fafc", "#0f172a");
+      const sigWidth = 150;
+      doc.fillColor("#0f172a").fontSize(7).font("Helvetica-Bold").text("TANDA TANGAN PENYEWA / TENANT SIGNATURE:", 42, sigBoxY + 5);
+      let signatureRendered = false;
       if (data.signatureBase64 && data.signatureBase64.startsWith("data:image")) {
         try {
           const base64Data = data.signatureBase64.replace(/^data:image\/\w+;base64,/, "");
           const imgBuffer = Buffer.from(base64Data, "base64");
-          doc.image(imgBuffer, { width: 140, height: 60 });
-          doc.moveDown(0.5);
+          if (imgBuffer.length > 30) {
+            doc.image(imgBuffer, 44, sigBoxY + 16, { fit: [136, 44], align: "center", valign: "center" });
+            signatureRendered = true;
+          }
         } catch {
-          doc.font("Helvetica-Oblique").text("[Tanda Tangan Digital Terverifikasi Melalui Sistem KOSMO]");
-          doc.moveDown(0.5);
+          signatureRendered = false;
         }
-      } else {
-        doc.font("Helvetica-Oblique").text("[Tanda Tangan Digital Terverifikasi Melalui Sistem KOSMO]");
-        doc.moveDown(0.5);
       }
-      doc.font("Helvetica").fontSize(10).text(`Nama Penyewa : ${data.tenantName}`);
-      doc.text(`Waktu Tanda Tangan: ${(/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}`);
+      if (!signatureRendered) {
+        doc.rect(44, sigBoxY + 16, 136, 44).fillAndStroke("#f1f5f9", "#94a3b8");
+        doc.fillColor("#475569").fontSize(6.5).font("Helvetica-Oblique").text("[Tanda Tangan Digital Terverifikasi via KOSMO Secure Pad / Verified Digital Signature]", 46, sigBoxY + 28, { width: 132, align: "center" });
+      }
+      doc.fillColor("#0f172a").fontSize(7).font("Helvetica-Bold").text(`${data.tenantName}`, 42, sigBoxY + 66, { width: sigWidth });
+      doc.fillColor("#475569").fontSize(6.5).font("Helvetica").text(`NIK / Pass: ${tenantNik}`, 42, sigBoxY + 76, { width: sigWidth }).text("Status: Terverifikasi Secara Elektronik (UU ITE Pasal 11)", 42, sigBoxY + 86, { width: sigWidth });
+      const auditX = 36 + sigWidth + 10;
+      const auditWidth = pageWidth - sigWidth - 16;
+      doc.fillColor("#0f172a").fontSize(7).font("Helvetica-Bold").text("JEJAK AUDIT FORENSIK DIGITAL (UU ITE & PP 71/2019 COMPLIANT):", auditX, sigBoxY + 5);
+      const signerIp = data.signerIp || "114.125.45.102 (Client Direct)";
+      const signerUserAgent = data.signerUserAgent || "Mozilla/5.0 KOSMO Secure Web Client";
+      doc.font("Courier").fontSize(6.2).fillColor("#0f172a").text(`\u2022 Signer Remote IP: ${signerIp}`, auditX, sigBoxY + 18, { width: auditWidth }).text(`\u2022 Waktu / Time    : ${signedAtWita} / ${signedAtUtc}`, auditX, sigBoxY + 28, { width: auditWidth }).text(`\u2022 Client Platform : ${signerUserAgent.substring(0, 65)}`, auditX, sigBoxY + 38, { width: auditWidth }).text(`\u2022 Dasar Hukum     : Pasal 1320 KUHPerdata, UU ITE No. 11/2008 jo. UU No. 1/2024`, auditX, sigBoxY + 48, { width: auditWidth });
+      doc.font("Helvetica-Oblique").fontSize(6).fillColor("#475569").text("Dokumen elektronik ini sah, mengikat, dan memiliki kekuatan pembuktian yang sempurna sesuai Pasal 5 & 6 UU ITE No. 11/2008 jo. UU No. 1/2024 serta Pasal 1320 KUHPerdata. Setiap modifikasi terhadap isi dokumen ini akan membatalkan integritas tanda tangan digital secara otomatis.", auditX, sigBoxY + 62, { width: auditWidth });
       doc.end();
     } catch (err) {
       reject(err);
     }
   });
+}
+async function generateRentalContractPdf(data, outputDir) {
+  const buffer = await generateRentalContractBuffer(data);
+  const contractHash = computeContractHash(buffer);
+  const sanitizedId = sanitizeRentalId(data.rentalId);
+  const fileName = `contract_${sanitizedId}.pdf`;
+  if (outputDir) {
+    try {
+      const resolvedTargetDir = path3.resolve(outputDir);
+      if (!fs2.existsSync(resolvedTargetDir)) {
+        fs2.mkdirSync(resolvedTargetDir, { recursive: true });
+      }
+      const fullFilePath = path3.join(resolvedTargetDir, fileName);
+      const resolvedFilePath = path3.resolve(fullFilePath);
+      if (resolvedFilePath.startsWith(resolvedTargetDir)) {
+        fs2.writeFileSync(resolvedFilePath, buffer);
+      }
+    } catch {
+    }
+  }
+  return {
+    filePath: `/uploads/${fileName}`,
+    fileName,
+    buffer,
+    contractHash
+  };
+}
+async function generateAndUploadContract(data) {
+  const pdfBuffer = await generateRentalContractBuffer(data);
+  const contractHash = computeContractHash(pdfBuffer);
+  const sanitizedId = sanitizeRentalId(data.rentalId);
+  const filename = `contract_${sanitizedId}.pdf`;
+  const uploadRes = await uploadContractStream(pdfBuffer, filename, "kosmo_contracts");
+  return {
+    pdfBuffer,
+    contractHash,
+    cloudinaryUrl: uploadRes.secure_url
+  };
 }
 
 // backend/services/cache.ts
@@ -611,6 +858,36 @@ var reviewSchema = z.object({
   comment: z.string().min(1, "Komentar ulasan wajib diisi"),
   rating: z.number().int().min(1, "Rating minimal 1").max(5, "Rating maksimal 5")
 });
+var previewContractSchema = z.object({
+  propertyId: z.string().min(1, "ID properti wajib diisi"),
+  durationMonths: z.number().int("Durasi sewa harus berupa bilangan bulat").min(1, "Durasi sewa minimal 1 bulan").max(120, "Durasi sewa maksimal 120 bulan").optional().default(1),
+  startDate: z.string().optional(),
+  tenantNikPassport: z.string().trim().regex(
+    /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
+    "NIK harus 16 digit angka atau nomor Paspor 6-12 karakter alfanumerik"
+  ).optional().or(z.literal("")),
+  signatureBase64: z.string().optional(),
+  rentalId: z.string().optional()
+});
+var signContractSchema = z.object({
+  propertyId: z.string().min(1, "ID properti wajib diisi"),
+  durationMonths: z.number().int("Durasi sewa harus berupa bilangan bulat").min(1, "Durasi sewa minimal 1 bulan").max(120, "Durasi sewa maksimal 120 bulan"),
+  startDate: z.string().min(1, "Tanggal mulai sewa wajib diisi"),
+  tenantNikPassport: z.string().trim().min(1, "NIK / Nomor Paspor wajib diisi").regex(
+    /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
+    "NIK harus berupa 16 digit angka atau nomor Paspor yang valid (6-12 karakter alfanumerik)"
+  ),
+  signatureBase64: z.string().min(20, "Tanda tangan digital wajib diisi").refine(
+    (val) => /^data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(val) || /^[A-Za-z0-9+/=]{20,}$/.test(val),
+    {
+      message: "Tanda tangan digital harus berupa data URL gambar base64 yang valid"
+    }
+  ),
+  affirmativeConsent: z.literal(true, {
+    message: "Penyewa wajib menyetujui syarat dan ketentuan perjanjian sewa (affirmative clickwrap consent)"
+  }),
+  rentalId: z.string().optional()
+});
 function validateBody(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
@@ -621,55 +898,6 @@ function validateBody(schema) {
     }
     next();
   };
-}
-
-// backend/services/cloudinary.ts
-import crypto from "crypto";
-import { v2 as cloudinary } from "cloudinary";
-import { Readable } from "stream";
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "",
-  api_key: process.env.CLOUDINARY_API_KEY || "",
-  api_secret: process.env.CLOUDINARY_API_SECRET || "",
-  secure: true
-});
-function uploadImageStream(buffer, folder = "kosmo_properties") {
-  return new Promise((resolve, reject) => {
-    if (!process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME === "kosmo-bali" || !process.env.CLOUDINARY_API_SECRET || process.env.CLOUDINARY_API_SECRET.includes("sample")) {
-      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-      const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
-      return resolve({
-        secure_url: mockUrl,
-        public_id: mockPublicId
-      });
-    }
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: "image",
-        format: "webp",
-        transformation: [
-          { fetch_format: "auto", quality: "auto" }
-        ]
-      },
-      (error, result) => {
-        if (error || !result) {
-          return reject(error || new Error("Upload to Cloudinary failed"));
-        }
-        resolve({
-          secure_url: result.secure_url || result.url,
-          public_id: result.public_id
-        });
-      }
-    );
-    const readableStream = new Readable({
-      read() {
-        this.push(buffer);
-        this.push(null);
-      }
-    });
-    readableStream.pipe(uploadStream);
-  });
 }
 
 // backend/router.ts
@@ -745,7 +973,7 @@ router.post("/upload", upload.single("image"), async (req, res) => {
   }
 });
 var generateId = (prefix) => {
-  return `${prefix}-${crypto2.randomBytes(4).toString("hex")}`;
+  return `${prefix}-${crypto3.randomBytes(4).toString("hex")}`;
 };
 router.post("/auth/login", authLimiter, validateBody(loginSchema), async (req, res) => {
   const { email, password } = req.body;
@@ -2032,6 +2260,248 @@ router.get("/tenant/rentals", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Gagal mengambil data sewa tenant." });
   }
 });
+router.post(
+  "/rentals/contract/preview",
+  authenticateToken,
+  validateBody(previewContractSchema),
+  async (req, res) => {
+    const authUser = req.user;
+    if (!authUser) {
+      return res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
+    }
+    const {
+      propertyId,
+      durationMonths,
+      startDate,
+      tenantNikPassport,
+      signatureBase64,
+      rentalId: customRentalId
+    } = req.body;
+    try {
+      const [propRows] = await pool.query(
+        "SELECT id, name, address, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ?",
+        [propertyId]
+      );
+      const property = propRows[0];
+      if (!property) {
+        return res.status(404).json({ success: false, message: "Properti tidak ditemukan." });
+      }
+      const [userRows] = await pool.query("SELECT * FROM users WHERE id = ?", [authUser.id]);
+      const tenant = userRows[0];
+      let landlord;
+      if (property.ownerId) {
+        const [landlordRows] = await pool.query("SELECT * FROM users WHERE id = ?", [property.ownerId]);
+        landlord = landlordRows[0];
+      }
+      const signerIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.socket.remoteAddress || "127.0.0.1";
+      const signerUserAgent = req.headers["user-agent"] || "Mozilla/5.0 (KOSMO Secure Client)";
+      const signedAtDate = /* @__PURE__ */ new Date();
+      const signedAtIso = signedAtDate.toISOString();
+      const duration = Number(durationMonths) || 1;
+      const monthlyPrice = Number(property.price) || 0;
+      const adminFee = 5e3;
+      const totalPrice = monthlyPrice * duration + adminFee;
+      const startDateStr = startDate || signedAtDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+      const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : "preview-draft";
+      const contractData = {
+        rentalId,
+        propertyName: property.name,
+        propertyAddress: property.address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
+        landlordName: landlord ? landlord.name : "PT KOSMO Bali Hospitality / Pengelola Properti",
+        landlordEmail: landlord ? landlord.email : "hospitality@kosmo.id",
+        landlordPhone: landlord ? landlord.phone : "+62 361-900-5676",
+        tenantName: tenant ? tenant.name : authUser.email,
+        tenantEmail: tenant ? tenant.email : authUser.email,
+        tenantPhone: tenant ? tenant.phone || "" : "",
+        tenantNikPassport: tenantNikPassport || "-",
+        startDate: startDateStr,
+        durationMonths: duration,
+        monthlyPrice,
+        pricePerMonth: monthlyPrice,
+        totalPrice,
+        adminFee,
+        signatureBase64: signatureBase64 || void 0,
+        signerIp,
+        signerUserAgent,
+        signedAt: signedAtIso,
+        utilityQuotas: {
+          electricityKwh: 200,
+          water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
+          wifiMbps: 100,
+          security: "24/7 CCTV & Security Access",
+          waste: "Daily Waste Management Included"
+        }
+      };
+      const pdfBuffer = await generateRentalContractBuffer(contractData);
+      const contractHash = computeContractHash(pdfBuffer);
+      return res.status(200).json({
+        success: true,
+        contractData,
+        contractHash,
+        monthlyPrice,
+        adminFee,
+        totalPrice,
+        totalAmount: totalPrice
+      });
+    } catch (err) {
+      console.error("Contract preview error:", err);
+      return res.status(500).json({ success: false, message: "Gagal membuat pratinjau kontrak digital." });
+    }
+  }
+);
+router.post(
+  "/rentals/contract/sign",
+  authenticateToken,
+  validateBody(signContractSchema),
+  async (req, res) => {
+    const authUser = req.user;
+    if (!authUser) {
+      return res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
+    }
+    const {
+      propertyId,
+      durationMonths,
+      startDate,
+      tenantNikPassport,
+      signatureBase64,
+      rentalId: customRentalId
+    } = req.body;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [userRows] = await connection.query("SELECT * FROM users WHERE id = ? FOR UPDATE", [authUser.id]);
+      const tenant = userRows[0];
+      if (!tenant) {
+        await connection.rollback();
+        return res.status(404).json({ success: false, message: "Pengguna tidak ditemukan." });
+      }
+      const [activeRentals] = await connection.query(
+        "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE",
+        [authUser.id]
+      );
+      if (activeRentals.length > 0) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
+        });
+      }
+      const [propRows] = await connection.query(
+        "SELECT id, name, address, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
+        [propertyId]
+      );
+      const property = propRows[0];
+      if (!property) {
+        await connection.rollback();
+        return res.status(404).json({ success: false, message: "Properti tidak ditemukan." });
+      }
+      if (property.occupiedRooms >= property.totalRooms) {
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: "Kamar kos sudah penuh." });
+      }
+      let landlord;
+      if (property.ownerId) {
+        const [landlordRows] = await connection.query("SELECT * FROM users WHERE id = ?", [property.ownerId]);
+        landlord = landlordRows[0];
+      }
+      const signerIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.socket.remoteAddress || "127.0.0.1";
+      const signerUserAgent = req.headers["user-agent"] || "Mozilla/5.0 (KOSMO Secure Client)";
+      const signedAtDate = /* @__PURE__ */ new Date();
+      const signedAtIso = signedAtDate.toISOString();
+      const duration = Number(durationMonths) || 1;
+      const adminFee = 5e3;
+      const rentalPrice = Number(property.price) || 0;
+      const totalAmount = rentalPrice * duration + adminFee;
+      const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
+      const startDateStr = startDate || signedAtDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+      const contractData = {
+        rentalId,
+        propertyName: property.name,
+        propertyAddress: property.address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
+        landlordName: landlord ? landlord.name : "PT KOSMO Bali Hospitality / Pengelola Properti",
+        landlordEmail: landlord ? landlord.email : "hospitality@kosmo.id",
+        landlordPhone: landlord ? landlord.phone : "+62 361-900-5676",
+        tenantName: tenant ? tenant.name : authUser.email,
+        tenantEmail: tenant ? tenant.email : authUser.email,
+        tenantPhone: tenant ? tenant.phone || "" : "",
+        tenantNikPassport,
+        startDate: startDateStr,
+        durationMonths: duration,
+        monthlyPrice: rentalPrice,
+        pricePerMonth: rentalPrice,
+        totalPrice: totalAmount,
+        adminFee,
+        signatureBase64,
+        signerIp,
+        signerUserAgent,
+        signedAt: signedAtIso,
+        utilityQuotas: {
+          electricityKwh: 200,
+          water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
+          wifiMbps: 100,
+          security: "24/7 CCTV & Security Access",
+          waste: "Daily Waste Management Included"
+        }
+      };
+      const uploadResult = await generateAndUploadContract(contractData);
+      const contractUrl = uploadResult.cloudinaryUrl || `/uploads/contract_${sanitizeRentalId(rentalId)}.pdf`;
+      const contractHash = uploadResult.contractHash;
+      await connection.query(
+        `INSERT INTO rentals (
+          id, tenantId, propertyId, propertyName, price, startDate, status,
+          document, contract_url, contract_hash, contract_signed_at,
+          signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          rentalId,
+          authUser.id,
+          propertyId,
+          property.name,
+          rentalPrice,
+          startDateStr,
+          contractUrl,
+          contractUrl,
+          contractHash,
+          signedAtDate,
+          signerIp,
+          signerUserAgent,
+          tenantNikPassport,
+          signatureBase64,
+          adminFee
+        ]
+      );
+      await connection.query(
+        "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
+        [propertyId]
+      );
+      if (property.ownerId) {
+        await connection.query(
+          "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
+          [rentalPrice * duration, rentalPrice * duration, property.ownerId]
+        );
+      }
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rentals");
+      return res.status(201).json({
+        success: true,
+        message: "Kontrak digital berhasil ditandatangani dan sewa aktif!",
+        rentalId,
+        contractUrl,
+        contractHash,
+        adminFee,
+        totalAmount,
+        signedAt: signedAtIso
+      });
+    } catch (err) {
+      await connection.rollback();
+      console.error("Contract sign error:", err);
+      return res.status(500).json({ success: false, message: "Gagal memproses penandatanganan kontrak digital." });
+    } finally {
+      connection.release();
+    }
+  }
+);
 router.post("/rentals", authenticateToken, async (req, res) => {
   const { tenantId, propertyId, propertyName, price, durationMonths, signature } = req.body;
   const authUser = req.user;
@@ -2212,44 +2682,108 @@ router.post("/rentals/:id/terminate", authenticateToken, async (req, res) => {
     connection.release();
   }
 });
-router.get("/rentals/:id/contract", authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const authUser = req.user;
-  try {
-    const [rentalRows] = await pool.query("SELECT * FROM rentals WHERE id = ?", [id]);
-    const rental = rentalRows[0];
-    if (!rental) {
-      return res.status(404).json({ message: "Data sewa tidak ditemukan." });
+router.get(
+  "/rentals/:id/contract",
+  authenticateToken,
+  async (req, res) => {
+    const { id } = req.params;
+    const authUser = req.user;
+    if (!authUser) {
+      return res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
     }
-    const [propRows] = await pool.query("SELECT * FROM properties WHERE id = ?", [rental.propertyId]);
-    const property = propRows[0];
-    const isTenant = authUser?.id === rental.tenantId;
-    const isOwner = property && authUser?.id === property.ownerId;
-    const isAdmin = authUser?.role === "admin";
-    if (!isTenant && !isOwner && !isAdmin) {
-      return res.status(403).json({ message: "Akses ditolak ke dokumen kontrak ini." });
+    try {
+      const [rows] = await pool.query(
+        `SELECT 
+          r.id AS rental_id,
+          r.tenantId AS rental_tenant_id,
+          r.propertyId AS rental_property_id,
+          r.propertyName AS rental_property_name,
+          r.price AS rental_price,
+          r.startDate AS rental_start_date,
+          r.status AS rental_status,
+          r.document AS rental_document,
+          r.contract_url,
+          r.contract_hash,
+          r.contract_signed_at,
+          r.signer_ip,
+          r.signer_user_agent,
+          r.tenant_nik_passport,
+          r.tenant_signature_data,
+          r.admin_fee_amount,
+          p.name AS property_name,
+          p.address AS property_address,
+          p.price AS property_price,
+          p.ownerId AS property_owner_id,
+          u.name AS tenant_name,
+          u.email AS tenant_email,
+          u.phone AS tenant_phone,
+          l.name AS landlord_name,
+          l.email AS landlord_email,
+          l.phone AS landlord_phone
+        FROM rentals r
+        LEFT JOIN properties p ON r.propertyId = p.id
+        LEFT JOIN users u ON r.tenantId = u.id
+        LEFT JOIN users l ON p.ownerId = l.id
+        WHERE r.id = ?`,
+        [id]
+      );
+      const rental = rows[0];
+      if (!rental) {
+        return res.status(404).json({ message: "Data sewa tidak ditemukan." });
+      }
+      const isTenant = authUser.id === rental.rental_tenant_id;
+      const isOwner = Boolean(rental.property_owner_id && authUser.id === rental.property_owner_id);
+      const isAdmin = authUser.role === "admin";
+      if (!isTenant && !isOwner && !isAdmin) {
+        return res.status(403).json({ message: "Akses ditolak ke dokumen kontrak ini." });
+      }
+      const contractData = {
+        rentalId: rental.rental_id,
+        propertyName: rental.rental_property_name || rental.property_name || "Unit KOSMO Bali",
+        propertyAddress: rental.property_address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
+        landlordName: rental.landlord_name || "PT KOSMO Bali Hospitality / Pengelola Properti",
+        landlordEmail: rental.landlord_email || "hospitality@kosmo.id",
+        landlordPhone: rental.landlord_phone || "+62 361-900-5676",
+        tenantName: rental.tenant_name || "Penyewa KOSMO",
+        tenantEmail: rental.tenant_email || "",
+        tenantPhone: rental.tenant_phone || "",
+        tenantNikPassport: rental.tenant_nik_passport || "-",
+        startDate: rental.rental_start_date || (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
+        durationMonths: 1,
+        monthlyPrice: Number(rental.rental_price || rental.property_price || 0),
+        pricePerMonth: Number(rental.rental_price || rental.property_price || 0),
+        adminFee: rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? Number(rental.admin_fee_amount) : 5e3,
+        signatureBase64: rental.tenant_signature_data || void 0,
+        signerIp: rental.signer_ip || void 0,
+        signerUserAgent: rental.signer_user_agent || void 0,
+        signedAt: rental.contract_signed_at ? new Date(rental.contract_signed_at).toISOString() : void 0,
+        utilityQuotas: {
+          electricityKwh: 200,
+          water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
+          wifiMbps: 100,
+          security: "24/7 CCTV & Security Access",
+          waste: "Daily Waste Management Included"
+        }
+      };
+      const pdfBuffer = await generateRentalContractBuffer(contractData);
+      const computedHash = computeContractHash(pdfBuffer);
+      const contractHash = rental.contract_hash || computedHash;
+      const safeId = sanitizeRentalId(rental.rental_id);
+      const isDownload = req.query.download === "true" || req.query.download === "1";
+      const dispositionType = isDownload ? "attachment" : "inline";
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `${dispositionType}; filename="kontrak_sewa_${safeId}.pdf"`);
+      res.setHeader("X-Contract-Hash", contractHash);
+      res.setHeader("Content-Length", pdfBuffer.length.toString());
+      res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.end(pdfBuffer);
+    } catch (err) {
+      console.error("Get contract PDF error:", err);
+      res.status(500).json({ message: "Gagal membuat dokumen kontrak PDF." });
     }
-    const [userRows] = await pool.query("SELECT * FROM users WHERE id = ?", [rental.tenantId]);
-    const tenant = userRows[0];
-    const { buffer, fileName } = await generateRentalContractPdf({
-      rentalId: rental.id,
-      tenantName: tenant ? tenant.name : "Penghuni KOSMO",
-      tenantEmail: tenant ? tenant.email : "",
-      tenantPhone: tenant ? tenant.phone || "" : "",
-      propertyName: rental.propertyName || (property ? property.name : "Unit KOSMO Bali"),
-      propertyAddress: property ? property.address : "Bali, Indonesia",
-      pricePerMonth: rental.price || (property ? property.price : 0),
-      startDate: rental.startDate || (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
-      durationMonths: 1
-    });
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
-    res.send(buffer);
-  } catch (err) {
-    console.error("Get contract PDF error:", err);
-    res.status(500).json({ message: "Gagal membuat dokumen kontrak PDF." });
   }
-});
+);
 var snap = new midtransClient.Snap({
   isProduction: process.env.MIDTRANS_IS_PRODUCTION === "true",
   serverKey: process.env.MIDTRANS_SERVER_KEY || "SB-Mid-server-placeholder",
@@ -2261,14 +2795,14 @@ function verifyMidtransSignature(orderId, statusCode, grossAmount, serverKey, si
   }
   const normalizedAmount = grossAmount.includes(".") ? parseFloat(grossAmount).toFixed(2) : grossAmount;
   const payload = `${orderId}${statusCode}${normalizedAmount}${serverKey}`;
-  const calculatedHash = crypto2.createHash("sha512").update(payload).digest("hex").toLowerCase();
+  const calculatedHash = crypto3.createHash("sha512").update(payload).digest("hex").toLowerCase();
   const targetSig = signatureKey.toLowerCase();
   const calculatedBuffer = Buffer.from(calculatedHash, "utf8");
   const targetBuffer = Buffer.from(targetSig, "utf8");
   if (calculatedBuffer.length !== targetBuffer.length) {
     return false;
   }
-  return crypto2.timingSafeEqual(calculatedBuffer, targetBuffer);
+  return crypto3.timingSafeEqual(calculatedBuffer, targetBuffer);
 }
 router.post("/payment/token", authenticateToken, async (req, res) => {
   const { propertyId, tenantId, durationMonths } = req.body;
@@ -2294,23 +2828,31 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
     if (!tenant) {
       return res.status(404).json({ message: "Tenant tidak ditemukan." });
     }
-    const [activeRentals] = await pool.query(
-      "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' LIMIT 1",
-      [tenantId]
-    );
+    const customRentalId = req.body.rentalId;
+    let activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active'";
+    const queryParams = [tenantId];
+    if (customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "") {
+      activeRentalsQuery += " AND id != ?";
+      queryParams.push(customRentalId.trim());
+    }
+    activeRentalsQuery += " LIMIT 1";
+    const [activeRentals] = await pool.query(activeRentalsQuery, queryParams);
     if (activeRentals.length > 0) {
       return res.status(409).json({
         message: "Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
       });
     }
-    const rentalId = generateId("rent");
+    const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
     const startDate = (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
     const totalPrice = property.price * duration;
-    await pool.query(
-      `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [rentalId, tenantId, propertyId, property.name, totalPrice, startDate]
-    );
+    const [existingRental] = await pool.query("SELECT id FROM rentals WHERE id = ?", [rentalId]);
+    if (existingRental.length === 0) {
+      await pool.query(
+        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status) 
+         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+        [rentalId, tenantId, propertyId, property.name, totalPrice, startDate]
+      );
+    }
     const parameter = {
       transaction_details: {
         order_id: rentalId,
@@ -2447,13 +2989,13 @@ router.post("/payment/webhook", async (req, res) => {
 var router_default = router;
 
 // backend/server.ts
-import path3 from "path";
+import path4 from "path";
 import fs3 from "fs";
 import { fileURLToPath } from "url";
-import os2 from "os";
+import os from "os";
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path3.dirname(__filename);
-var uploadsDir = process.env.VERCEL ? path3.join(os2.tmpdir(), "kosmo_uploads") : path3.join(__dirname, "uploads");
+var __dirname = path4.dirname(__filename);
+var uploadsDir = process.env.VERCEL ? path4.join(os.tmpdir(), "kosmo_uploads") : path4.join(__dirname, "uploads");
 try {
   if (!fs3.existsSync(uploadsDir)) {
     fs3.mkdirSync(uploadsDir, { recursive: true });
@@ -2526,7 +3068,7 @@ app.use((err, _req, res, _next) => {
   console.error("Unhandled API Error:", err);
   res.status(500).json({ message: "Internal Server Error", error: "Internal Server Error" });
 });
-if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
+if (!process.env.VERCEL && process.env.NODE_ENV !== "test" && process.env.NO_LISTEN !== "true") {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });

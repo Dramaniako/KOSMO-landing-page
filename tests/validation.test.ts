@@ -7,7 +7,9 @@ import {
   registerSchema,
   propertySchema,
   withdrawalSchema,
-  reviewSchema
+  reviewSchema,
+  previewContractSchema,
+  signContractSchema
 } from '../backend/middleware/validation';
 import type { Request, Response, NextFunction } from 'express';
 
@@ -211,5 +213,109 @@ test('Zod request body validation middleware & schemas', async (t) => {
       rating: 4
     });
     assert.equal(emptyComment.success, false);
+  });
+
+  await t.test('previewContractSchema allows minimal valid payload with defaults', () => {
+    const result = previewContractSchema.safeParse({
+      propertyId: 'prop-01'
+    });
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.data.durationMonths, 1);
+    }
+  });
+
+  await t.test('previewContractSchema validates full optional draft data', () => {
+    const result = previewContractSchema.safeParse({
+      propertyId: 'prop-01',
+      durationMonths: 6,
+      startDate: '2026-09-01',
+      tenantNikPassport: '5171012308980001',
+      signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    });
+    assert.equal(result.success, true);
+  });
+
+  await t.test('previewContractSchema rejects empty propertyId or invalid duration', () => {
+    assert.equal(previewContractSchema.safeParse({ propertyId: '' }).success, false);
+    assert.equal(previewContractSchema.safeParse({ propertyId: 'prop-01', durationMonths: 0 }).success, false);
+    assert.equal(previewContractSchema.safeParse({ propertyId: 'prop-01', durationMonths: -3 }).success, false);
+    assert.equal(previewContractSchema.safeParse({ propertyId: 'prop-01', durationMonths: 2.5 }).success, false);
+  });
+
+  await t.test('signContractSchema accepts valid Indonesian 16-digit NIK', () => {
+    const valid = signContractSchema.safeParse({
+      propertyId: 'prop-01',
+      durationMonths: 3,
+      startDate: '2026-09-01',
+      tenantNikPassport: '3201012804900002',
+      signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      affirmativeConsent: true
+    });
+    assert.equal(valid.success, true);
+  });
+
+  await t.test('signContractSchema accepts valid International Passport numbers', () => {
+    const validPassports = ['A1234567', 'B98765432', 'PA0123456', 'K12345678901'];
+    for (const passport of validPassports) {
+      const result = signContractSchema.safeParse({
+        propertyId: 'prop-01',
+        durationMonths: 1,
+        startDate: '2026-09-01',
+        tenantNikPassport: passport,
+        signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        affirmativeConsent: true
+      });
+      assert.equal(result.success, true, `Passport ${passport} should be valid`);
+    }
+  });
+
+  await t.test('signContractSchema rejects invalid NIK lengths and illegal characters', () => {
+    const invalidNiks = [
+      '320101280490000',     // 15 digits
+      '32010128049000021',   // 17 digits
+      '320101280490000A',   // 16 chars but contains letter
+      '12345',              // 5 chars
+      'PASS@1234'           // Special chars
+    ];
+    for (const nik of invalidNiks) {
+      const result = signContractSchema.safeParse({
+        propertyId: 'prop-01',
+        durationMonths: 1,
+        startDate: '2026-09-01',
+        tenantNikPassport: nik,
+        signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        affirmativeConsent: true
+      });
+      assert.equal(result.success, false, `NIK/Passport ${nik} should be rejected`);
+    }
+  });
+
+  await t.test('signContractSchema strictly requires affirmativeConsent to be true', () => {
+    const base = {
+      propertyId: 'prop-01',
+      durationMonths: 1,
+      startDate: '2026-09-01',
+      tenantNikPassport: '5171012308980001',
+      signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    };
+
+    assert.equal(signContractSchema.safeParse({ ...base, affirmativeConsent: false }).success, false);
+    assert.equal(signContractSchema.safeParse({ ...base, affirmativeConsent: undefined }).success, false);
+    assert.equal(signContractSchema.safeParse({ ...base, affirmativeConsent: null }).success, false);
+    assert.equal(signContractSchema.safeParse({ ...base, affirmativeConsent: 'true' }).success, false);
+  });
+
+  await t.test('signContractSchema rejects empty or malformed digital signatures', () => {
+    const base = {
+      propertyId: 'prop-01',
+      durationMonths: 1,
+      startDate: '2026-09-01',
+      tenantNikPassport: '5171012308980001',
+      affirmativeConsent: true
+    };
+
+    assert.equal(signContractSchema.safeParse({ ...base, signatureBase64: '' }).success, false);
+    assert.equal(signContractSchema.safeParse({ ...base, signatureBase64: 'short' }).success, false);
   });
 });

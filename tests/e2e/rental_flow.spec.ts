@@ -115,10 +115,37 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     await expect(bookButton).toBeVisible();
     await bookButton.click();
 
-    // 7. Sign digital e-contract
+    // 7. Sign digital e-contract with evidentiary verification
     await expect(modalContent).toContainText('Tanda Tangan Kontrak Digital');
+    
+    // Fill 16-digit NIK
+    const nikInput = modalContent.locator('#tenant-id-input');
+    await expect(nikInput).toBeVisible();
+    await nikInput.fill('5171012304950001');
+
+    // Scroll terms region to enable consent
+    const termsRegion = modalContent.locator('[role="region"]').first();
+    await termsRegion.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await termsRegion.dispatchEvent('scroll');
+
+    // Affirm consent
+    const consentCheckbox = modalContent.locator('input[type="checkbox"]');
+    await consentCheckbox.check();
+
+    // Draw and confirm signature
+    const canvas = modalContent.locator('canvas');
+    await canvas.dispatchEvent('pointerdown', { clientX: 50, clientY: 50, pointerId: 1 });
+    await canvas.dispatchEvent('pointermove', { clientX: 100, clientY: 80, pointerId: 1 });
+    await canvas.dispatchEvent('pointerup', { clientX: 100, clientY: 80, pointerId: 1 });
+    
+    const confirmSigBtn = modalContent.locator('button:has-text("Konfirmasi Tanda Tangan")');
+    await confirmSigBtn.click();
+
+    // Submit contract signing
     const signButton = modalContent.locator('button:has-text("Setujui & Tanda Tangan")');
-    await expect(signButton).toBeVisible();
+    await expect(signButton).toBeEnabled();
     await signButton.click();
 
     // 8. Payment step & complete booking

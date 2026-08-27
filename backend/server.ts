@@ -122,7 +122,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ message: "Internal Server Error", error: "Internal Server Error" });
 });
 
-if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test' && process.env.NO_LISTEN !== 'true') {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });

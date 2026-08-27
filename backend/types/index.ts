@@ -1,3 +1,5 @@
+import type { RowDataPacket } from 'mysql2/promise';
+
 /**
  * Core Domain Type Definitions for KOSMO
  * Strict TypeScript interfaces with zero `any` usage
@@ -331,3 +333,209 @@ export function validateReview(data: unknown): { valid: boolean; errors: string[
 
   return { valid: errors.length === 0, errors };
 }
+
+export type RentalStatus = 'pending' | 'active' | 'completed' | 'terminated' | 'cancelled';
+export const VALID_RENTAL_STATUSES: readonly RentalStatus[] = [
+  'pending',
+  'active',
+  'completed',
+  'terminated',
+  'cancelled'
+] as const;
+
+export interface Rental {
+  id: string;
+  tenantId: string;
+  propertyId: string;
+  propertyName: string;
+  price: number;
+  startDate: string;
+  status: RentalStatus;
+  document?: string;
+  contract_url?: string | null;
+  contract_hash?: string | null;
+  contract_signed_at?: string | Date | null;
+  signer_ip?: string | null;
+  signer_user_agent?: string | null;
+  tenant_nik_passport?: string | null;
+  tenant_signature_data?: string | null;
+  admin_fee_amount?: number;
+  nextPaymentDate?: string;
+  nextPaymentDateISO?: string;
+  daysRemaining?: number;
+  paymentStatus?: string;
+}
+
+export interface RentalRow extends RowDataPacket {
+  id: string;
+  tenantId: string;
+  propertyId: string;
+  propertyName: string;
+  price: number;
+  startDate: string;
+  status: RentalStatus;
+  document?: string;
+  contract_url?: string | null;
+  contract_hash?: string | null;
+  contract_signed_at?: string | Date | null;
+  signer_ip?: string | null;
+  signer_user_agent?: string | null;
+  tenant_nik_passport?: string | null;
+  tenant_signature_data?: string | null;
+  admin_fee_amount?: number | string;
+}
+
+export interface UtilityQuotas {
+  electricityKwh?: number | string;
+  water?: string;
+  wifiMbps?: number | string;
+  security?: string;
+  waste?: string;
+}
+
+export interface RentalContractData {
+  rentalId?: string;
+  propertyName: string;
+  propertyAddress?: string;
+  landlordName?: string;
+  landlordEmail?: string;
+  landlordPhone?: string;
+  tenantName: string;
+  tenantEmail: string;
+  tenantPhone?: string;
+  tenantNikPassport?: string;
+  startDate: string;
+  durationMonths?: number;
+  monthlyPrice?: number;
+  pricePerMonth?: number;
+  totalPrice?: number;
+  adminFee?: number;
+  signatureBase64?: string;
+  signerIp?: string;
+  signerUserAgent?: string;
+  signedAt?: string | Date;
+  utilityQuotas?: UtilityQuotas;
+}
+
+export interface GeneratedContractResult {
+  pdfBuffer: Buffer;
+  contractHash: string;
+  cloudinaryUrl?: string;
+}
+
+/**
+ * Validation helper for Rental schema
+ */
+export function validateRental(data: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Rental must be a non-null object'] };
+  }
+
+  const rental = data as Record<string, unknown>;
+
+  if (typeof rental.id !== 'string' || !rental.id.trim()) {
+    errors.push('id must be a non-empty string');
+  }
+  if (typeof rental.tenantId !== 'string' || !rental.tenantId.trim()) {
+    errors.push('tenantId must be a non-empty string');
+  }
+  if (typeof rental.propertyId !== 'string' || !rental.propertyId.trim()) {
+    errors.push('propertyId must be a non-empty string');
+  }
+  if (typeof rental.propertyName !== 'string' || !rental.propertyName.trim()) {
+    errors.push('propertyName must be a non-empty string');
+  }
+  if (typeof rental.price !== 'number' || Number.isNaN(rental.price) || rental.price <= 0) {
+    errors.push('price must be a positive number');
+  }
+  if (typeof rental.startDate !== 'string' || !rental.startDate.trim()) {
+    errors.push('startDate must be a non-empty string');
+  }
+  if (typeof rental.status !== 'string' || !VALID_RENTAL_STATUSES.includes(rental.status as RentalStatus)) {
+    errors.push(`status must be one of: ${VALID_RENTAL_STATUSES.join(', ')}`);
+  }
+  if (rental.contract_hash !== undefined && rental.contract_hash !== null) {
+    if (typeof rental.contract_hash !== 'string' || rental.contract_hash.length !== 64) {
+      errors.push('contract_hash must be a 64-character SHA-256 hexadecimal string');
+    }
+  }
+  if (rental.admin_fee_amount !== undefined && rental.admin_fee_amount !== null) {
+    if (typeof rental.admin_fee_amount !== 'number' || Number.isNaN(rental.admin_fee_amount) || rental.admin_fee_amount < 0) {
+      errors.push('admin_fee_amount must be a non-negative number');
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export interface ContractPreviewRequest {
+  propertyId: string;
+  durationMonths?: number;
+  startDate?: string;
+  tenantNikPassport?: string;
+  signatureBase64?: string;
+  rentalId?: string;
+}
+
+export interface ContractPreviewResponse {
+  success: boolean;
+  contractData: RentalContractData;
+  contractHash: string;
+  previewUrl?: string;
+  monthlyPrice: number;
+  adminFee: number;
+  totalPrice: number;
+  totalAmount: number;
+}
+
+export interface ContractSignRequest {
+  propertyId: string;
+  durationMonths: number;
+  startDate: string;
+  tenantNikPassport: string;
+  signatureBase64: string;
+  affirmativeConsent: true;
+  rentalId?: string;
+}
+
+export interface ContractSignResponse {
+  success: boolean;
+  message: string;
+  rentalId: string;
+  contractUrl: string;
+  contractHash: string;
+  adminFee: number;
+  totalAmount: number;
+  signedAt: string;
+}
+
+export interface RentalContractJoinedRow extends RowDataPacket {
+  rental_id: string;
+  rental_tenant_id: string;
+  rental_property_id: string;
+  rental_property_name: string;
+  rental_price: number;
+  rental_start_date: string;
+  rental_status: RentalStatus;
+  rental_document?: string;
+  contract_url?: string | null;
+  contract_hash?: string | null;
+  contract_signed_at?: string | Date | null;
+  signer_ip?: string | null;
+  signer_user_agent?: string | null;
+  tenant_nik_passport?: string | null;
+  tenant_signature_data?: string | null;
+  admin_fee_amount?: number | string;
+  property_name?: string;
+  property_address?: string;
+  property_price?: number;
+  property_owner_id?: string;
+  tenant_name?: string;
+  tenant_email?: string;
+  tenant_phone?: string;
+  landlord_name?: string;
+  landlord_email?: string;
+  landlord_phone?: string;
+}
+

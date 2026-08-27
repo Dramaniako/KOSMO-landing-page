@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Building, DollarSign, Star, Percent, Trash2, Edit, Plus, LogOut, 
   ArrowUpRight, Landmark, CreditCard, LayoutDashboard, MessageSquare,
-  Download, Users, X
+  Download, FileText, Users, X
 } from 'lucide-react';
 import { User, Property, Review, Rental, LandlordStats, FacilityFilterState } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
@@ -29,6 +29,7 @@ interface PropertyFormState {
   totalRooms: string;
   image: string;
   facilities: FacilityFilterState;
+  document?: string;
 }
 
 const shimmerStyle: React.CSSProperties = {
@@ -65,7 +66,37 @@ export default function LandlordDashboard() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [rentals, setRentals] = useState<Rental[]>([]);
   const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ overview: true });
+  const [contractDownloading, setContractDownloading] = useState<Record<string, boolean>>({});
   const loadedTabs = useRef<Set<string>>(new Set());
+
+  const handleLandlordContractDownload = async (rentalId: string, directUrl?: string | null): Promise<void> => {
+    if (directUrl && directUrl.startsWith('http')) {
+      window.open(directUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setContractDownloading(prev => ({ ...prev, [rentalId]: true }));
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const res = await fetch(`${API_BASE}/rentals/${rentalId}/contract?download=true`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error('Gagal mengunduh dokumen kontrak PDF.');
+      const blob = await res.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `kontrak_sewa_${rentalId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengunduh dokumen.';
+      alert(msg);
+    } finally {
+      setContractDownloading(prev => ({ ...prev, [rentalId]: false }));
+    }
+  };
 
   // Modals
   const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
@@ -843,17 +874,19 @@ export default function LandlordDashboard() {
                           </span>
                         </td>
                         <td style={{ padding: '16px', textAlign: 'right' }}>
-                          <a
-                            href={`${API_BASE}/rentals/${r.id}/contract`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => handleLandlordContractDownload(r.id, r.contract_url)}
+                            disabled={contractDownloading[r.id]}
                             className="btn btn-outline"
                             style={{ padding: '4px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            title={r.contract_hash ? `SHA-256: ${r.contract_hash}` : undefined}
                           >
-                            <Download size={13} />
-                            Unduh PDF
-                          </a>
+                            <FileText size={13} />
+                            {contractDownloading[r.id] ? 'Mengunduh...' : t('landlord.viewContract')}
+                          </button>
                         </td>
+
                       </tr>
                     ))}
                   </tbody>

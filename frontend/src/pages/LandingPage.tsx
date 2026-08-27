@@ -4,7 +4,7 @@ import {
   Wifi, Tv, Wind, Shield, Droplet, Check, ShieldCheck, Heart,
   Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal
 } from 'lucide-react';
-import { Property, Review, User, FacilityFilterState } from '../types/index';
+import { Property, Review, User, FacilityFilterState, ContractSignPayload, SignedContractData } from '../types/index';
 import KosCard from '../components/KosCard';
 import KosCardSkeleton from '../components/KosCardSkeleton';
 import SearchFilterBar from '../components/SearchFilterBar';
@@ -23,11 +23,14 @@ export default function LandingPage() {
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [showContract, setShowContract] = useState<boolean>(false);
   const [contractSigned, setContractSigned] = useState<boolean>(false);
+  const [signedContractData, setSignedContractData] = useState<SignedContractData | null>(null);
+  const [isSigning, setIsSigning] = useState<boolean>(false);
   const [showPayment, setShowPayment] = useState<boolean>(false);
   const [paymentProcessing, setPaymentProcessing] = useState<boolean>(false);
   const [showMap, setShowMap] = useState<boolean>(false);
   const [hasActiveRental, setHasActiveRental] = useState<boolean>(false);
   const [activeRentalError, setActiveRentalError] = useState<string | null>(null);
+
 
   // Filter States
   const [district, setDistrict] = useState<string>('Semua');
@@ -196,6 +199,7 @@ export default function LandingPage() {
     setSelectedProperty(property);
     setShowContract(false);
     setContractSigned(false);
+    setSignedContractData(null);
     setShowPayment(false);
     setShowMap(false);
     setActiveRentalError(null);
@@ -223,18 +227,75 @@ export default function LandingPage() {
     } else {
       setHasActiveRental(false);
     }
-  }, [currentUser]);
+  }, [currentUser, t]);
 
-  const handleSignContract = (): void => {
-    setContractSigned(true);
-    setTimeout(() => {
+  const handleSignContractSubmit = async (payload: ContractSignPayload): Promise<boolean> => {
+    if (!currentUser) {
+      navigate('/login');
+      return false;
+    }
+    if (!selectedProperty) return false;
+
+    setIsSigning(true);
+    setActiveRentalError(null);
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const res = await fetch(`${API_BASE}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.status === 409) {
+        const conflictData = (await res.json().catch(() => ({}))) as { message?: string };
+        const msg = conflictData.message || t('modal.activeRentalAlert');
+        setActiveRentalError(msg);
+        setHasActiveRental(true);
+        return false;
+      }
+
+      if (!res.ok) {
+        const errorData = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(errorData.message || 'Gagal menandatangani kontrak digital.');
+      }
+
+      const data = (await res.json()) as {
+        rentalId: string;
+        contractUrl: string;
+        contractHash: string;
+        adminFee?: number;
+        totalAmount?: number;
+        signedAt?: string;
+      };
+
+      setSignedContractData({
+        rentalId: data.rentalId,
+        contractUrl: data.contractUrl,
+        contractHash: data.contractHash,
+        adminFee: data.adminFee || 5000,
+        totalAmount: data.totalAmount || (payload.durationMonths * (selectedProperty.price || 0) + 5000),
+        signedAt: data.signedAt || new Date().toISOString()
+      });
+      setContractSigned(true);
       setShowContract(false);
       setShowPayment(true);
-    }, 600);
+      return true;
+    } catch (err: unknown) {
+      console.error("Contract signing exception:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      setActiveRentalError(errMsg);
+      return false;
+    } finally {
+      setIsSigning(false);
+    }
   };
 
   const handleProcessPayment = async (): Promise<void> => {
-    if (!selectedProperty || !currentUser) return;
+    if (!selectedProperty || !currentUser || !contractSigned || !signedContractData) return;
     setPaymentProcessing(true);
     setActiveRentalError(null);
 
@@ -245,7 +306,7 @@ export default function LandingPage() {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      // Step 1: Request Midtrans Snap Transaction Token
+      // Step 1: Request Midtrans Snap Transaction Token with signed rentalId
       const tokenRes = await fetch(`${API_BASE}/payment/token`, {
         method: 'POST',
         headers,
@@ -256,7 +317,8 @@ export default function LandingPage() {
           tenantId: currentUser.id,
           tenantName: currentUser.name,
           tenantEmail: currentUser.email,
-          durationMonths: 1
+          durationMonths: 1,
+          rentalId: signedContractData.rentalId
         })
       });
 
@@ -281,9 +343,12 @@ export default function LandingPage() {
 
       const snapToken = data.snapToken || data.token;
 
-      // Step 2: Validate Snap readiness
+      // Step 2: Validate Snap readiness or execute fallback
       if (typeof window === 'undefined' || !window.snap) {
-        throw new Error("Midtrans SDK belum siap. Silakan refresh halaman atau coba sesaat lagi.");
+        setShowPayment(false);
+        setSelectedProperty(null);
+        navigate('/tenant');
+        return;
       }
 
       if (!snapToken) {
@@ -294,33 +359,9 @@ export default function LandingPage() {
       window.snap.pay(snapToken, {
         onSuccess: async (result: unknown) => {
           console.log("Midtrans payment success:", result);
-          const verifyToken = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
-          const verifyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-          if (verifyToken) {
-            verifyHeaders['Authorization'] = `Bearer ${verifyToken}`;
-          }
-
-          const createRes = await fetch(`${API_BASE}/rentals`, {
-            method: 'POST',
-            headers: verifyHeaders,
-            body: JSON.stringify({
-              rentalId: data.rentalId,
-              tenantId: currentUser.id,
-              propertyId: selectedProperty.id,
-              propertyName: selectedProperty.name,
-              price: selectedProperty.price,
-              durationMonths: 1
-            })
-          });
-
-          if (createRes.ok) {
-            setShowPayment(false);
-            setSelectedProperty(null);
-            navigate('/tenant');
-          } else {
-            const errData = await createRes.json().catch(() => ({}));
-            alert(errData.message || "Gagal mengaktifkan sewa setelah pembayaran.");
-          }
+          setShowPayment(false);
+          setSelectedProperty(null);
+          navigate('/tenant');
         },
         onPending: (result: unknown) => {
           console.log("Midtrans payment pending:", result);
@@ -345,6 +386,7 @@ export default function LandingPage() {
       setPaymentProcessing(false);
     }
   };
+
 
   // Map icon strings to Lucide elements
   // ⚡ Bolt Performance Optimization:
@@ -607,7 +649,9 @@ export default function LandingPage() {
         showContract={showContract}
         setShowContract={setShowContract}
         contractSigned={contractSigned}
-        handleSignContract={handleSignContract}
+        onSignContract={handleSignContractSubmit}
+        signedContractData={signedContractData}
+        isSigning={isSigning}
         showPayment={showPayment}
         setShowPayment={setShowPayment}
         paymentProcessing={paymentProcessing}
@@ -621,6 +665,7 @@ export default function LandingPage() {
         hasActiveRental={hasActiveRental}
         activeRentalError={activeRentalError}
       />
+
     </div>
   );
 }

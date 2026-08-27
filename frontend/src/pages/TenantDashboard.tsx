@@ -26,7 +26,7 @@ interface ProfileFormState {
 
 export default function TenantDashboard() {
   const navigate = useNavigate();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [activeTab, setActiveTab] = useState<'profile' | 'rentals' | 'bills' | 'reviews'>('profile');
   
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -65,7 +65,41 @@ export default function TenantDashboard() {
 
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
   const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({});
+  const [contractDownloading, setContractDownloading] = useState<Record<string, boolean>>({});
   const loadedTabs = useRef<Set<string>>(new Set(['profile']));
+
+  const handleOpenContract = async (rentalId: string, directUrl?: string | null): Promise<void> => {
+    if (directUrl && directUrl.startsWith('http')) {
+      window.open(directUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setContractDownloading(prev => ({ ...prev, [rentalId]: true }));
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const res = await fetch(`${API_BASE}/rentals/${rentalId}/contract`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) {
+        throw new Error('Gagal memuat dokumen kontrak PDF.');
+      }
+      const blob = await res.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal membuka kontrak.';
+      alert(msg);
+    } finally {
+      setContractDownloading(prev => ({ ...prev, [rentalId]: false }));
+    }
+  };
+
 
   const fetchMyRentals = useCallback(async (userId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, rentals: true, bills: true }));
@@ -617,22 +651,36 @@ export default function TenantDashboard() {
                           )}
                         </div>
                       )}
+                      {/* Cryptographic Contract Verification Badge */}
+                      {activeRental.contract_hash && (
+                        <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1.5 flex-wrap">
+                          <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                            {t('tenant.contractHash')} {activeRental.contract_hash.slice(0, 16)}...
+                          </span>
+                          {activeRental.contract_signed_at && (
+                            <span className="text-slate-400 dark:text-slate-500">
+                              &bull; {t('tenant.signedAt')} {new Date(activeRental.contract_signed_at).toLocaleDateString(language === 'en' ? 'en-US' : 'id-ID', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <strong style={{ fontSize: '20px', color: 'var(--primary)', display: 'block' }}>
                         Rp {activeRental.price ? activeRental.price.toLocaleString('id-ID') : '0'}/bln
                       </strong>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px', flexWrap: 'wrap' }}>
-                        <a
-                          href={`${API_BASE}/rentals/${activeRental.id}/contract`}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => handleOpenContract(activeRental.id, activeRental.contract_url)}
+                          disabled={contractDownloading[activeRental.id]}
                           className="btn btn-outline"
                           style={{ padding: '6px 14px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                          title={activeRental.contract_hash ? `SHA-256: ${activeRental.contract_hash}` : undefined}
                         >
-                          <Download size={14} />
-                          {t('tenant.downloadPdf')}
-                        </a>
+                          <FileText size={14} />
+                          {contractDownloading[activeRental.id] ? 'Memuat PDF...' : t('tenant.viewContract')}
+                        </button>
                         <button 
                           className="btn btn-outline btn-danger" 
                           style={{ padding: '6px 14px', fontSize: '12px' }}
@@ -687,22 +735,27 @@ export default function TenantDashboard() {
                           </span>
                           <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#334155' }}>{rent.propertyName}</h4>
                           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>{t('tenant.startDate')}: {rent.startDate}</p>
+                          {rent.contract_hash && (
+                            <p style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
+                              SHA-256: {rent.contract_hash.slice(0, 16)}...
+                            </p>
+                          )}
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           <strong style={{ fontSize: '16px', color: '#64748b', display: 'block' }}>
                             Rp {rent.price ? rent.price.toLocaleString('id-ID') : '0'}/bln
                           </strong>
                           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '6px' }}>
-                            <a
-                              href={`${API_BASE}/rentals/${rent.id}/contract`}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => handleOpenContract(rent.id, rent.contract_url)}
+                              disabled={contractDownloading[rent.id]}
                               className="btn btn-outline"
                               style={{ padding: '4px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                             >
-                              <Download size={12} />
-                              Unduh Kontrak Sewa (PDF)
-                            </a>
+                              <FileText size={12} />
+                              {contractDownloading[rent.id] ? 'Memuat...' : t('tenant.viewContract')}
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -710,6 +763,7 @@ export default function TenantDashboard() {
                   </div>
                 </div>
               )}
+
             </div>
           );
         })()}

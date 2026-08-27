@@ -5,7 +5,8 @@ import {
   validateBooking,
   validateUser,
   validateProperty,
-  validateReview
+  validateReview,
+  validateRental
 } from '../backend/types/index';
 
 test('KosRoom schema validation & boundary conditions', async (t) => {
@@ -267,5 +268,85 @@ test('Property row transformer functions', async (t) => {
     };
     const summary = normalizePropertySummary(withHeavyImage);
     assert.equal(summary.image, DEFAULT_PROPERTY_IMAGE);
+  });
+});
+
+test('Rental schema validation & contract audit fields', async (t) => {
+  const validRental = {
+    id: 'rent-001',
+    tenantId: 'user-tenant-01',
+    propertyId: 'prop-101',
+    propertyName: 'KOSMO Hub Seminyak',
+    price: 3500000,
+    startDate: '2026-09-01',
+    status: 'active',
+    contract_url: 'https://res.cloudinary.com/kosmo/image/upload/v123/contracts/c1.pdf',
+    contract_hash: 'a'.repeat(64),
+    contract_signed_at: '2026-08-27T07:00:00.000Z',
+    signer_ip: '127.0.0.1',
+    signer_user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    tenant_nik_passport: '5171012345678901',
+    tenant_signature_data: 'data:image/png;base64,sample',
+    admin_fee_amount: 5000.00
+  };
+
+  await t.test('valid Rental passes schema validation', () => {
+    const result = validateRental(validRental);
+    assert.equal(result.valid, true);
+    assert.equal(result.errors.length, 0);
+  });
+
+  await t.test('validates all valid rental statuses', () => {
+    const statuses = ['pending', 'active', 'completed', 'terminated', 'cancelled'];
+    for (const status of statuses) {
+      const rental = { ...validRental, status };
+      const result = validateRental(rental);
+      assert.equal(result.valid, true, `Status ${status} should be valid`);
+    }
+  });
+
+  await t.test('rejects missing or invalid core fields in Rental', () => {
+    const invalidRental = {
+      id: '',
+      tenantId: '   ',
+      propertyId: '',
+      propertyName: '',
+      price: -1000,
+      startDate: '',
+      status: 'unknown_status'
+    };
+
+    const result = validateRental(invalidRental);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(err => err.includes('id')));
+    assert.ok(result.errors.some(err => err.includes('tenantId')));
+    assert.ok(result.errors.some(err => err.includes('propertyId')));
+    assert.ok(result.errors.some(err => err.includes('propertyName')));
+    assert.ok(result.errors.some(err => err.includes('price')));
+    assert.ok(result.errors.some(err => err.includes('startDate')));
+    assert.ok(result.errors.some(err => err.includes('status')));
+  });
+
+  await t.test('rejects invalid contract_hash format (must be 64-char string)', () => {
+    const shortHash = { ...validRental, contract_hash: 'too_short' };
+    const nonStringHash = { ...validRental, contract_hash: 12345 };
+
+    assert.equal(validateRental(shortHash).valid, false);
+    assert.equal(validateRental(nonStringHash).valid, false);
+  });
+
+  await t.test('rejects negative or NaN admin_fee_amount', () => {
+    const negativeFee = { ...validRental, admin_fee_amount: -500 };
+    const nanFee = { ...validRental, admin_fee_amount: NaN };
+
+    assert.equal(validateRental(negativeFee).valid, false);
+    assert.equal(validateRental(nanFee).valid, false);
+  });
+
+  await t.test('rejects null or non-object Rental', () => {
+    assert.equal(validateRental(null).valid, false);
+    assert.equal(validateRental(undefined).valid, false);
+    assert.equal(validateRental('string').valid, false);
+    assert.equal(validateRental(123).valid, false);
   });
 });
