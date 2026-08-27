@@ -2086,13 +2086,13 @@ router.post(
       const contractUrl = uploadResult.cloudinaryUrl || `/uploads/contract_${sanitizeRentalId(rentalId)}.pdf`;
       const contractHash = uploadResult.contractHash;
 
-      // Atomic Insert with 8 Audit Columns
+      // Atomic Insert with 8 Audit Columns and duration_months
       await connection.query(
         `INSERT INTO rentals (
           id, tenantId, propertyId, propertyName, price, startDate, status,
           document, contract_url, contract_hash, contract_signed_at,
-          signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount
-        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount, duration_months
+        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           rentalId,
           authUser.id,
@@ -2108,7 +2108,8 @@ router.post(
           signerUserAgent,
           tenantNikPassport,
           signatureBase64,
-          adminFee
+          adminFee,
+          duration
         ]
       );
 
@@ -2267,18 +2268,20 @@ router.post('/rentals', authenticateToken, async (req: AuthenticatedRequest, res
       console.warn("PDF contract generation warning:", contractErr);
     }
 
+    const rentalDuration = durationMonths && durationMonths > 0 ? durationMonths : 1;
+
     if (existingRentals.length > 0) {
       await connection.query(
         `UPDATE rentals 
-         SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ? 
+         SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ?, duration_months = ? 
          WHERE id = ?`,
-        [documentPath, rentalName, rentalPrice, startDate, rentalId]
+        [documentPath, rentalName, rentalPrice, startDate, rentalDuration, rentalId]
       );
     } else {
       await connection.query(
-        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document) 
-         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
-        [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath]
+        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document, duration_months) 
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath, rentalDuration]
       );
     }
 
@@ -2290,7 +2293,7 @@ router.post('/rentals', authenticateToken, async (req: AuthenticatedRequest, res
     if (property.ownerId) {
       await connection.query(
         'UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?',
-        [rentalPrice, rentalPrice, property.ownerId]
+        [rentalPrice * rentalDuration, rentalPrice * rentalDuration, property.ownerId]
       );
     }
 
@@ -2408,6 +2411,7 @@ router.get(
           r.tenant_nik_passport,
           r.tenant_signature_data,
           r.admin_fee_amount,
+          r.duration_months,
           p.name AS property_name,
           p.address AS property_address,
           p.price AS property_price,
@@ -2440,6 +2444,14 @@ router.get(
         return res.status(403).json({ message: 'Akses ditolak ke dokumen kontrak ini.' });
       }
 
+      const contractDuration = Number(rental.duration_months || 1);
+      const contractMonthlyPrice = Number(rental.rental_price || rental.property_price || 0);
+      const contractAdminFee =
+        rental.admin_fee_amount !== undefined && rental.admin_fee_amount !== null
+          ? Number(rental.admin_fee_amount)
+          : 5000;
+      const contractTotalPrice = (contractMonthlyPrice * contractDuration) + contractAdminFee;
+
       // Prepare contract data model with complete audit trail
       const contractData: RentalContractData = {
         rentalId: rental.rental_id,
@@ -2455,13 +2467,11 @@ router.get(
         startDate:
           rental.rental_start_date ||
           new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
-        durationMonths: 1,
-        monthlyPrice: Number(rental.rental_price || rental.property_price || 0),
-        pricePerMonth: Number(rental.rental_price || rental.property_price || 0),
-        adminFee:
-          rental.admin_fee_amount !== undefined && rental.admin_fee_amount !== null
-            ? Number(rental.admin_fee_amount)
-            : 5000,
+        durationMonths: contractDuration,
+        monthlyPrice: contractMonthlyPrice,
+        pricePerMonth: contractMonthlyPrice,
+        totalPrice: contractTotalPrice,
+        adminFee: contractAdminFee,
         signatureBase64: rental.tenant_signature_data || undefined,
         signerIp: rental.signer_ip || undefined,
         signerUserAgent: rental.signer_user_agent || undefined,
@@ -2705,12 +2715,22 @@ router.post('/payment/webhook', async (req: Request<Record<string, never>, unkno
         return res.status(404).json({ message: "Data sewa tidak ditemukan." });
       }
 
-      // Validate payment gross amount against expected rental price
+      // Validate payment gross amount against expected rental price (supporting duration_months and admin fee)
       const paidAmount = parseFloat(gross_amount);
-      const expectedPrice = Number(rental.price || 0);
-      if (isNaN(paidAmount) || Math.abs(paidAmount - expectedPrice) > 1.0) {
+      const monthlyPrice = Number(rental.price || 0);
+      const durationMonths = Number(rental.duration_months || 1);
+      const adminFee = Number(rental.admin_fee_amount !== undefined && rental.admin_fee_amount !== null ? rental.admin_fee_amount : 5000);
+      const expectedWithAdmin = (monthlyPrice * durationMonths) + adminFee;
+      const expectedBase = monthlyPrice * durationMonths;
+
+      const isPriceMatch =
+        Math.abs(paidAmount - expectedWithAdmin) <= 1.0 ||
+        Math.abs(paidAmount - expectedBase) <= 1.0 ||
+        Math.abs(paidAmount - monthlyPrice) <= 1.0;
+
+      if (isNaN(paidAmount) || !isPriceMatch) {
         await connection.rollback();
-        console.error(`Midtrans gross_amount mismatch: expected ${expectedPrice}, got ${paidAmount}`);
+        console.error(`Midtrans gross_amount mismatch: expected ${expectedWithAdmin} or ${expectedBase}, got ${paidAmount}`);
         return res.status(400).json({ message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa." });
       }
 
@@ -2736,10 +2756,10 @@ router.post('/payment/webhook', async (req: Request<Record<string, never>, unkno
         );
 
         if (property && property.ownerId) {
-          const rentalPrice = rental.price || 0;
+          const totalRentalRevenue = monthlyPrice * durationMonths;
           await connection.query(
             'UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?',
-            [rentalPrice, rentalPrice, property.ownerId]
+            [totalRentalRevenue, totalRentalRevenue, property.ownerId]
           );
         }
       }

@@ -306,7 +306,7 @@ test('Zod request body validation middleware & schemas', async (t) => {
     assert.equal(signContractSchema.safeParse({ ...base, affirmativeConsent: 'true' }).success, false);
   });
 
-  await t.test('signContractSchema rejects empty or malformed digital signatures', () => {
+  await t.test('signContractSchema rejects empty, malformed, or oversized digital signatures (> 1MB)', () => {
     const base = {
       propertyId: 'prop-01',
       durationMonths: 1,
@@ -317,5 +317,10 @@ test('Zod request body validation middleware & schemas', async (t) => {
 
     assert.equal(signContractSchema.safeParse({ ...base, signatureBase64: '' }).success, false);
     assert.equal(signContractSchema.safeParse({ ...base, signatureBase64: 'short' }).success, false);
+
+    // Oversized signature payload > 1MB
+    const oversizedSig = 'data:image/png;base64,' + 'A'.repeat(1_000_100);
+    const oversizedResult = signContractSchema.safeParse({ ...base, signatureBase64: oversizedSig });
+    assert.equal(oversizedResult.success, false);
   });
 });

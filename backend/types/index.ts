@@ -360,6 +360,7 @@ export interface Rental {
   tenant_nik_passport?: string | null;
   tenant_signature_data?: string | null;
   admin_fee_amount?: number;
+  duration_months?: number;
   nextPaymentDate?: string;
   nextPaymentDateISO?: string;
   daysRemaining?: number;
@@ -383,6 +384,7 @@ export interface RentalRow extends RowDataPacket {
   tenant_nik_passport?: string | null;
   tenant_signature_data?: string | null;
   admin_fee_amount?: number | string;
+  duration_months?: number;
 }
 
 export interface UtilityQuotas {
@@ -527,6 +529,7 @@ export interface RentalContractJoinedRow extends RowDataPacket {
   tenant_nik_passport?: string | null;
   tenant_signature_data?: string | null;
   admin_fee_amount?: number | string;
+  duration_months?: number;
   property_name?: string;
   property_address?: string;
   property_price?: number;

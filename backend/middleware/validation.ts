@@ -58,7 +58,7 @@ export const previewContractSchema = z.object({
     )
     .optional()
     .or(z.literal('')),
-  signatureBase64: z.string().optional(),
+  signatureBase64: z.string().max(1_000_000, 'Ukuran data tanda tangan digital melebihi batas maksimum 1MB').optional(),
   rentalId: z.string().optional()
 });
 
@@ -85,6 +85,7 @@ export const signContractSchema = z.object({
   signatureBase64: z
     .string()
     .min(20, 'Tanda tangan digital wajib diisi')
+    .max(1_000_000, 'Ukuran data tanda tangan digital melebihi batas maksimum 1MB')
     .refine(
       (val) =>
         /^data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(val) ||

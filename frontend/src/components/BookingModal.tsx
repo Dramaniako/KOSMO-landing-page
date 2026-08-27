@@ -149,7 +149,10 @@ export default function BookingModal({
   };
 
   const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
+    let val = e.target.value;
+    if (idType === 'PASSPORT') {
+      val = val.toUpperCase();
+    }
     setIdNumber(val);
     setIdTouched(true);
     const result = validateIdentity(val, idType);

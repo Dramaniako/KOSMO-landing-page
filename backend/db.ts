@@ -235,6 +235,7 @@ async function createSchemaTables(p: typeof pool): Promise<void> {
       tenant_nik_passport VARCHAR(50),
       tenant_signature_data LONGTEXT,
       admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
+      duration_months INT DEFAULT 1,
       FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -258,7 +259,8 @@ async function applyTableMigrations(p: typeof pool): Promise<void> {
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_user_agent VARCHAR(255)",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1"
   ];
 
   for (const query of alterQueries) {

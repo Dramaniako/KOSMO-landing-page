@@ -210,6 +210,7 @@ async function createSchemaTables(p) {
       tenant_nik_passport VARCHAR(50),
       tenant_signature_data LONGTEXT,
       admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
+      duration_months INT DEFAULT 1,
       FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -232,7 +233,8 @@ async function applyTableMigrations(p) {
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_user_agent VARCHAR(255)",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1"
   ];
   for (const query of alterQueries) {
     try {
@@ -866,7 +868,7 @@ var previewContractSchema = z.object({
     /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
     "NIK harus 16 digit angka atau nomor Paspor 6-12 karakter alfanumerik"
   ).optional().or(z.literal("")),
-  signatureBase64: z.string().optional(),
+  signatureBase64: z.string().max(1e6, "Ukuran data tanda tangan digital melebihi batas maksimum 1MB").optional(),
   rentalId: z.string().optional()
 });
 var signContractSchema = z.object({
@@ -877,7 +879,7 @@ var signContractSchema = z.object({
     /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
     "NIK harus berupa 16 digit angka atau nomor Paspor yang valid (6-12 karakter alfanumerik)"
   ),
-  signatureBase64: z.string().min(20, "Tanda tangan digital wajib diisi").refine(
+  signatureBase64: z.string().min(20, "Tanda tangan digital wajib diisi").max(1e6, "Ukuran data tanda tangan digital melebihi batas maksimum 1MB").refine(
     (val) => /^data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(val) || /^[A-Za-z0-9+/=]{20,}$/.test(val),
     {
       message: "Tanda tangan digital harus berupa data URL gambar base64 yang valid"
@@ -2450,8 +2452,8 @@ router.post(
         `INSERT INTO rentals (
           id, tenantId, propertyId, propertyName, price, startDate, status,
           document, contract_url, contract_hash, contract_signed_at,
-          signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount
-        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount, duration_months
+        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           rentalId,
           authUser.id,
@@ -2467,7 +2469,8 @@ router.post(
           signerUserAgent,
           tenantNikPassport,
           signatureBase64,
-          adminFee
+          adminFee,
+          duration
         ]
       );
       await connection.query(
@@ -2587,18 +2590,19 @@ router.post("/rentals", authenticateToken, async (req, res) => {
     } catch (contractErr) {
       console.warn("PDF contract generation warning:", contractErr);
     }
+    const rentalDuration = durationMonths && durationMonths > 0 ? durationMonths : 1;
     if (existingRentals.length > 0) {
       await connection.query(
         `UPDATE rentals 
-         SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ? 
+         SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ?, duration_months = ? 
          WHERE id = ?`,
-        [documentPath, rentalName, rentalPrice, startDate, rentalId]
+        [documentPath, rentalName, rentalPrice, startDate, rentalDuration, rentalId]
       );
     } else {
       await connection.query(
-        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document) 
-         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
-        [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath]
+        `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document, duration_months) 
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath, rentalDuration]
       );
     }
     await connection.query(
@@ -2608,7 +2612,7 @@ router.post("/rentals", authenticateToken, async (req, res) => {
     if (property.ownerId) {
       await connection.query(
         "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
-        [rentalPrice, rentalPrice, property.ownerId]
+        [rentalPrice * rentalDuration, rentalPrice * rentalDuration, property.ownerId]
       );
     }
     await connection.commit();
@@ -2710,6 +2714,7 @@ router.get(
           r.tenant_nik_passport,
           r.tenant_signature_data,
           r.admin_fee_amount,
+          r.duration_months,
           p.name AS property_name,
           p.address AS property_address,
           p.price AS property_price,
@@ -2737,6 +2742,10 @@ router.get(
       if (!isTenant && !isOwner && !isAdmin) {
         return res.status(403).json({ message: "Akses ditolak ke dokumen kontrak ini." });
       }
+      const contractDuration = Number(rental.duration_months || 1);
+      const contractMonthlyPrice = Number(rental.rental_price || rental.property_price || 0);
+      const contractAdminFee = rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? Number(rental.admin_fee_amount) : 5e3;
+      const contractTotalPrice = contractMonthlyPrice * contractDuration + contractAdminFee;
       const contractData = {
         rentalId: rental.rental_id,
         propertyName: rental.rental_property_name || rental.property_name || "Unit KOSMO Bali",
@@ -2749,10 +2758,11 @@ router.get(
         tenantPhone: rental.tenant_phone || "",
         tenantNikPassport: rental.tenant_nik_passport || "-",
         startDate: rental.rental_start_date || (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
-        durationMonths: 1,
-        monthlyPrice: Number(rental.rental_price || rental.property_price || 0),
-        pricePerMonth: Number(rental.rental_price || rental.property_price || 0),
-        adminFee: rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? Number(rental.admin_fee_amount) : 5e3,
+        durationMonths: contractDuration,
+        monthlyPrice: contractMonthlyPrice,
+        pricePerMonth: contractMonthlyPrice,
+        totalPrice: contractTotalPrice,
+        adminFee: contractAdminFee,
         signatureBase64: rental.tenant_signature_data || void 0,
         signerIp: rental.signer_ip || void 0,
         signerUserAgent: rental.signer_user_agent || void 0,
@@ -2933,10 +2943,15 @@ router.post("/payment/webhook", async (req, res) => {
         return res.status(404).json({ message: "Data sewa tidak ditemukan." });
       }
       const paidAmount = parseFloat(gross_amount);
-      const expectedPrice = Number(rental.price || 0);
-      if (isNaN(paidAmount) || Math.abs(paidAmount - expectedPrice) > 1) {
+      const monthlyPrice = Number(rental.price || 0);
+      const durationMonths = Number(rental.duration_months || 1);
+      const adminFee = Number(rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? rental.admin_fee_amount : 5e3);
+      const expectedWithAdmin = monthlyPrice * durationMonths + adminFee;
+      const expectedBase = monthlyPrice * durationMonths;
+      const isPriceMatch = Math.abs(paidAmount - expectedWithAdmin) <= 1 || Math.abs(paidAmount - expectedBase) <= 1 || Math.abs(paidAmount - monthlyPrice) <= 1;
+      if (isNaN(paidAmount) || !isPriceMatch) {
         await connection.rollback();
-        console.error(`Midtrans gross_amount mismatch: expected ${expectedPrice}, got ${paidAmount}`);
+        console.error(`Midtrans gross_amount mismatch: expected ${expectedWithAdmin} or ${expectedBase}, got ${paidAmount}`);
         return res.status(400).json({ message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa." });
       }
       if (rental.status !== "active") {
@@ -2956,10 +2971,10 @@ router.post("/payment/webhook", async (req, res) => {
           [rental.propertyId]
         );
         if (property && property.ownerId) {
-          const rentalPrice = rental.price || 0;
+          const totalRentalRevenue = monthlyPrice * durationMonths;
           await connection.query(
             "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
-            [rentalPrice, rentalPrice, property.ownerId]
+            [totalRentalRevenue, totalRentalRevenue, property.ownerId]
           );
         }
       }

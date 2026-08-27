@@ -66,6 +66,7 @@ export interface Rental {
   tenant_nik_passport?: string | null;
   tenant_signature_data?: string | null;
   admin_fee_amount?: number;
+  duration_months?: number;
   nextPaymentDate?: string;
   nextPaymentDateISO?: string;
   daysRemaining?: number;

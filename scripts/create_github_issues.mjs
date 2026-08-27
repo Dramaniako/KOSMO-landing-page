@@ -15,6 +15,26 @@ if (!GITHUB_TOKEN) {
 
 const allIssues = [
   {
+    title: '🛡️ Security & Integrity: Enforce Upper Bound Limit on Base64 Canvas Signature Payloads',
+    body: `### Overview\nDigital signature payloads submitted to \`POST /api/rentals/contract/sign\` and \`POST /api/rentals/contract/preview\` must have a strict upper size limit (1MB) to prevent memory bloat and CPU denial-of-service during PDF generation.\n\n### Affected Files\n- \`backend/middleware/validation.ts\` (\`signContractSchema\`, \`previewContractSchema\`)\n- \`backend/services/contract.ts\`\n\n### Resolution Applied\nAdded \`.max(1_000_000)\` validation constraint in Zod schemas and added boundary test coverage in \`tests/validation.test.ts\`.`,
+    labels: ['security', 'enhancement']
+  },
+  {
+    title: '⚖️ Legal & Contract Integrity: Persist duration_months in rentals Table and Contract Queries',
+    body: `### Overview\nPreviously, multi-month leases (e.g., 3, 6, 12 months) calculated the upfront price correctly during initial signing, but \`rentals\` table lacked a \`duration_months\` column, causing \`GET /api/rentals/:id/contract\` to regenerate PDFs with a default 1-month duration.\n\n### Affected Files\n- \`backend/db.ts\`\n- \`backend/router.ts\` (\`POST /rentals/contract/sign\`, \`GET /rentals/:id/contract\`, \`POST /rentals\`)\n- \`backend/types/index.ts\`\n- \`frontend/src/types/index.ts\`\n\n### Resolution Applied\nAdded non-destructive migration \`ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1\` and bound \`duration_months\` to contract generation, database storage, and retrieval flows.`,
+    labels: ['bug', 'legal']
+  },
+  {
+    title: '💳 Payment Reconciliation: Multi-Month and Admin Fee Reconciliation in Payment Webhook',
+    body: `### Overview\n\`POST /api/payment/webhook\` previously compared incoming \`gross_amount\` strictly to \`rental.price\` (monthly base rate). For multi-month tenancies or bookings with the flat Rp 5,000 platform admin fee, this caused gross amount validation to fail with HTTP 400.\n\n### Affected Files\n- \`backend/router.ts\` (\`POST /payment/webhook\`)\n\n### Resolution Applied\nUpdated payment webhook gross amount reconciliation to validate against \`(monthlyPrice * durationMonths) + adminFee\` and \`monthlyPrice * durationMonths\`, accurately crediting full lease revenue to landlord balance.`,
+    labels: ['bug', 'payment']
+  },
+  {
+    title: '⚡ Performance: Safe In-Memory PDFKit Stream Cleanup & Buffer Discard',
+    body: `### Overview\nEnsure in-memory PDF generation streams properly clear internal chunk buffers upon error events to prevent buffer retention and memory leaks during high concurrent load.\n\n### Affected Files\n- \`backend/services/contract.ts\` (\`generateRentalContractBuffer\`)\n\n### Resolution Applied\nImplemented stream lifecycle tracking to discard buffers immediately on stream error and ensure complete resolution on stream end.`,
+    labels: ['performance']
+  },
+  {
     title: '🛡️ Security: Hardcoded Default API Keys in Router and Cloudinary Service',
     body: `### Overview\nFallback API keys and placeholder identifiers are present in source code.\n\n### Affected Files\n- \`backend/router.ts\` (lines 2124-2125, 2282)\n- \`backend/services/cloudinary.ts\` (lines 25-27)\n\n### Impact\nUsing static placeholder keys instead of enforcing environment variables can mask misconfigurations and risk unintentional mock behavior in production.\n\n### Recommended Fix\nRequire environment variables (\`MIDTRANS_SERVER_KEY\`, \`MIDTRANS_CLIENT_KEY\`, \`CLOUDINARY_*\`) and throw explicit errors if unconfigured in production/staging.`,
     labels: ['bug']
