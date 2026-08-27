@@ -168,22 +168,8 @@ export default function TenantDashboard() {
         snapToken?: string;
         rentalId: string;
       };
+      const targetRentalId = selectedPendingRental.id;
       const snapToken = tokenData.snapToken || tokenData.token;
-
-      const finishPayment = async () => {
-        const finishRes = await fetch(`${API_BASE}/payment/finish`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ rentalId: selectedPendingRental.id })
-        });
-        if (!finishRes.ok) {
-          const finishErr = (await finishRes.json().catch(() => ({}))) as { message?: string };
-          throw new Error(finishErr.message || 'Gagal mengaktifkan sewa kos.');
-        }
-        await fetchMyRentals(currentUser.id);
-        setShowPendingPaymentModal(false);
-        setSelectedPendingRental(null);
-      };
 
       if (!snapToken) {
         throw new Error('Token pembayaran tidak ditemukan dari server.');
@@ -193,26 +179,43 @@ export default function TenantDashboard() {
         throw new Error('Midtrans Payment Gateway belum siap. Silakan muat ulang halaman.');
       }
 
+      // Close the payment info modal immediately upon launching Snap
+      setShowPendingPaymentModal(false);
+
+      const finishPayment = async () => {
+        const finishRes = await fetch(`${API_BASE}/payment/finish`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ rentalId: targetRentalId })
+        });
+        if (!finishRes.ok) {
+          const finishErr = (await finishRes.json().catch(() => ({}))) as { message?: string };
+          throw new Error(finishErr.message || 'Gagal mengaktifkan sewa kos.');
+        }
+        await fetchMyRentals(currentUser.id);
+        setSelectedPendingRental(null);
+      };
+
       window.snap.pay(snapToken, {
         onSuccess: async (result: unknown) => {
           console.log('Pending payment completed successfully:', result);
           try {
             await finishPayment();
           } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : 'Gagal menyelesaikan sewa.';
-            setPendingPaymentError(msg);
+            console.error('Finish payment error:', err);
           }
         },
         onPending: (result: unknown) => {
           console.log('Payment pending in Snap:', result);
-          setShowPendingPaymentModal(false);
+          setSelectedPendingRental(null);
         },
         onError: (err: unknown) => {
           console.error('Payment error in Snap:', err);
-          setPendingPaymentError('Pembayaran gagal atau dibatalkan.');
+          setSelectedPendingRental(null);
         },
         onClose: () => {
           console.log('Payment popup closed by user.');
+          setSelectedPendingRental(null);
         }
       });
     } catch (err: unknown) {
@@ -227,7 +230,7 @@ export default function TenantDashboard() {
   const fetchMyRentals = useCallback(async (userId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, rentals: true, bills: true }));
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
       const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
