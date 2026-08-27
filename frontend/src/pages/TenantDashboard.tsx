@@ -69,7 +69,7 @@ export default function TenantDashboard() {
     name: currentUser?.name || '',
     phone: currentUser?.phone || '',
     paymentMethod: currentUser?.paymentMethod || 'Virtual Account',
-    notifications: currentUser?.notifications !== undefined ? currentUser.notifications : true,
+    notifications: currentUser?.notifications !== undefined ? (typeof currentUser.notifications === 'number' ? currentUser.notifications === 1 : Boolean(currentUser.notifications)) : true,
     language: currentUser?.language || 'Indonesia',
     identity_type: (currentUser?.identity_type as 'NIK' | 'PASSPORT') || 'NIK',
     identity_number: currentUser?.identity_number || '',
@@ -203,6 +203,28 @@ export default function TenantDashboard() {
     navigate('/');
   };
 
+  const handleStartEditProfile = (): void => {
+    if (currentUser) {
+      setProfileForm({
+        name: currentUser.name || '',
+        phone: currentUser.phone || '',
+        paymentMethod: currentUser.paymentMethod || 'Virtual Account',
+        notifications: currentUser.notifications !== undefined ? (typeof currentUser.notifications === 'number' ? currentUser.notifications === 1 : Boolean(currentUser.notifications)) : true,
+        language: currentUser.language || 'Indonesia',
+        identity_type: (currentUser.identity_type as 'NIK' | 'PASSPORT') || 'NIK',
+        identity_number: currentUser.identity_number || '',
+        address: currentUser.address || '',
+        occupation: currentUser.occupation || '',
+        emergency_contact_name: currentUser.emergency_contact_name || '',
+        emergency_contact_relation: currentUser.emergency_contact_relation || 'Orang Tua',
+        emergency_contact_phone: currentUser.emergency_contact_phone || '',
+        date_of_birth: currentUser.date_of_birth || '',
+        gender: currentUser.gender || ''
+      });
+    }
+    setIsEditingProfile(true);
+  };
+
   const handleProfileSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     if (!currentUser) return;
@@ -212,13 +234,17 @@ export default function TenantDashboard() {
         navigate('/login');
         return;
       }
+      const payload = {
+        ...profileForm,
+        notifications: Boolean(profileForm.notifications)
+      };
       const res = await fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(profileForm)
+        body: JSON.stringify(payload)
       });
       if (res.status === 401) {
         alert("Sesi Anda telah berakhir. Silakan masuk kembali.");
@@ -552,7 +578,7 @@ export default function TenantDashboard() {
                       <h3 style={{ fontSize: '18px', fontWeight: 700 }}>Data Identitas Hukum & Akun</h3>
                     </div>
                     {!isEditingProfile && (
-                      <button className="btn btn-secondary" style={{ padding: '6px 16px' }} onClick={() => setIsEditingProfile(true)}>
+                      <button className="btn btn-secondary" style={{ padding: '6px 16px' }} onClick={handleStartEditProfile}>
                         {t('tenant.editProfile')}
                       </button>
                     )}

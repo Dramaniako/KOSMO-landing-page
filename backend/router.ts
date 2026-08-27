@@ -210,6 +210,7 @@ export function formatSafeUser(user: UserRow): Partial<UserRow> & {
   const profileStatus = isUserProfileComplete(user);
   return {
     ...safeUser,
+    notifications: user.notifications !== undefined ? (typeof user.notifications === 'number' ? user.notifications === 1 : Boolean(user.notifications)) : true,
     isProfileComplete: profileStatus.complete,
     missingProfileFields: profileStatus.missingFields,
     missingProfileFieldLabels: profileStatus.missingFieldLabels

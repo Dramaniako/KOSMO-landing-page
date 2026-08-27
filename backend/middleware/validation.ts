@@ -52,7 +52,13 @@ export const updateProfileSchema = z.object({
     )
     .optional(),
   paymentMethod: z.string().optional(),
-  notifications: z.boolean().optional(),
+  notifications: z
+    .preprocess((val) => {
+      if (typeof val === 'number') return val === 1;
+      if (typeof val === 'string') return val === 'true' || val === '1';
+      return val;
+    }, z.boolean())
+    .optional(),
   language: z.string().optional(),
   identity_type: z.enum(['NIK', 'PASSPORT']).optional(),
   identity_number: z

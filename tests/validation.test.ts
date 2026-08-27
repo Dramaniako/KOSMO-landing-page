@@ -367,6 +367,34 @@ test('Zod request body validation middleware & schemas', async (t) => {
     });
     assert.equal(valid.success, true);
 
+    // Verify MySQL TINYINT(1) number and string representation normalization for notifications
+    const validWithNumberNotification = updateProfileSchema.safeParse({
+      name: 'Bayu Wipradnyana',
+      notifications: 1
+    });
+    assert.equal(validWithNumberNotification.success, true);
+    if (validWithNumberNotification.success) {
+      assert.equal(validWithNumberNotification.data.notifications, true);
+    }
+
+    const validWithZeroNotification = updateProfileSchema.safeParse({
+      name: 'Bayu Wipradnyana',
+      notifications: 0
+    });
+    assert.equal(validWithZeroNotification.success, true);
+    if (validWithZeroNotification.success) {
+      assert.equal(validWithZeroNotification.data.notifications, false);
+    }
+
+    const validWithStringNotification = updateProfileSchema.safeParse({
+      name: 'Bayu Wipradnyana',
+      notifications: 'true'
+    });
+    assert.equal(validWithStringNotification.success, true);
+    if (validWithStringNotification.success) {
+      assert.equal(validWithStringNotification.data.notifications, true);
+    }
+
     const invalidNik = updateProfileSchema.safeParse({
       identity_number: '123'
     });
