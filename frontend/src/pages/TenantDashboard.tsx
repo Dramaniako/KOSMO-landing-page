@@ -83,6 +83,7 @@ export default function TenantDashboard() {
   }));
 
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
+  const [isSubmittingProfile, setIsSubmittingProfile] = useState<boolean>(false);
   const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({});
   const [contractDownloading, setContractDownloading] = useState<Record<string, boolean>>({});
   const loadedTabs = useRef<Set<string>>(new Set(['profile']));
@@ -95,18 +96,18 @@ export default function TenantDashboard() {
     setContractDownloading(prev => ({ ...prev, [rentalId]: true }));
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
-      const res = await fetch(`${API_BASE}/rentals/${rentalId}/contract`, {
+      const res = await fetch(`${API_BASE}/rentals/${rentalId}/contract?download=true`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (!res.ok) {
         throw new Error('Gagal memuat dokumen kontrak PDF.');
       }
-      const blob = await res.blob();
+      const arrayBuffer = await res.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
       const objectUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
+      link.download = `kontrak_sewa_${rentalId}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -227,7 +228,8 @@ export default function TenantDashboard() {
 
   const handleProfileSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
-    if (!currentUser) return;
+    if (!currentUser || isSubmittingProfile) return;
+    setIsSubmittingProfile(true);
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
       if (!token) {
@@ -261,6 +263,8 @@ export default function TenantDashboard() {
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       alert(errorMsg);
+    } finally {
+      setIsSubmittingProfile(false);
     }
   };
 
@@ -738,10 +742,27 @@ export default function TenantDashboard() {
                       </div>
 
                       <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-                        <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
-                          {t('tenant.saveProfile')}
+                        <button
+                          type="submit"
+                          className="btn btn-primary"
+                          style={{ flex: 1 }}
+                          disabled={isSubmittingProfile}
+                        >
+                          {isSubmittingProfile ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                              <span style={{ width: '16px', height: '16px', border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></span>
+                              <span>{t('tenant.saving') || 'Menyimpan...'}</span>
+                            </span>
+                          ) : (
+                            t('tenant.saveProfile')
+                          )}
                         </button>
-                        <button type="button" className="btn btn-secondary" onClick={() => setIsEditingProfile(false)}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => setIsEditingProfile(false)}
+                          disabled={isSubmittingProfile}
+                        >
                           {t('tenant.cancel')}
                         </button>
                       </div>

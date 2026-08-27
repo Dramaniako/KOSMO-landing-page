@@ -199,4 +199,41 @@ test('Next payment schedule and billing computation', async (t) => {
     // March 2026 has 31 days -> restores to Mar 31!
     assert.equal(schedMar.nextPaymentDateISO, '2026-03-31');
   });
+
+  await t.test('computes multi-month lease schedule and boundaries for 3, 6, and 12-month leases', () => {
+    // 3-month lease
+    const ref3 = new Date('2026-02-15T00:00:00Z');
+    const sched3 = computePaymentSchedule('2026-01-01', 'active', 3, ref3);
+    assert.equal(sched3.nextPaymentDateISO, '2026-03-01');
+    assert.equal(sched3.leaseEndDateISO, '2026-04-01');
+    assert.equal(sched3.totalDurationMonths, 3);
+    assert.equal(sched3.paymentStatus, 'Lunas (Periode Berjalan)');
+
+    // 6-month lease
+    const ref6 = new Date('2026-05-15T00:00:00Z');
+    const sched6 = computePaymentSchedule('2026-01-01', 'active', 6, ref6);
+    assert.equal(sched6.nextPaymentDateISO, '2026-06-01');
+    assert.equal(sched6.leaseEndDateISO, '2026-07-01');
+    assert.equal(sched6.totalDurationMonths, 6);
+
+    // 12-month lease
+    const ref12 = new Date('2026-11-29T00:00:00Z');
+    const sched12 = computePaymentSchedule('2026-01-01', 'active', 12, ref12);
+    assert.equal(sched12.nextPaymentDateISO, '2026-12-01');
+    assert.equal(sched12.leaseEndDateISO, '2027-01-01');
+    assert.equal(sched12.totalDurationMonths, 12);
+    assert.equal(sched12.daysRemaining, 2);
+    assert.equal(sched12.paymentStatus, 'Menjelang Jatuh Tempo');
+  });
+
+  await t.test('marks multi-month lease as completed when reference date exceeds total lease duration', () => {
+    const refExpired = new Date('2027-01-15T00:00:00Z');
+    const schedExpired = computePaymentSchedule('2026-01-01', 'active', 12, refExpired);
+    assert.equal(schedExpired.nextPaymentDate, '-');
+    assert.equal(schedExpired.nextPaymentDateISO, '');
+    assert.equal(schedExpired.daysRemaining, 0);
+    assert.equal(schedExpired.paymentStatus, 'Penyewaan Selesai');
+    assert.equal(schedExpired.leaseEndDateISO, '2027-01-01');
+    assert.equal(schedExpired.totalDurationMonths, 12);
+  });
 });

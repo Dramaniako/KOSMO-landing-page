@@ -153,6 +153,7 @@ const translations: Record<Language, Translations> = {
     'tenant.accountInfo': 'Informasi Akun',
     'tenant.accountSettings': 'Pengaturan Akun',
     'tenant.saveProfile': 'Simpan Profil',
+    'tenant.saving': 'Menyimpan...',
     'tenant.editProfile': 'Edit Profil',
     'tenant.cancel': 'Batal',
 
@@ -342,6 +343,7 @@ const translations: Record<Language, Translations> = {
     'tenant.accountInfo': 'Account Information',
     'tenant.accountSettings': 'Account Settings',
     'tenant.saveProfile': 'Save Profile',
+    'tenant.saving': 'Saving...',
     'tenant.editProfile': 'Edit Profile',
     'tenant.cancel': 'Cancel',
 

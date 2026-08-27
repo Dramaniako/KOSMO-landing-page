@@ -321,33 +321,38 @@ describe('Adversarial Stress Test: Evidentiary UI & Digital Contract Gating', ()
     });
   });
 
-  describe('5. Comprehensive Sign-Gate Enactment', () => {
-    it('keeps Sign button disabled until all 4 criteria are strictly met', async () => {
+  describe('5. Comprehensive Sign-Gate Enactment & Visible Inline Validation Feedback', () => {
+    it('displays visible inline errors and blocks onSignContract when attempting to submit incomplete contract', async () => {
       const onSignContractMock = vi.fn().mockResolvedValue(true);
       renderComponent({ onSignContract: onSignContractMock });
 
       const signButton = screen.getByRole('button', { name: /Setujui & Tanda Tangani Kontrak/i });
-      expect(signButton).toBeDisabled();
 
-      // Step 1: Provide valid NIK -> Sign still disabled
+      // Attempt submit with nothing completed
+      fireEvent.click(signButton);
+      expect(onSignContractMock).not.toHaveBeenCalled();
+
+      // Check visible inline error messages
+      expect(screen.getByText(/Wajib membaca dan menggulir klausul kontrak hingga ke bagian paling bawah/i)).toBeInTheDocument();
+      expect(screen.getByText(/Wajib mencentang persetujuan syarat & ketentuan/i)).toBeInTheDocument();
+      expect(screen.getByText(/Wajib membubuhkan tanda tangan digital/i)).toBeInTheDocument();
+
+      // Step 1: Provide valid NIK
       const idInput = screen.getByPlaceholderText(/16 digit NIK KTP/i);
       fireEvent.change(idInput, { target: { value: '5171012304950001' } });
-      expect(signButton).toBeDisabled();
 
-      // Step 2: Scroll terms to bottom -> Sign still disabled
+      // Step 2: Scroll terms to bottom
       const scrollContainer = screen.getByRole('region', { name: /Klausul Kontrak Sewa Digital KOSMO/i });
       Object.defineProperty(scrollContainer, 'scrollTop', { value: 300, writable: true });
       Object.defineProperty(scrollContainer, 'clientHeight', { value: 180, writable: true });
       Object.defineProperty(scrollContainer, 'scrollHeight', { value: 450, writable: true });
       fireEvent.scroll(scrollContainer);
-      expect(signButton).toBeDisabled();
 
-      // Step 3: Affirm consent checkbox -> Sign still disabled
+      // Step 3: Affirm consent checkbox
       const checkbox = screen.getByRole('checkbox');
       fireEvent.click(checkbox);
-      expect(signButton).toBeDisabled();
 
-      // Step 4: Draw and confirm signature -> Sign becomes ENABLED
+      // Step 4: Draw and confirm signature
       const canvas = screen.getByRole('region', { name: /Klausul Kontrak/i }).parentElement?.parentElement?.querySelector('canvas');
       if (canvas) {
         fireEvent.pointerDown(canvas, { clientX: 20, clientY: 20, pointerId: 1 });
@@ -357,9 +362,7 @@ describe('Adversarial Stress Test: Evidentiary UI & Digital Contract Gating', ()
       const confirmButton = screen.getByRole('button', { name: /Konfirmasi Tanda Tangan/i });
       fireEvent.click(confirmButton);
 
-      expect(signButton).not.toBeDisabled();
-
-      // Click sign and verify payload
+      // Now all 4 criteria satisfied -> clicking sign invokes onSignContract
       fireEvent.click(signButton);
       await waitFor(() => {
         expect(onSignContractMock).toHaveBeenCalledTimes(1);

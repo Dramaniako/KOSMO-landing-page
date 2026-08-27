@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  MapPin, Star, X, ArrowRight, ShieldCheck, Download, CreditCard, Sparkles, Check, AlertCircle,
+  MapPin, Star, X, ArrowRight, ShieldCheck, Download, CreditCard, Sparkles, Check, AlertCircle, AlertTriangle,
   FileText, Eraser, CheckCircle2, ChevronDown, ChevronUp, Eye, Lock, RefreshCw, Hash, ShieldAlert
 } from 'lucide-react';
 import {
@@ -82,6 +82,8 @@ export default function BookingModal({
   const termsContainerRef = useRef<HTMLDivElement>(null);
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState<boolean>(false);
   const [affirmativeConsent, setAffirmativeConsent] = useState<boolean>(false);
+  const [scrollError, setScrollError] = useState<string | null>(null);
+  const [consentError, setConsentError] = useState<string | null>(null);
 
   // 4. HTML5 Canvas Signature Pad
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -105,6 +107,8 @@ export default function BookingModal({
     if (showContract) {
       setHasScrolledToBottom(false);
       setAffirmativeConsent(false);
+      setScrollError(null);
+      setConsentError(null);
       setSignatureConfirmed(false);
       setHasDrawnSignature(false);
       setSignatureBase64('');
@@ -186,6 +190,7 @@ export default function BookingModal({
     const target = e.currentTarget;
     if (target.scrollTop + target.clientHeight >= target.scrollHeight - 10) {
       setHasScrolledToBottom(true);
+      setScrollError(null);
     }
   };
 
@@ -324,17 +329,38 @@ export default function BookingModal({
     const idVal = validateIdentity(idNumber, idType);
     if (!idVal.isValid) {
       setIdValidationMsg(idVal.error);
-      return;
-    }
-    if (!hasScrolledToBottom || !affirmativeConsent) {
-      return;
-    }
-    if (!hasDrawnSignature || !signatureConfirmed || !signatureBase64) {
-      setSignatureError(t('contract.signatureRequired'));
-      return;
     }
 
-    if (!property) return;
+    let hasError = false;
+    if (!idVal.isValid) {
+      hasError = true;
+    }
+
+    if (!hasScrolledToBottom) {
+      setScrollError('Wajib membaca dan menggulir klausul kontrak hingga ke bagian paling bawah.');
+      hasError = true;
+    } else {
+      setScrollError(null);
+    }
+
+    if (!affirmativeConsent) {
+      setConsentError('Wajib mencentang persetujuan syarat & ketentuan klausul kontrak sewa digital.');
+      hasError = true;
+    } else {
+      setConsentError(null);
+    }
+
+    if (!hasDrawnSignature) {
+      setSignatureError('Wajib membubuhkan tanda tangan digital pada area kanvas di atas.');
+      hasError = true;
+    } else if (!signatureConfirmed || !signatureBase64) {
+      setSignatureError('Wajib mengeklik tombol "Konfirmasi Tanda Tangan" untuk menyimpan tanda tangan digital.');
+      hasError = true;
+    } else {
+      setSignatureError(null);
+    }
+
+    if (hasError || !property) return;
 
     if (onSignContract) {
       await onSignContract({
@@ -624,7 +650,7 @@ export default function BookingModal({
                   backgroundColor: 'var(--bg-main)',
                   padding: '16px',
                   borderRadius: 'var(--radius-sm)',
-                  border: `1px solid ${hasScrolledToBottom ? '#22c55e' : 'var(--border-color)'}`,
+                  border: `1px solid ${scrollError ? '#ef4444' : hasScrolledToBottom ? '#22c55e' : 'var(--border-color)'}`,
                   maxHeight: '180px',
                   overflowY: 'auto',
                   fontSize: '12px',
@@ -665,7 +691,12 @@ export default function BookingModal({
               </div>
 
               {/* Scroll prompt / status indicator */}
-              {!hasScrolledToBottom ? (
+              {scrollError ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#dc2626', marginTop: '6px', fontWeight: 600 }}>
+                  <AlertTriangle size={14} />
+                  <span>{scrollError}</span>
+                </div>
+              ) : !hasScrolledToBottom ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#d97706', marginTop: '6px' }}>
                   <ChevronDown size={14} className="animate-bounce" />
                   <span>{t('contract.scrollToReadPrompt')}</span>
@@ -693,11 +724,20 @@ export default function BookingModal({
                     type="checkbox"
                     checked={affirmativeConsent}
                     disabled={!hasScrolledToBottom}
-                    onChange={(e) => setAffirmativeConsent(e.target.checked)}
+                    onChange={(e) => {
+                      setAffirmativeConsent(e.target.checked);
+                      if (e.target.checked) setConsentError(null);
+                    }}
                     style={{ marginTop: '2px', cursor: hasScrolledToBottom ? 'pointer' : 'not-allowed' }}
                   />
                   <span>{t('contract.consentCheckbox')}</span>
                 </label>
+                {consentError && (
+                  <p style={{ color: '#dc2626', fontSize: '11px', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <AlertTriangle size={12} />
+                    <span>{consentError}</span>
+                  </p>
+                )}
               </div>
             </div>
 
@@ -786,8 +826,9 @@ export default function BookingModal({
 
               {/* Signature Status & Feedback */}
               {signatureError ? (
-                <p style={{ color: '#dc2626', fontSize: '11px', marginTop: '6px' }}>
-                  {signatureError}
+                <p style={{ color: '#dc2626', fontSize: '11px', marginTop: '6px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <AlertTriangle size={13} />
+                  <span>{signatureError}</span>
                 </p>
               ) : signatureConfirmed ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#16a34a', marginTop: '6px', fontWeight: 600 }}>
@@ -853,10 +894,6 @@ export default function BookingModal({
                 disabled={
                   isSigning ||
                   contractSigned ||
-                  !isIdValid ||
-                  !hasScrolledToBottom ||
-                  !affirmativeConsent ||
-                  !signatureConfirmed ||
                   hasActiveRental ||
                   Boolean(activeRentalError) ||
                   !profileStatus.complete

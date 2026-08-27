@@ -2403,22 +2403,28 @@ router.post("/auth/verify-password", authLimiter, authenticateToken, async (req,
     res.status(500).json({ message: "Gagal memverifikasi password." });
   }
 });
-function computePaymentSchedule(startDateStr, status, referenceDate = /* @__PURE__ */ new Date()) {
-  if (status !== "active") {
-    return {
-      nextPaymentDate: "-",
-      nextPaymentDateISO: "",
-      daysRemaining: 0,
-      paymentStatus: "Penyewaan Selesai"
-    };
+function computePaymentSchedule(startDateStr, status, durationMonthsOrRef, referenceDate) {
+  let effectiveDuration = 1;
+  let isBoundedDuration = false;
+  let effectiveRef = /* @__PURE__ */ new Date();
+  if (durationMonthsOrRef instanceof Date) {
+    effectiveRef = durationMonthsOrRef;
+    isBoundedDuration = false;
+  } else {
+    if (typeof durationMonthsOrRef === "number" && !isNaN(durationMonthsOrRef)) {
+      effectiveDuration = Math.max(1, Math.floor(durationMonthsOrRef));
+      isBoundedDuration = true;
+    }
+    if (referenceDate instanceof Date) {
+      effectiveRef = referenceDate;
+    }
   }
-  const now = new Date(referenceDate);
+  const now = new Date(effectiveRef);
   now.setHours(0, 0, 0, 0);
   const rawStart = new Date(startDateStr);
   const start = isNaN(rawStart.getTime()) ? new Date(now) : new Date(rawStart);
   start.setHours(0, 0, 0, 0);
   const startDay = start.getDate();
-  let addedMonths = 1;
   const getClampedDate = (months) => {
     const totalMonths = start.getMonth() + months;
     const year = start.getFullYear() + Math.floor(totalMonths / 12);
@@ -2426,14 +2432,39 @@ function computePaymentSchedule(startDateStr, status, referenceDate = /* @__PURE
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     return new Date(year, month, Math.min(startDay, daysInMonth), 0, 0, 0, 0);
   };
+  const pad = (n) => n.toString().padStart(2, "0");
+  const leaseEnd = getClampedDate(effectiveDuration);
+  const leaseStartDate = start.toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
+  const leaseEndDate = leaseEnd.toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
+  const leaseEndDateISO = `${leaseEnd.getFullYear()}-${pad(leaseEnd.getMonth() + 1)}-${pad(leaseEnd.getDate())}`;
+  if (status !== "active" || isBoundedDuration && now > leaseEnd) {
+    return {
+      nextPaymentDate: "-",
+      nextPaymentDateISO: "",
+      daysRemaining: 0,
+      paymentStatus: "Penyewaan Selesai",
+      leaseStartDate,
+      leaseEndDate,
+      leaseEndDateISO,
+      totalDurationMonths: effectiveDuration
+    };
+  }
+  let addedMonths = 1;
   let due = getClampedDate(addedMonths);
-  while (due < now) {
+  while (due < now && (!isBoundedDuration || addedMonths < effectiveDuration)) {
     addedMonths += 1;
     due = getClampedDate(addedMonths);
   }
   const diffMs = due.getTime() - now.getTime();
   const daysRemaining = Math.max(0, Math.round(diffMs / (1e3 * 60 * 60 * 24)));
-  const pad = (n) => n.toString().padStart(2, "0");
   const iso = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`;
   const formatted = due.toLocaleDateString("id-ID", {
     day: "numeric",
@@ -2450,7 +2481,11 @@ function computePaymentSchedule(startDateStr, status, referenceDate = /* @__PURE
     nextPaymentDate: formatted,
     nextPaymentDateISO: iso,
     daysRemaining,
-    paymentStatus
+    paymentStatus,
+    leaseStartDate,
+    leaseEndDate,
+    leaseEndDateISO,
+    totalDurationMonths: effectiveDuration
   };
 }
 router.get("/rentals", authenticateToken, async (req, res) => {
@@ -2472,13 +2507,19 @@ router.get("/rentals", authenticateToken, async (req, res) => {
     }
     const [rows] = await pool.query(sql, params);
     const enrichedRows = rows.map((r) => {
-      const schedule = computePaymentSchedule(r.startDate || (/* @__PURE__ */ new Date()).toISOString(), r.status);
+      const duration = Number(r.duration_months || 1);
+      const schedule = computePaymentSchedule(r.startDate || (/* @__PURE__ */ new Date()).toISOString(), r.status, duration);
       return {
         ...r,
+        duration_months: duration,
         nextPaymentDate: schedule.nextPaymentDate,
         nextPaymentDateISO: schedule.nextPaymentDateISO,
         daysRemaining: schedule.daysRemaining,
-        paymentStatus: schedule.paymentStatus
+        paymentStatus: schedule.paymentStatus,
+        leaseStartDate: schedule.leaseStartDate,
+        leaseEndDate: schedule.leaseEndDate,
+        leaseEndDateISO: schedule.leaseEndDateISO,
+        totalDurationMonths: schedule.totalDurationMonths
       };
     });
     res.json(enrichedRows);
@@ -2498,13 +2539,19 @@ router.get("/tenant/rentals", authenticateToken, async (req, res) => {
       [tenantId]
     );
     const enrichedRows = rows.map((r) => {
-      const schedule = computePaymentSchedule(r.startDate || (/* @__PURE__ */ new Date()).toISOString(), r.status);
+      const duration = Number(r.duration_months || 1);
+      const schedule = computePaymentSchedule(r.startDate || (/* @__PURE__ */ new Date()).toISOString(), r.status, duration);
       return {
         ...r,
+        duration_months: duration,
         nextPaymentDate: schedule.nextPaymentDate,
         nextPaymentDateISO: schedule.nextPaymentDateISO,
         daysRemaining: schedule.daysRemaining,
-        paymentStatus: schedule.paymentStatus
+        paymentStatus: schedule.paymentStatus,
+        leaseStartDate: schedule.leaseStartDate,
+        leaseEndDate: schedule.leaseEndDate,
+        leaseEndDateISO: schedule.leaseEndDateISO,
+        totalDurationMonths: schedule.totalDurationMonths
       };
     });
     res.json(enrichedRows);
@@ -2728,7 +2775,7 @@ router.post(
           id, tenantId, propertyId, propertyName, price, startDate, status,
           document, contract_url, contract_hash, contract_signed_at,
           signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount, duration_months
-        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           rentalId,
           authUser.id,
@@ -2748,22 +2795,12 @@ router.post(
           duration
         ]
       );
-      await connection.query(
-        "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
-        [propertyId]
-      );
-      if (property.ownerId) {
-        await connection.query(
-          "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
-          [rentalPrice * duration, rentalPrice * duration, property.ownerId]
-        );
-      }
       await connection.commit();
       apiCache.invalidatePattern("properties");
       apiCache.invalidatePattern("rentals");
       return res.status(201).json({
         success: true,
-        message: "Kontrak digital berhasil ditandatangani dan sewa aktif!",
+        message: "Kontrak digital berhasil ditandatangani. Silakan selesaikan pembayaran.",
         rentalId,
         contractUrl,
         contractHash,
@@ -3208,7 +3245,7 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Gagal membuat token pembayaran Midtrans." });
   }
 });
-router.post("/payment/webhook", async (req, res) => {
+var handlePaymentNotification = async (req, res) => {
   const {
     order_id,
     status_code,
@@ -3284,6 +3321,7 @@ router.post("/payment/webhook", async (req, res) => {
       }
       await connection.commit();
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rentals");
       return res.json({ message: "Pembayaran berhasil diproses dan status rental diaktifkan." });
     } catch (err) {
       await connection.rollback();
@@ -3297,6 +3335,7 @@ router.post("/payment/webhook", async (req, res) => {
     try {
       await pool.query("UPDATE rentals SET status = 'cancelled' WHERE id = ? AND status = 'pending'", [order_id]);
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rentals");
       return res.json({ message: `Status transaksi dibatalkan (${transaction_status}).` });
     } catch (err) {
       console.error("Cancel rental error:", err);
@@ -3304,7 +3343,9 @@ router.post("/payment/webhook", async (req, res) => {
     }
   }
   res.json({ message: "Status notifikasi diterima." });
-});
+};
+router.post("/payment/webhook", handlePaymentNotification);
+router.post("/payment/notification", handlePaymentNotification);
 var router_default = router;
 
 // backend/server.ts

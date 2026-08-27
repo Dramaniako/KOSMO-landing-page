@@ -9,12 +9,14 @@ The KOSMO Digital Rental Agreement Pipeline provides an end-to-end legally bindi
 - **Cloud Storage Streaming**: In-memory PDF buffer is piped directly to Cloudinary (`uploadContractStream` to `kosmo_contracts/` folder with `resource_type: 'raw'` / `auto`) with zero local disk file writes (`backend/uploads/` untouched).
 - **Backend API & Concurrency Guards**: 
   - `POST /api/rentals/contract/preview`: Generates draft contract metadata and in-memory PDF preview without creating tenancy.
-  - `POST /api/rentals/contract/sign`: Atomic transactional signing using `SELECT ... FOR UPDATE` row locks, enforcing Single Active Tenancy covenant (returns HTTP 409 Conflict on duplicate active lease).
+  - `POST /api/rentals/contract/sign`: Atomic transactional signing using `SELECT ... FOR UPDATE` row locks, recording signed contract metadata as `status: 'pending'`, without premature room decrement or landlord revenue credit.
+  - `POST /api/payment/webhook` (and alias `/payment/notification`): Webhook handling payment settlement/capture, atomically transitioning rental from `pending` to `active`, incrementing `occupiedRooms`, and crediting landlord revenue with transactional row locks (`SELECT ... FOR UPDATE`).
   - `GET /api/rentals/:id/contract`: Role-based access control (RBAC) permitting only the tenant, property landlord, or admin.
+  - `computePaymentSchedule(startDate, status, durationMonths, referenceDate)`: Polymorphic payment schedule and lease boundary calculator accurately tracking multi-month lease terms.
 - **Frontend Evidentiary UI**:
-  - `BookingModal.tsx`: Scroll-to-read clickwrap container (checkbox disabled until scrolled to bottom), HTML5 Canvas digital signature pad (draw/clear/confirm to PNG Base64), 16-digit NIK / Passport input validation, full bilingual terms, flat Rp 5,000 admin fee, utility quotas (electricity token, PDAM water, 100 Mbps WiFi, security, waste), and Pengadilan Negeri Denpasar / Badung jurisdiction.
+  - `BookingModal.tsx`: Scroll-to-read clickwrap container, HTML5 Canvas digital signature pad, 16-digit NIK / Passport input validation, visible inline validation error states (for scroll, consent, signature, and NIK/Passport), and Pengadilan Negeri Denpasar / Badung jurisdiction.
   - `LandingPage.tsx`: Midtrans Snap payment token generation gated strictly behind signed contract state.
-  - `TenantDashboard.tsx` & `LandlordDashboard.tsx`: Authenticated contract view/download handlers with Lucide `FileText` icons.
+  - `TenantDashboard.tsx` & `LandlordDashboard.tsx`: Throttled profile submissions with spinner feedback, and authenticated contract downloads with explicit `application/pdf` MIME type and `kontrak_sewa_{id}.pdf` filenames.
 
 ---
 
@@ -38,6 +40,12 @@ The KOSMO Digital Rental Agreement Pipeline provides an end-to-end legally bindi
 | 15 | Gated Checkout Flow | Midtrans Snap payment token generation in `LandingPage.tsx` gated behind signed contract | M4 | ORIGINAL_REQUEST §R4 |
 | 16 | Dashboard FileText Actions | `TenantDashboard.tsx` & `LandlordDashboard.tsx` authenticated contract view/download with `FileText` icons | M4 | ORIGINAL_REQUEST §R4 |
 | 17 | E2E & Automated Test Suite | Unit tests (`tests/contract.test.ts`), DB tests (`tests/db_integration.test.ts`), Vitest (`BookingModal.test.tsx`), E2E Playwright (`rental_flow.spec.ts`), all 5 gates in `scripts/verify.ps1` passing | M5 | ORIGINAL_REQUEST §Acceptance |
+| 18 | Profile Submission Throttling | `isSubmittingProfile` state, button disabling, loading spinner, and feedback text in `TenantDashboard.tsx` | M6 | ORIGINAL_REQUEST Follow-up §R1 |
+| 19 | Visible Inline Contract Validation | Immediate inline validation alerts for NIK/Passport, unscrolled terms, unchecked consent, and signature states in `BookingModal.tsx` | M6 | ORIGINAL_REQUEST Follow-up §R2 |
+| 20 | PDF MIME & Download Trigger | Explicit `application/pdf` Blob and `kontrak_sewa_{id}.pdf` download filename in `TenantDashboard.tsx` and `LandlordDashboard.tsx` | M6 | ORIGINAL_REQUEST Follow-up §R3 |
+| 21 | Decoupled Contract Tenancy State | `POST /api/rentals/contract/sign` sets `status: 'pending'`, does not increment room occupancy or credit balance | M6 | ORIGINAL_REQUEST Follow-up §R4 |
+| 22 | Payment Tenancy Activation & Sync | `POST /api/payment/webhook` atomically transitions status to `'active'`, increments `occupiedRooms`, credits landlord balance | M6 | ORIGINAL_REQUEST Follow-up §R5 |
+| 23 | Multi-Month Lease Schedule Calculation | Polymorphic `computePaymentSchedule` calculating lease start/end boundaries and payment status for multi-month leases | M6 | ORIGINAL_REQUEST Follow-up §R6 |
 
 ---
 
@@ -49,6 +57,7 @@ The KOSMO Digital Rental Agreement Pipeline provides an end-to-end legally bindi
 | M3 | R3: Backend Endpoints, Audit & Concurrency | `backend/router.ts`, `backend/types/index.ts`, `backend/middleware/validation.ts` | M1, M2 | DONE |
 | M4 | R4: Frontend Evidentiary UI & Dashboards | `frontend/src/components/BookingModal.tsx`, `frontend/src/pages/LandingPage.tsx`, `frontend/src/pages/TenantDashboard.tsx`, `frontend/src/pages/LandlordDashboard.tsx`, `frontend/src/types/index.ts`, `frontend/src/contexts/LanguageContext.tsx` | M2, M3 | DONE |
 | M5 | E2E Testing & Verification Gates | `tests/contract.test.ts`, `tests/db_integration.test.ts`, `tests/router.test.ts`, `frontend/src/components/__tests__/BookingModal.test.tsx`, `tests/e2e/rental_flow.spec.ts`, `scripts/verify.ps1` | M1, M2, M3, M4 | DONE |
+| M6 | Comprehensive Fixes R1-R6 | `frontend/src/pages/TenantDashboard.tsx`, `frontend/src/components/BookingModal.tsx`, `frontend/src/pages/LandlordDashboard.tsx`, `backend/router.ts`, `tests/rentals.test.ts`, `tests/challenger_m3.test.ts`, `tests/challenger_m3_rbac.test.ts`, `tests/contract_concurrency_stress.test.ts`, `frontend/src/components/__tests__/BookingModal.test.tsx` | M1, M2, M3, M4, M5 | IN_PROGRESS |
 
 ---
 
@@ -108,13 +117,25 @@ export function computeContractHash(buffer: Buffer): string;
 export function generateAndUploadContract(data: RentalContractData): Promise<GeneratedContractResult>;
 ```
 
-### 3. Cloudinary Streaming Interface (`backend/services/cloudinary.ts`)
+### 3. Payment Schedule Calculation Interface (`backend/router.ts`)
 ```ts
-export function uploadContractStream(
-  buffer: Buffer,
-  filename: string,
-  folder?: string
-): Promise<{ secure_url: string; public_id: string }>;
+export interface PaymentSchedule {
+  nextPaymentDate: string;
+  nextPaymentDateISO: string;
+  daysRemaining: number;
+  paymentStatus: 'Lunas (Periode Berjalan)' | 'Menjelang Jatuh Tempo' | 'Menunggu Pembayaran' | 'Penyewaan Selesai';
+  leaseStartDate?: string;
+  leaseEndDate?: string;
+  leaseEndDateISO?: string;
+  totalDurationMonths?: number;
+}
+
+export function computePaymentSchedule(
+  startDateStr: string,
+  status: string,
+  durationMonthsOrRef?: number | Date,
+  referenceDate?: Date
+): PaymentSchedule;
 ```
 
 ### 4. REST Endpoints (`backend/router.ts`)
@@ -124,7 +145,9 @@ export function uploadContractStream(
 - **`POST /api/rentals/contract/sign`**
   - Input: `{ propertyId: string, durationMonths: number, startDate: string, tenantNikPassport: string, signatureBase64: string, affirmativeConsent: boolean }` (Auth required)
   - Output: `{ success: true, rentalId: string, contractUrl: string, contractHash: string, adminFee: number, totalAmount: number }`
-  - Error: HTTP 409 Conflict if tenant already has active rental or property unavailable.
+  - Action: Inserts rental with `status = 'pending'`. Does NOT increment `occupiedRooms` or credit landlord balance.
+- **`POST /api/payment/webhook` & `POST /api/payment/notification`**
+  - Midtrans webhook: On `settlement`/`capture`, atomically updates rental to `status = 'active'`, increments `occupiedRooms`, and credits landlord revenue using `SELECT ... FOR UPDATE`. On `cancel`/`expire`/`deny`, marks `status = 'cancelled'`.
 - **`GET /api/rentals/:id/contract`**
   - Auth required. RBAC: Caller must be rental tenant, property landlord/owner, or admin.
   - Output: Streams PDF buffer with headers (`Content-Type: application/pdf`, `Content-Disposition: inline; filename="kontrak_sewa_<id>.pdf"`, `X-Contract-Hash: <hash>`).
@@ -135,16 +158,17 @@ export function uploadContractStream(
 - `backend/db.ts`: Database pool, schema definition, and `applyTableMigrations()`
 - `backend/services/contract.ts`: In-memory PDF generator, bilingual statutory clauses, SHA-256 hash
 - `backend/services/cloudinary.ts`: Direct buffer upload stream for raw PDF contracts
-- `backend/router.ts`: Express router with `/contract/preview`, `/contract/sign`, `/contract` endpoints
+- `backend/router.ts`: Express router with `/contract/preview`, `/contract/sign`, `/contract`, `/payment/webhook`, `computePaymentSchedule`
 - `backend/types/index.ts`: Strict TypeScript interfaces
 - `backend/middleware/validation.ts`: Zod validation middleware
-- `frontend/src/components/BookingModal.tsx`: Clickwrap scroll-to-read, canvas signature pad, NIK validation
+- `frontend/src/components/BookingModal.tsx`: Clickwrap scroll-to-read, canvas signature pad, NIK validation, inline feedback alerts
 - `frontend/src/pages/LandingPage.tsx`: Midtrans Snap gated booking payment flow
-- `frontend/src/pages/TenantDashboard.tsx`: Authenticated contract view/download with FileText icon
-- `frontend/src/pages/LandlordDashboard.tsx`: Authenticated contract view/download with FileText icon
+- `frontend/src/pages/TenantDashboard.tsx`: Authenticated contract download (`application/pdf`) and throttled profile updates with loading spinner
+- `frontend/src/pages/LandlordDashboard.tsx`: Authenticated contract download (`application/pdf`)
 - `frontend/src/types/index.ts`: Frontend TypeScript interfaces
 - `tests/contract.test.ts`: PDF generation & hash unit tests
 - `tests/db_integration.test.ts`: DB transactional signing & concurrency tests
+- `tests/rentals.test.ts`: Payment schedule calculation tests
 - `frontend/src/components/__tests__/BookingModal.test.tsx`: Vitest component tests
 - `tests/e2e/rental_flow.spec.ts`: Playwright E2E full agreement flow tests
 - `scripts/verify.ps1`: 5-gate project verification script

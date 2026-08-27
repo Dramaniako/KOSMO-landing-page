@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import express from 'express';
 import bodyParser from 'body-parser';
 import router from '../backend/router';
@@ -547,13 +548,13 @@ test('Empirical Challenge: Milestone 3 RBAC Authorization Matrix & Preview Side-
     assert.equal(data.adminFee, 5000);
     assert.equal(data.totalAmount, (4000000 * 3) + 5000);
 
-    // Verify DB state
+    // Verify DB state immediately after signing (status must be pending, rooms and balance unchanged)
     const [rentalRows] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE id = ?', [data.rentalId]);
     assert.equal(rentalRows.length, 1);
     const r = rentalRows[0];
     assert.equal(r.tenantId, tenant2.id);
     assert.equal(r.propertyId, testProp1Id);
-    assert.equal(r.status, 'active');
+    assert.equal(r.status, 'pending');
     assert.equal(r.contract_hash, data.contractHash);
     assert.equal(r.signer_ip, '203.0.113.195');
     assert.equal(r.signer_user_agent, 'KOSMO-Challenger-Bot/1.0');
@@ -561,11 +562,42 @@ test('Empirical Challenge: Milestone 3 RBAC Authorization Matrix & Preview Side-
     assert.ok(r.tenant_signature_data);
     assert.equal(Number(r.admin_fee_amount), 5000);
 
-    // Verify property occupiedRooms incremented by 1
+    // Verify property occupiedRooms NOT yet incremented before payment
+    const [propBeforePayment] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [testProp1Id]);
+    assert.equal(propBeforePayment[0].occupiedRooms, propBefore[0].occupiedRooms);
+
+    // Verify landlord revenue and balance NOT yet credited before payment
+    const [landlordBeforePayment] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlord1.id]);
+    assert.equal(Number(landlordBeforePayment[0].balance), Number(landlordBefore[0].balance));
+
+    // Simulate payment settlement webhook
+    const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder';
+    const grossAmount = `${(4000000 * 3) + 5000}.00`;
+    const payloadStr = `${data.rentalId}200${grossAmount}${serverKey}`;
+    const signatureKey = crypto.createHash('sha512').update(payloadStr).digest('hex');
+
+    const webhookRes = await fetch(`${baseUrl}/payment/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_id: data.rentalId,
+        status_code: '200',
+        gross_amount: grossAmount,
+        signature_key: signatureKey,
+        transaction_status: 'settlement'
+      })
+    });
+    assert.equal(webhookRes.status, 200);
+
+    // Verify rental status transitioned to active
+    const [activeRentalRows] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE id = ?', [data.rentalId]);
+    assert.equal(activeRentalRows[0].status, 'active');
+
+    // Verify property occupiedRooms incremented by 1 after payment
     const [propAfter] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE id = ?', [testProp1Id]);
     assert.equal(propAfter[0].occupiedRooms, propBefore[0].occupiedRooms + 1);
 
-    // Verify landlord revenue and balance credited by 4000000 * 3 = 12000000
+    // Verify landlord revenue and balance credited by 4000000 * 3 = 12000000 after payment
     const [landlordAfter] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlord1.id]);
     assert.equal(Number(landlordAfter[0].balance), Number(landlordBefore[0].balance) + 12000000);
     assert.equal(Number(landlordAfter[0].totalRevenue), Number(landlordBefore[0].totalRevenue) + 12000000);

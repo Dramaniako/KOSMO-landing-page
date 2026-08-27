@@ -119,23 +119,49 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
     }
 
     try {
-      // Fire 20 requests concurrently to sign contract for the same property
-      const promises = tenantTokens.map((tok, index) => {
-        return fetch(`${baseUrl}/rentals/contract/sign`, {
+      // 1. All 20 tenants sign contracts -> all receive HTTP 201 with status: pending
+      const rentalIds: string[] = [];
+      for (let i = 0; i < 20; i++) {
+        const tok = tenantTokens[i];
+        const res = await fetch(`${baseUrl}/rentals/contract/sign`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${tok}`,
-            'X-Forwarded-For': `192.168.10.${100 + index}`,
-            'User-Agent': `StormClient/${index}`
+            'X-Forwarded-For': `192.168.10.${100 + i}`,
+            'User-Agent': `StormClient/${i}`
           },
           body: JSON.stringify({
             propertyId: propId,
             durationMonths: 2,
             startDate: '2026-10-01',
-            tenantNikPassport: `517101230898${(1000 + index).toString()}`,
+            tenantNikPassport: `517101230898${(1000 + i).toString()}`,
             signatureBase64: validSignatureBase64,
             affirmativeConsent: true
+          })
+        });
+        assert.equal(res.status, 201);
+        const data = await res.json();
+        rentalIds.push(data.rentalId);
+      }
+
+      // 2. Fire 20 payment settlement requests concurrently to webhook
+      const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder';
+      const grossAmount = `${(monthlyPrice * 2) + 5000}.00`;
+
+      const paymentPromises = rentalIds.map((rId) => {
+        const payloadStr = `${rId}200${grossAmount}${serverKey}`;
+        const signatureKey = crypto.createHash('sha512').update(payloadStr).digest('hex');
+
+        return fetch(`${baseUrl}/payment/webhook`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            order_id: rId,
+            status_code: '200',
+            gross_amount: grossAmount,
+            signature_key: signatureKey,
+            transaction_status: 'settlement'
           })
         }).then(async (res) => {
           const body = await res.json();
@@ -143,7 +169,7 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
         });
       });
 
-      const results = await Promise.all(promises);
+      const results = await Promise.all(paymentPromises);
 
       const statusCounts: Record<number, number> = {};
       for (const r of results) {
@@ -151,18 +177,18 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
       }
 
       // EMPIRICAL ORACLE:
-      // Exactly 3 requests must succeed (201 Created) because availableRooms = 3.
-      // Exactly 17 requests must fail (400 Bad Request: "Kamar kos sudah penuh.").
+      // Exactly 3 requests must succeed (200 OK) because availableRooms = 3.
+      // Exactly 17 requests must fail (409 Conflict: "Kamar sudah penuh...").
       // ZERO requests can fail with 500, deadlock, or unexpected errors.
       assert.equal(
-        statusCounts[201],
+        statusCounts[200],
         availableRooms,
-        `Exactly ${availableRooms} requests must succeed with 201 Created. Got: ${JSON.stringify(statusCounts)}`
+        `Exactly ${availableRooms} requests must succeed with 200 OK. Got: ${JSON.stringify(statusCounts)}`
       );
       assert.equal(
-        statusCounts[400],
+        statusCounts[409],
         20 - availableRooms,
-        `Exactly ${20 - availableRooms} requests must fail with 400 Bad Request. Got: ${JSON.stringify(statusCounts)}`
+        `Exactly ${20 - availableRooms} requests must fail with 409 Conflict. Got: ${JSON.stringify(statusCounts)}`
       );
       assert.equal(statusCounts[500] || 0, 0, 'Zero 500 server errors or deadlocks allowed under high concurrency');
 
@@ -171,8 +197,8 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
       assert.equal(propRows[0].occupiedRooms, totalRooms, `occupiedRooms must equal ${totalRooms}`);
 
       // Verify rentals table contains EXACTLY 3 active leases for this property
-      const [rentals] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE propertyId = ?', [propId]);
-      assert.equal(rentals.length, availableRooms, `Database must contain exactly ${availableRooms} rentals for this property`);
+      const [activeRentals] = await pool.query<RentalRow[]>("SELECT * FROM rentals WHERE propertyId = ? AND status = 'active'", [propId]);
+      assert.equal(activeRentals.length, availableRooms, `Database must contain exactly ${availableRooms} active rentals for this property`);
 
       // Verify landlord financial balance & revenue:
       // 3 successful rentals * (2 months * 3,000,000) = 18,000,000 added
@@ -233,7 +259,45 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
     const token = generateJwtToken({ id: tenantId, email: `poly-tenant-${tag}@kosmo.test`, role: 'tenant' });
 
     try {
-      // 15 requests spread across the 5 properties
+      // 1. Tenant signs first contract and activates it via payment settlement webhook
+      const signRes = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          propertyId: propIds[0],
+          durationMonths: 1,
+          startDate: '2026-11-01',
+          tenantNikPassport: '5171012308980001',
+          signatureBase64: validSignatureBase64,
+          affirmativeConsent: true
+        })
+      });
+      assert.equal(signRes.status, 201);
+      const signData = await signRes.json();
+      const firstRentalId = signData.rentalId;
+
+      const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder';
+      const grossAmount = `${3500000 + 5000}.00`;
+      const payloadStr = `${firstRentalId}200${grossAmount}${serverKey}`;
+      const signatureKey = crypto.createHash('sha512').update(payloadStr).digest('hex');
+
+      const webhookRes = await fetch(`${baseUrl}/payment/webhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order_id: firstRentalId,
+          status_code: '200',
+          gross_amount: grossAmount,
+          signature_key: signatureKey,
+          transaction_status: 'settlement'
+        })
+      });
+      assert.equal(webhookRes.status, 200);
+
+      // 2. Now tenant has an active tenancy; 15 requests spread across the 5 properties must all fail with 409
       const promises = Array.from({ length: 15 }, (_, i) => {
         const targetProp = propIds[i % propIds.length];
         return fetch(`${baseUrl}/rentals/contract/sign`, {
@@ -258,25 +322,12 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
 
       const results = await Promise.all(promises);
 
-      const statusCounts: Record<number, number> = {};
-      for (const r of results) {
-        statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
-      }
-
       // EMPIRICAL ORACLE:
-      // Exactly 1 request must succeed with 201 Created (the first one to acquire the tenant row lock).
-      // Exactly 14 requests must fail with 409 Conflict ("Single Active Tenancy Violation").
+      // All 15 requests must fail with 409 Conflict ("Single Active Tenancy Violation").
       // ZERO duplicate leases may be created for the same tenant.
-      assert.equal(
-        statusCounts[201],
-        1,
-        `Single Active Tenancy: Exactly 1 request must succeed. Got: ${JSON.stringify(statusCounts)}`
-      );
-      assert.equal(
-        statusCounts[409],
-        14,
-        `Single Active Tenancy: Exactly 14 requests must be rejected with 409 Conflict. Got: ${JSON.stringify(statusCounts)}`
-      );
+      for (const r of results) {
+        assert.equal(r.status, 409, `All subsequent requests must be rejected with 409 Conflict. Got: ${r.status}`);
+      }
 
       // Verify Database: Exactly 1 active rental in database for this tenant
       const [dbRentals] = await pool.query<RentalRow[]>(

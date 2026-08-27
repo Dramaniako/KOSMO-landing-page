@@ -119,8 +119,47 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
     const token = generateJwtToken({ id: tenantId, email: `tenant-${uniqueTag}@kosmo.test`, role: 'tenant' });
 
     try {
-      // Fire 10 simultaneous signing requests targeting two different properties
-      const promises = Array.from({ length: 10 }, (_, i) => {
+      // 1. Tenant signs contract on Property 1 -> HTTP 201 with status: pending
+      const signRes = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          propertyId: prop1Id,
+          durationMonths: 1,
+          startDate: '2026-09-01',
+          tenantNikPassport: '5171012308980001',
+          signatureBase64: validSignatureBase64,
+          affirmativeConsent: true
+        })
+      });
+      assert.equal(signRes.status, 201);
+      const signData = await signRes.json();
+      const rentalId = signData.rentalId;
+
+      // 2. Settle payment via webhook -> transitions status to 'active', increments occupiedRooms, credits balance
+      const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder';
+      const grossAmount = `${4000000 + 5000}.00`;
+      const payloadStr = `${rentalId}200${grossAmount}${serverKey}`;
+      const signatureKey = crypto.createHash('sha512').update(payloadStr).digest('hex');
+
+      const webhookRes = await fetch(`${baseUrl}/payment/webhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order_id: rentalId,
+          status_code: '200',
+          gross_amount: grossAmount,
+          signature_key: signatureKey,
+          transaction_status: 'settlement'
+        })
+      });
+      assert.equal(webhookRes.status, 200);
+
+      // 3. Now that tenant has an ACTIVE tenancy, fire 9 simultaneous signing requests targeting both properties
+      const promises = Array.from({ length: 9 }, (_, i) => {
         const targetPropId = i % 2 === 0 ? prop1Id : prop2Id;
         return fetch(`${baseUrl}/rentals/contract/sign`, {
           method: 'POST',
@@ -144,23 +183,12 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
 
       const results = await Promise.all(promises);
 
-      const statusCounts: Record<number, number> = {};
-      for (const r of results) {
-        statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
-      }
-
       // EMPIRICAL ORACLE:
-      // Exactly 1 request must succeed with HTTP 201 Created.
-      // Exactly 9 requests must fail with HTTP 409 Conflict.
-      // 0 requests can fail with 500, 400, or deadlock.
-      assert.equal(statusCounts[201], 1, `Exactly 1 request must succeed with 201 Created. Got results: ${JSON.stringify(statusCounts)}`);
-      assert.equal(statusCounts[409], 9, `Exactly 9 requests must fail with 409 Conflict. Got results: ${JSON.stringify(statusCounts)}`);
-
-      // Verify the 409 responses contain the specific Single Active Tenancy violation message
-      const conflictResponses = results.filter((r) => r.status === 409);
-      for (const cr of conflictResponses) {
+      // All 9 concurrent requests must fail with HTTP 409 Conflict.
+      for (const r of results) {
+        assert.equal(r.status, 409, `All subsequent requests must fail with 409 Conflict. Got ${r.status}`);
         assert.ok(
-          cr.body.message?.includes('Single Active Tenancy Violation') || cr.body.message?.includes('masih memiliki sewa kos yang aktif'),
+          r.body.message?.includes('Single Active Tenancy Violation') || r.body.message?.includes('masih memiliki sewa kos yang aktif'),
           '409 response must explain single active tenancy violation'
         );
       }
@@ -180,9 +208,8 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
 
       // Verify landlord financial credit occurred exactly once
       const [landlord] = await pool.query<UserRow[]>('SELECT balance, totalRevenue FROM users WHERE id = ?', [landlordId]);
-      const expectedPrice = rentals[0].propertyId === prop1Id ? 4000000 : 4500000;
-      assert.equal(Number(landlord[0].balance), expectedPrice, 'Landlord balance must be credited exactly once');
-      assert.equal(Number(landlord[0].totalRevenue), expectedPrice, 'Landlord totalRevenue must be credited exactly once');
+      assert.equal(Number(landlord[0].balance), 4000000, 'Landlord balance must be credited exactly once');
+      assert.equal(Number(landlord[0].totalRevenue), 4000000, 'Landlord totalRevenue must be credited exactly once');
     } finally {
       // Cleanup
       await pool.query('DELETE FROM rentals WHERE tenantId = ?', [tenantId]);
@@ -192,9 +219,9 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
   });
 
   // =========================================================================
-  // 2. Concurrent Storm: Room Capacity Starvation Race (HTTP 400 Room Full Guard)
+  // 2. Concurrent Storm: Room Capacity Starvation Race (HTTP 409 Overbooking Guard in Webhook)
   // =========================================================================
-  await t.test('Concurrency Guard 2: 10x simultaneous signing requests for the last room prevents overbooking', async () => {
+  await t.test('Concurrency Guard 2: 10x simultaneous settlement requests for the last room prevents overbooking', async () => {
     const uniqueTag = crypto.randomBytes(4).toString('hex');
     const landlordId = `landlord-cap-${uniqueTag}`;
     const propId = `prop-cap-${uniqueTag}`;
@@ -209,9 +236,12 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
       [propId, landlordId]
     );
 
-    // Setup 10 distinct tenants
+    // Setup 10 distinct tenants and sign 10 pending contracts
     const tenantIds: string[] = [];
-    const tenantTokens: string[] = [];
+    const rentalIds: string[] = [];
+    const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder';
+    const grossAmount = `${5000000 + 5000}.00`;
+
     for (let i = 0; i < 10; i++) {
       const tId = `tenant-cap-${uniqueTag}-${i}`;
       tenantIds.push(tId);
@@ -221,25 +251,42 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
         ) VALUES (?, ?, ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', ?, 'Jl. Pantai Uluwatu No. 1, Badung, Bali', 'Engineer', 'Emergency Contact', '+6281234567899')`,
         [tId, `Cap Tenant ${i}`, `tenant-${uniqueTag}-${i}@kosmo.test`, `517101230898${(1000 + i).toString()}`]
       );
-      tenantTokens.push(generateJwtToken({ id: tId, email: `tenant-${uniqueTag}-${i}@kosmo.test`, role: 'tenant' }));
+      const token = generateJwtToken({ id: tId, email: `tenant-${uniqueTag}-${i}@kosmo.test`, role: 'tenant' });
+      const signRes = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          propertyId: propId,
+          durationMonths: 1,
+          startDate: '2026-09-01',
+          tenantNikPassport: `517101230898${(1000 + i).toString()}`,
+          signatureBase64: validSignatureBase64,
+          affirmativeConsent: true
+        })
+      });
+      assert.equal(signRes.status, 201);
+      const signData = await signRes.json();
+      rentalIds.push(signData.rentalId);
     }
 
     try {
-      // Fire 10 simultaneous signing requests for the same last room
-      const promises = tenantTokens.map((tok) => {
-        return fetch(`${baseUrl}/rentals/contract/sign`, {
+      // Fire 10 simultaneous settlement webhook requests for the 10 pending rentals
+      const promises = rentalIds.map((rId) => {
+        const payloadStr = `${rId}200${grossAmount}${serverKey}`;
+        const signatureKey = crypto.createHash('sha512').update(payloadStr).digest('hex');
+
+        return fetch(`${baseUrl}/payment/webhook`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${tok}`
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            propertyId: propId,
-            durationMonths: 1,
-            startDate: '2026-09-01',
-            tenantNikPassport: '5171012308980001',
-            signatureBase64: validSignatureBase64,
-            affirmativeConsent: true
+            order_id: rId,
+            status_code: '200',
+            gross_amount: grossAmount,
+            signature_key: signatureKey,
+            transaction_status: 'settlement'
           })
         }).then(async (res) => {
           const body = await res.json();
@@ -255,19 +302,19 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
       }
 
       // EMPIRICAL ORACLE:
-      // Exactly 1 request succeeds (201 Created).
-      // Exactly 9 requests fail with 400 Bad Request ("Kamar kos sudah penuh.").
+      // Exactly 1 request succeeds (200 OK) winning the last room.
+      // Exactly 9 requests fail with 409 Conflict ("Kamar sudah penuh...").
       // No overbooking allowed!
-      assert.equal(statusCounts[201], 1, `Exactly 1 request must win the last room (201). Got: ${JSON.stringify(statusCounts)}`);
-      assert.equal(statusCounts[400], 9, `Exactly 9 requests must be rejected with 400. Got: ${JSON.stringify(statusCounts)}`);
+      assert.equal(statusCounts[200], 1, `Exactly 1 settlement request must win the last room (200). Got: ${JSON.stringify(statusCounts)}`);
+      assert.equal(statusCounts[409], 9, `Exactly 9 settlement requests must be rejected with 409 Conflict. Got: ${JSON.stringify(statusCounts)}`);
 
       // Verify property occupiedRooms is strictly capped at totalRooms (10)
       const [propRows] = await pool.query<PropertyRow[]>('SELECT totalRooms, occupiedRooms FROM properties WHERE id = ?', [propId]);
       assert.equal(propRows[0].occupiedRooms, 10, 'occupiedRooms must be exactly 10 and never exceed totalRooms');
 
       // Verify exactly 1 active rental record created for this property
-      const [rentals] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE propertyId = ?', [propId]);
-      assert.equal(rentals.length, 1, 'Exactly 1 rental should be recorded in database');
+      const [activeRentals] = await pool.query<RentalRow[]>("SELECT * FROM rentals WHERE propertyId = ? AND status = 'active'", [propId]);
+      assert.equal(activeRentals.length, 1, 'Exactly 1 active rental should be recorded in database');
     } finally {
       // Cleanup
       await pool.query('DELETE FROM rentals WHERE propertyId = ?', [propId]);
@@ -638,96 +685,107 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
   // 6. Validation Boundary & Adversarial Payload Defenses
   // =========================================================================
   await t.test('Validation Defenses: Rejects invalid NIK, missing consent, short signatures, and bad durations', async () => {
-    const token = generateJwtToken({ id: 'user-tenant', email: 'tenant@kosmo.local', role: 'tenant' });
+    const tenantId = `tenant-val-${crypto.randomBytes(4).toString('hex')}`;
+    await pool.query(
+      `INSERT INTO users (
+        id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone
+      ) VALUES (?, 'Valid KYC Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', '5171012308980001', 'Jl. Pantai Kuta No. 1, Badung, Bali', 'Engineer', 'Emergency Contact', '+6281234567899')`,
+      [tenantId, `${tenantId}@kosmo.test`]
+    );
+    const token = generateJwtToken({ id: tenantId, email: `${tenantId}@kosmo.test`, role: 'tenant' });
 
-    // 6.1 Missing affirmativeConsent
-    const resNoConsent = await fetch(`${baseUrl}/rentals/contract/sign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        propertyId: 'prop-01',
-        durationMonths: 1,
-        startDate: '2026-09-01',
-        tenantNikPassport: '5171012308980001',
-        signatureBase64: validSignatureBase64
-        // affirmativeConsent omitted
-      })
-    });
-    assert.equal(resNoConsent.status, 400, 'Missing affirmativeConsent must be rejected with 400');
+    try {
+      // 6.1 Missing affirmativeConsent
+      const resNoConsent = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          propertyId: 'prop-01',
+          durationMonths: 1,
+          startDate: '2026-09-01',
+          tenantNikPassport: '5171012308980001',
+          signatureBase64: validSignatureBase64
+          // affirmativeConsent omitted
+        })
+      });
+      assert.equal(resNoConsent.status, 400, 'Missing affirmativeConsent must be rejected with 400');
 
-    // 6.2 affirmativeConsent: false
-    const resFalseConsent = await fetch(`${baseUrl}/rentals/contract/sign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        propertyId: 'prop-01',
-        durationMonths: 1,
-        startDate: '2026-09-01',
-        tenantNikPassport: '5171012308980001',
-        signatureBase64: validSignatureBase64,
-        affirmativeConsent: false
-      })
-    });
-    assert.equal(resFalseConsent.status, 400, 'affirmativeConsent: false must be rejected with 400');
+      // 6.2 affirmativeConsent: false
+      const resFalseConsent = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          propertyId: 'prop-01',
+          durationMonths: 1,
+          startDate: '2026-09-01',
+          tenantNikPassport: '5171012308980001',
+          signatureBase64: validSignatureBase64,
+          affirmativeConsent: false
+        })
+      });
+      assert.equal(resFalseConsent.status, 400, 'affirmativeConsent: false must be rejected with 400');
 
-    // 6.3 Invalid NIK (15 digits)
-    const resShortNik = await fetch(`${baseUrl}/rentals/contract/sign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        propertyId: 'prop-01',
-        durationMonths: 1,
-        startDate: '2026-09-01',
-        tenantNikPassport: '123456789012345', // 15 digits
-        signatureBase64: validSignatureBase64,
-        affirmativeConsent: true
-      })
-    });
-    assert.equal(resShortNik.status, 400, '15-digit NIK must be rejected with 400');
+      // 6.3 Invalid NIK (15 digits)
+      const resShortNik = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          propertyId: 'prop-01',
+          durationMonths: 1,
+          startDate: '2026-09-01',
+          tenantNikPassport: '123456789012345', // 15 digits
+          signatureBase64: validSignatureBase64,
+          affirmativeConsent: true
+        })
+      });
+      assert.equal(resShortNik.status, 400, '15-digit NIK must be rejected with 400');
 
-    // 6.4 Invalid NIK (17 digits)
-    const resLongNik = await fetch(`${baseUrl}/rentals/contract/sign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        propertyId: 'prop-01',
-        durationMonths: 1,
-        startDate: '2026-09-01',
-        tenantNikPassport: '12345678901234567', // 17 digits
-        signatureBase64: validSignatureBase64,
-        affirmativeConsent: true
-      })
-    });
-    assert.equal(resLongNik.status, 400, '17-digit NIK must be rejected with 400');
+      // 6.4 Invalid NIK (17 digits)
+      const resLongNik = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          propertyId: 'prop-01',
+          durationMonths: 1,
+          startDate: '2026-09-01',
+          tenantNikPassport: '12345678901234567', // 17 digits
+          signatureBase64: validSignatureBase64,
+          affirmativeConsent: true
+        })
+      });
+      assert.equal(resLongNik.status, 400, '17-digit NIK must be rejected with 400');
 
-    // 6.5 Short signature (< 20 chars)
-    const resShortSig = await fetch(`${baseUrl}/rentals/contract/sign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        propertyId: 'prop-01',
-        durationMonths: 1,
-        startDate: '2026-09-01',
-        tenantNikPassport: '5171012308980001',
-        signatureBase64: 'data:image/png;1234',
-        affirmativeConsent: true
-      })
-    });
-    assert.equal(resShortSig.status, 400, 'Short signature must be rejected with 400');
+      // 6.5 Short signature (< 20 chars)
+      const resShortSig = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          propertyId: 'prop-01',
+          durationMonths: 1,
+          startDate: '2026-09-01',
+          tenantNikPassport: '5171012308980001',
+          signatureBase64: 'data:image/png;1234',
+          affirmativeConsent: true
+        })
+      });
+      assert.equal(resShortSig.status, 400, 'Short signature must be rejected with 400');
 
-    // 6.6 Non-existent propertyId -> HTTP 404
-    const resNonExistentProp = await fetch(`${baseUrl}/rentals/contract/sign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        propertyId: 'prop-does-not-exist-at-all-9999',
-        durationMonths: 1,
-        startDate: '2026-09-01',
-        tenantNikPassport: '5171012308980001',
-        signatureBase64: validSignatureBase64,
-        affirmativeConsent: true
-      })
-    });
-    assert.equal(resNonExistentProp.status, 404, 'Non-existent propertyId must return 404');
+      // 6.6 Non-existent propertyId -> HTTP 404
+      const resNonExistentProp = await fetch(`${baseUrl}/rentals/contract/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          propertyId: 'prop-does-not-exist-at-all-9999',
+          durationMonths: 1,
+          startDate: '2026-09-01',
+          tenantNikPassport: '5171012308980001',
+          signatureBase64: validSignatureBase64,
+          affirmativeConsent: true
+        })
+      });
+      assert.equal(resNonExistentProp.status, 404, 'Non-existent propertyId must return 404');
+    } finally {
+      await pool.query('DELETE FROM users WHERE id = ?', [tenantId]);
+    }
   });
 });
