@@ -7,10 +7,62 @@ export const loginSchema = z.object({
 });
 
 export const registerSchema = z.object({
-  name: z.string().min(1, 'Nama wajib diisi'),
+  name: z.string().min(2, 'Nama wajib diisi minimal 2 karakter'),
   email: z.string().email('Format email tidak valid'),
   password: z.string().min(6, 'Password minimal 6 karakter'),
-  phone: z.string().optional()
+  phone: z
+    .string({ message: 'Nomor telepon wajib diisi saat mendaftar akun' })
+    .trim()
+    .min(9, 'Nomor telepon minimal 9 digit')
+    .max(20, 'Nomor telepon maksimal 20 digit')
+    .regex(
+      /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
+      'Format nomor telepon tidak valid (contoh: 08123456789 atau +628123456789)'
+    )
+});
+
+export const updateProfileSchema = z.object({
+  name: z.string().min(2, 'Nama minimal 2 karakter').optional(),
+  phone: z
+    .string()
+    .trim()
+    .min(9, 'Nomor telepon minimal 9 digit')
+    .max(20, 'Nomor telepon maksimal 20 digit')
+    .regex(
+      /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
+      'Format nomor telepon tidak valid (contoh: 08123456789 atau +628123456789)'
+    )
+    .optional(),
+  paymentMethod: z.string().optional(),
+  notifications: z.boolean().optional(),
+  language: z.string().optional(),
+  identity_type: z.enum(['NIK', 'PASSPORT']).optional(),
+  identity_number: z
+    .string()
+    .trim()
+    .regex(
+      /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
+      'NIK harus 16 digit angka atau Paspor 6-12 karakter alfanumerik'
+    )
+    .optional()
+    .or(z.literal('')),
+  address: z.string().min(5, 'Alamat domisili minimal 5 karakter').optional().or(z.literal('')),
+  occupation: z.string().min(2, 'Pekerjaan/Profesi minimal 2 karakter').optional().or(z.literal('')),
+  emergency_contact_name: z.string().min(2, 'Nama kontak darurat minimal 2 karakter').optional().or(z.literal('')),
+  emergency_contact_relation: z.string().optional().or(z.literal('')),
+  emergency_contact_phone: z
+    .string()
+    .trim()
+    .min(9, 'Nomor telepon kontak darurat minimal 9 digit')
+    .max(20, 'Nomor telepon kontak darurat maksimal 20 digit')
+    .regex(
+      /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
+      'Format nomor telepon kontak darurat tidak valid'
+    )
+    .optional()
+    .or(z.literal('')),
+  date_of_birth: z.string().optional().or(z.literal('')),
+  gender: z.string().optional().or(z.literal(''))
 });
 
 export const propertySchema = z.object({

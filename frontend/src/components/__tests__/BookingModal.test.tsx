@@ -28,7 +28,13 @@ describe('BookingModal Evidentiary UI & Contract Signing Suite', () => {
     name: 'Wayan John Doe',
     email: 'wayan.john@example.com',
     role: 'tenant',
-    phone: '081234567890'
+    phone: '081234567890',
+    identity_type: 'NIK',
+    identity_number: '5171012304950001',
+    address: 'Jl. Sunset Road No. 88, Badung, Bali',
+    occupation: 'Software Engineer',
+    emergency_contact_name: 'Made Wipradnyana',
+    emergency_contact_phone: '081234567899'
   };
 
   const mockSignedContract: SignedContractData = {

@@ -23,6 +23,11 @@ export interface RentalContractData {
   tenantEmail: string;
   tenantPhone?: string;
   tenantNikPassport?: string;
+  tenantAddress?: string;
+  tenantOccupation?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  emergencyContactRelation?: string;
   startDate: string;
   durationMonths?: number;
   monthlyPrice?: number;
@@ -160,26 +165,26 @@ export function generateRentalContractBuffer(data: RentalContractData): Promise<
       const boxY = doc.y;
 
       // Pihak Pertama (Lessor)
-      doc.rect(36, boxY, colWidth, 64).fillAndStroke('#f8fafc', '#cbd5e1');
+      doc.rect(36, boxY, colWidth, 70).fillAndStroke('#f8fafc', '#cbd5e1');
       doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica-Bold')
         .text('PIHAK PERTAMA (PENGELOLA / LESSOR)', 42, boxY + 5);
-      doc.font('Helvetica').fontSize(7).fillColor('#334155')
-        .text(`• Nama / Name    : ${landlordName}`, 42, boxY + 18)
-        .text(`• Email          : ${landlordEmail}`, 42, boxY + 30)
-        .text(`• Telepon / Phone: ${landlordPhone}`, 42, boxY + 42)
-        .text('• Peran / Role   : Pengelola Sah & Penyedia Hunian Co-Living', 42, boxY + 54);
+      doc.font('Helvetica').fontSize(6.8).fillColor('#334155')
+        .text(`• Nama / Name    : ${landlordName}`, 42, boxY + 17)
+        .text(`• Email          : ${landlordEmail}`, 42, boxY + 29)
+        .text(`• Telepon / Phone: ${landlordPhone}`, 42, boxY + 41)
+        .text('• Peran / Role   : Pengelola Sah & Penyedia Hunian Co-Living', 42, boxY + 53);
 
       // Pihak Kedua (Tenant)
-      doc.rect(36 + colWidth + 10, boxY, colWidth, 64).fillAndStroke('#f8fafc', '#cbd5e1');
+      doc.rect(36 + colWidth + 10, boxY, colWidth, 70).fillAndStroke('#f8fafc', '#cbd5e1');
       doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica-Bold')
         .text('PIHAK KEDUA (PENYEWA / TENANT)', 42 + colWidth + 10, boxY + 5);
-      doc.font('Helvetica').fontSize(7).fillColor('#334155')
-        .text(`• Nama Lengkap   : ${data.tenantName}`, 42 + colWidth + 10, boxY + 18)
-        .text(`• NIK / Passport : ${tenantNik}`, 42 + colWidth + 10, boxY + 30)
-        .text(`• Email          : ${data.tenantEmail}`, 42 + colWidth + 10, boxY + 42)
-        .text(`• Telepon / WA   : ${tenantPhone}`, 42 + colWidth + 10, boxY + 54);
+      doc.font('Helvetica').fontSize(6.8).fillColor('#334155')
+        .text(`• Nama Lengkap   : ${data.tenantName}`, 42 + colWidth + 10, boxY + 17)
+        .text(`• NIK / Paspor   : ${tenantNik} • ${data.tenantOccupation || 'Penyewa'}`, 42 + colWidth + 10, boxY + 29)
+        .text(`• Alamat Asal    : ${(data.tenantAddress || 'Denpasar/Badung, Bali').substring(0, 36)}`, 42 + colWidth + 10, boxY + 41)
+        .text(`• Telepon / WA   : ${tenantPhone} • Darurat: ${data.emergencyContactPhone || '-'}`, 42 + colWidth + 10, boxY + 53);
 
-      doc.y = boxY + 70;
+      doc.y = boxY + 76;
 
       // ==========================================
       // PASAL 2 & 3: OBJEK & BIAYA SEWA (2-Column Grid)

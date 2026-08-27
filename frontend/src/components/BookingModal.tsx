@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import {
   Property, User, ContractSignPayload, SignedContractData,
-  ContractPreviewResponse, RentalContractData
+  ContractPreviewResponse, RentalContractData, isUserProfileComplete
 } from '../types/index';
 import { useTranslation } from '../context/LanguageContext';
 import { formatRupiah } from '../utils/format';
@@ -65,10 +65,17 @@ export default function BookingModal({
     return new Date().toISOString().split('T')[0];
   });
 
+  // Profile completeness check
+  const profileStatus = isUserProfileComplete(currentUser);
+
   // 2. Identity Verification (NIK / Passport)
-  const [idType, setIdType] = useState<'NIK' | 'PASSPORT'>('NIK');
-  const [idNumber, setIdNumber] = useState<string>('');
-  const [idTouched, setIdTouched] = useState<boolean>(false);
+  const [idType, setIdType] = useState<'NIK' | 'PASSPORT'>(() => {
+    return (currentUser?.identity_type as 'NIK' | 'PASSPORT') || 'NIK';
+  });
+  const [idNumber, setIdNumber] = useState<string>(() => {
+    return currentUser?.identity_number || '';
+  });
+  const [idTouched, setIdTouched] = useState<boolean>(() => Boolean(currentUser?.identity_number));
   const [idValidationMsg, setIdValidationMsg] = useState<string | null>(null);
 
   // 3. Scroll-to-Read Clickwrap
@@ -102,8 +109,15 @@ export default function BookingModal({
       setHasDrawnSignature(false);
       setSignatureBase64('');
       setSignatureError(null);
-      setIdTouched(false);
-      setIdValidationMsg(null);
+      if (currentUser?.identity_number) {
+        setIdNumber(currentUser.identity_number);
+        setIdType((currentUser.identity_type as 'NIK' | 'PASSPORT') || 'NIK');
+        setIdTouched(true);
+        setIdValidationMsg(null);
+      } else {
+        setIdTouched(false);
+        setIdValidationMsg(null);
+      }
       setShowPreviewModal(false);
 
       // Check if container already fits within view without scrolling
@@ -118,7 +132,7 @@ export default function BookingModal({
 
       return () => clearTimeout(timer);
     }
-  }, [showContract]);
+  }, [showContract, currentUser]);
 
   // Identity Validation Engine
   const validateIdentity = (val: string, type: 'NIK' | 'PASSPORT'): { isValid: boolean; error: string | null } => {
@@ -415,6 +429,43 @@ export default function BookingModal({
               >
                 <ShieldAlert size={16} style={{ color: '#d97706', flexShrink: 0 }} />
                 <span>{activeRentalError || t('modal.activeRentalAlert')}</span>
+              </div>
+            )}
+
+            {/* In-Modal Profile Incomplete Alert */}
+            {currentUser && !profileStatus.complete && (
+              <div
+                style={{
+                  backgroundColor: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#991b1b',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '14px 16px',
+                  marginBottom: '18px',
+                  fontSize: '12px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, marginBottom: '6px' }}>
+                  <AlertCircle size={18} style={{ color: '#dc2626', flexShrink: 0 }} />
+                  <span>Profil Identitas Hukum Belum Lengkap</span>
+                </div>
+                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#b91c1c', lineHeight: '1.4' }}>
+                  Berdasarkan Pasal 1320 KUHPerdata & UU ITE, Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, Kontak Darurat) sebelum dapat menandatangani kontrak.
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+                  {profileStatus.missingFieldLabels.map((lbl, idx) => (
+                    <span key={idx} style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                      ✕ {lbl}
+                    </span>
+                  ))}
+                </div>
+                <a
+                  href="/tenant"
+                  className="btn btn-primary"
+                  style={{ padding: '6px 14px', fontSize: '12px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  Lengkapi Profil di Dashboard &rarr;
+                </a>
               </div>
             )}
 
@@ -807,7 +858,8 @@ export default function BookingModal({
                   !affirmativeConsent ||
                   !signatureConfirmed ||
                   hasActiveRental ||
-                  Boolean(activeRentalError)
+                  Boolean(activeRentalError) ||
+                  !profileStatus.complete
                 }
               >
                 {isSigning ? (
@@ -1171,6 +1223,36 @@ export default function BookingModal({
                 </div>
               )}
 
+              {/* Profile Incomplete Warning Banner */}
+              {currentUser && !profileStatus.complete && (
+                <div
+                  style={{
+                    backgroundColor: '#fffbeb',
+                    border: '1px solid #fde68a',
+                    color: '#92400e',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '12px 14px',
+                    marginBottom: '16px',
+                    fontSize: '12px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, marginBottom: '4px' }}>
+                    <AlertCircle size={16} style={{ color: '#d97706', flexShrink: 0 }} />
+                    <span>Profil Identitas Hukum Belum Lengkap</span>
+                  </div>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '11px', color: '#b45309', lineHeight: '1.4' }}>
+                    Sesuai Pasal 1320 KUHPerdata, Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, Kontak Darurat) sebelum menyewa kos.
+                  </p>
+                  <a
+                    href="/tenant"
+                    className="btn btn-secondary"
+                    style={{ padding: '4px 12px', fontSize: '11px', textDecoration: 'none', display: 'inline-block' }}
+                  >
+                    Lengkapi Profil Sekarang
+                  </a>
+                </div>
+              )}
+
               {/* Action buttons */}
               <div style={{ display: 'flex', gap: '12px' }}>
                 <button
@@ -1186,10 +1268,12 @@ export default function BookingModal({
                     type="button"
                     className="btn btn-primary"
                     style={{ flex: 2 }}
-                    disabled={isFull || hasActiveRental || Boolean(activeRentalError)}
+                    disabled={isFull || hasActiveRental || Boolean(activeRentalError) || !profileStatus.complete}
                     onClick={() => setShowContract(true)}
                   >
-                    {(hasActiveRental || activeRentalError)
+                    {!profileStatus.complete
+                      ? 'Lengkapi Profil untuk Menyewa'
+                      : (hasActiveRental || activeRentalError)
                       ? t('modal.activeRentalFound')
                       : isFull
                       ? t('modal.roomFull')

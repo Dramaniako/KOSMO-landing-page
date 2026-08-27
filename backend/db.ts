@@ -137,7 +137,16 @@ async function createSchemaTables(p: typeof pool): Promise<void> {
       totalWithdrawn DECIMAL(15, 2) DEFAULT 0.00,
       bankName VARCHAR(50) DEFAULT '',
       bankAccountNumber VARCHAR(50) DEFAULT '',
-      bankAccountHolder VARCHAR(100) DEFAULT ''
+      bankAccountHolder VARCHAR(100) DEFAULT '',
+      identity_type VARCHAR(20) DEFAULT 'NIK',
+      identity_number VARCHAR(50) DEFAULT '',
+      address TEXT,
+      occupation VARCHAR(100) DEFAULT '',
+      emergency_contact_name VARCHAR(100) DEFAULT '',
+      emergency_contact_relation VARCHAR(50) DEFAULT '',
+      emergency_contact_phone VARCHAR(50) DEFAULT '',
+      date_of_birth VARCHAR(30) DEFAULT '',
+      gender VARCHAR(20) DEFAULT ''
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
@@ -260,7 +269,16 @@ async function applyTableMigrations(p: typeof pool): Promise<void> {
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_type VARCHAR(20) DEFAULT 'NIK'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_number VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS occupation VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS emergency_contact_name VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS emergency_contact_relation VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS emergency_contact_phone VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(30) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(20) DEFAULT ''"
   ];
 
   for (const query of alterQueries) {
@@ -282,11 +300,14 @@ async function seedDefaultUsers(p: typeof pool): Promise<void> {
     const tenantHash = bcrypt.hashSync('tenant', 10);
 
     await p.query(`
-      INSERT INTO users (id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder)
+      INSERT INTO users (
+        id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder,
+        identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_relation, emergency_contact_phone
+      )
       VALUES 
-        ('user-admin', 'admin@kosmo.com', ?, 'Admin Super', 'admin', '+62 888-8888-8888', 'Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', ''),
-        ('user-landlord', 'landlord@kosmo.com', ?, 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord'),
-        ('user-tenant', 'tenant@kosmo.com', ?, 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '');
+        ('user-admin', 'admin@kosmo.com', ?, 'Admin Super', 'admin', '+62 888-8888-8888', 'Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '', 'NIK', '5171010000000001', 'Kantor Pusat KOSMO Bali, Denpasar', 'Platform Administrator', 'Support Center', 'Kantor', '+628888888888'),
+        ('user-landlord', 'landlord@kosmo.com', ?, 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord', 'NIK', '5171012204850002', 'Jl. Sunset Road No. 88, Seminyak, Badung, Bali', 'Pengelola Properti', 'Wayan Landlord', 'Keluarga', '+6281122334400'),
+        ('user-tenant', 'tenant@kosmo.com', ?, 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '', 'NIK', '5171012308980001', 'Jl. Teuku Umar No. 88, Denpasar Barat, Kota Denpasar, Bali', 'Software Engineer', 'Made Wipradnyana', 'Orang Tua', '+6281234567899');
     `, [adminHash, landlordHash, tenantHash]);
 
     // Seed withdrawals

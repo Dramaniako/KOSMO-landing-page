@@ -124,7 +124,16 @@ async function createSchemaTables(p) {
       totalWithdrawn DECIMAL(15, 2) DEFAULT 0.00,
       bankName VARCHAR(50) DEFAULT '',
       bankAccountNumber VARCHAR(50) DEFAULT '',
-      bankAccountHolder VARCHAR(100) DEFAULT ''
+      bankAccountHolder VARCHAR(100) DEFAULT '',
+      identity_type VARCHAR(20) DEFAULT 'NIK',
+      identity_number VARCHAR(50) DEFAULT '',
+      address TEXT,
+      occupation VARCHAR(100) DEFAULT '',
+      emergency_contact_name VARCHAR(100) DEFAULT '',
+      emergency_contact_relation VARCHAR(50) DEFAULT '',
+      emergency_contact_phone VARCHAR(50) DEFAULT '',
+      date_of_birth VARCHAR(30) DEFAULT '',
+      gender VARCHAR(20) DEFAULT ''
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
   await p.query(`
@@ -234,7 +243,16 @@ async function applyTableMigrations(p) {
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_type VARCHAR(20) DEFAULT 'NIK'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_number VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS occupation VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS emergency_contact_name VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS emergency_contact_relation VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS emergency_contact_phone VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(30) DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(20) DEFAULT ''"
   ];
   for (const query of alterQueries) {
     try {
@@ -251,11 +269,14 @@ async function seedDefaultUsers(p) {
     const landlordHash = bcrypt.hashSync("landlord", 10);
     const tenantHash = bcrypt.hashSync("tenant", 10);
     await p.query(`
-      INSERT INTO users (id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder)
+      INSERT INTO users (
+        id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder,
+        identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_relation, emergency_contact_phone
+      )
       VALUES 
-        ('user-admin', 'admin@kosmo.com', ?, 'Admin Super', 'admin', '+62 888-8888-8888', 'Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', ''),
-        ('user-landlord', 'landlord@kosmo.com', ?, 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord'),
-        ('user-tenant', 'tenant@kosmo.com', ?, 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '');
+        ('user-admin', 'admin@kosmo.com', ?, 'Admin Super', 'admin', '+62 888-8888-8888', 'Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '', 'NIK', '5171010000000001', 'Kantor Pusat KOSMO Bali, Denpasar', 'Platform Administrator', 'Support Center', 'Kantor', '+628888888888'),
+        ('user-landlord', 'landlord@kosmo.com', ?, 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord', 'NIK', '5171012204850002', 'Jl. Sunset Road No. 88, Seminyak, Badung, Bali', 'Pengelola Properti', 'Wayan Landlord', 'Keluarga', '+6281122334400'),
+        ('user-tenant', 'tenant@kosmo.com', ?, 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '', 'NIK', '5171012308980001', 'Jl. Teuku Umar No. 88, Denpasar Barat, Kota Denpasar, Bali', 'Software Engineer', 'Made Wipradnyana', 'Orang Tua', '+6281234567899');
     `, [adminHash, landlordHash, tenantHash]);
     await p.query(`
       INSERT INTO withdrawals (id, userId, bankName, accountNumber, amount, date, status)
@@ -550,13 +571,13 @@ function generateRentalContractBuffer(data) {
       doc.moveDown(0.2);
       const colWidth = (pageWidth - 10) / 2;
       const boxY = doc.y;
-      doc.rect(36, boxY, colWidth, 64).fillAndStroke("#f8fafc", "#cbd5e1");
+      doc.rect(36, boxY, colWidth, 70).fillAndStroke("#f8fafc", "#cbd5e1");
       doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PIHAK PERTAMA (PENGELOLA / LESSOR)", 42, boxY + 5);
-      doc.font("Helvetica").fontSize(7).fillColor("#334155").text(`\u2022 Nama / Name    : ${landlordName}`, 42, boxY + 18).text(`\u2022 Email          : ${landlordEmail}`, 42, boxY + 30).text(`\u2022 Telepon / Phone: ${landlordPhone}`, 42, boxY + 42).text("\u2022 Peran / Role   : Pengelola Sah & Penyedia Hunian Co-Living", 42, boxY + 54);
-      doc.rect(36 + colWidth + 10, boxY, colWidth, 64).fillAndStroke("#f8fafc", "#cbd5e1");
+      doc.font("Helvetica").fontSize(6.8).fillColor("#334155").text(`\u2022 Nama / Name    : ${landlordName}`, 42, boxY + 17).text(`\u2022 Email          : ${landlordEmail}`, 42, boxY + 29).text(`\u2022 Telepon / Phone: ${landlordPhone}`, 42, boxY + 41).text("\u2022 Peran / Role   : Pengelola Sah & Penyedia Hunian Co-Living", 42, boxY + 53);
+      doc.rect(36 + colWidth + 10, boxY, colWidth, 70).fillAndStroke("#f8fafc", "#cbd5e1");
       doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PIHAK KEDUA (PENYEWA / TENANT)", 42 + colWidth + 10, boxY + 5);
-      doc.font("Helvetica").fontSize(7).fillColor("#334155").text(`\u2022 Nama Lengkap   : ${data.tenantName}`, 42 + colWidth + 10, boxY + 18).text(`\u2022 NIK / Passport : ${tenantNik}`, 42 + colWidth + 10, boxY + 30).text(`\u2022 Email          : ${data.tenantEmail}`, 42 + colWidth + 10, boxY + 42).text(`\u2022 Telepon / WA   : ${tenantPhone}`, 42 + colWidth + 10, boxY + 54);
-      doc.y = boxY + 70;
+      doc.font("Helvetica").fontSize(6.8).fillColor("#334155").text(`\u2022 Nama Lengkap   : ${data.tenantName}`, 42 + colWidth + 10, boxY + 17).text(`\u2022 NIK / Paspor   : ${tenantNik} \u2022 ${data.tenantOccupation || "Penyewa"}`, 42 + colWidth + 10, boxY + 29).text(`\u2022 Alamat Asal    : ${(data.tenantAddress || "Denpasar/Badung, Bali").substring(0, 36)}`, 42 + colWidth + 10, boxY + 41).text(`\u2022 Telepon / WA   : ${tenantPhone} \u2022 Darurat: ${data.emergencyContactPhone || "-"}`, 42 + colWidth + 10, boxY + 53);
+      doc.y = boxY + 76;
       const gridY = doc.y;
       doc.rect(36, gridY, colWidth, 76).fillAndStroke("#ffffff", "#e2e8f0");
       doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PASAL 2: OBJEK & LOKASI HUNIAN", 42, gridY + 5);
@@ -836,10 +857,38 @@ var loginSchema = z.object({
   password: z.string().min(1, "Password wajib diisi")
 });
 var registerSchema = z.object({
-  name: z.string().min(1, "Nama wajib diisi"),
+  name: z.string().min(2, "Nama wajib diisi minimal 2 karakter"),
   email: z.string().email("Format email tidak valid"),
   password: z.string().min(6, "Password minimal 6 karakter"),
-  phone: z.string().optional()
+  phone: z.string({ message: "Nomor telepon wajib diisi saat mendaftar akun" }).trim().min(9, "Nomor telepon minimal 9 digit").max(20, "Nomor telepon maksimal 20 digit").regex(
+    /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
+    "Format nomor telepon tidak valid (contoh: 08123456789 atau +628123456789)"
+  )
+});
+var updateProfileSchema = z.object({
+  name: z.string().min(2, "Nama minimal 2 karakter").optional(),
+  phone: z.string().trim().min(9, "Nomor telepon minimal 9 digit").max(20, "Nomor telepon maksimal 20 digit").regex(
+    /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
+    "Format nomor telepon tidak valid (contoh: 08123456789 atau +628123456789)"
+  ).optional(),
+  paymentMethod: z.string().optional(),
+  notifications: z.boolean().optional(),
+  language: z.string().optional(),
+  identity_type: z.enum(["NIK", "PASSPORT"]).optional(),
+  identity_number: z.string().trim().regex(
+    /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
+    "NIK harus 16 digit angka atau Paspor 6-12 karakter alfanumerik"
+  ).optional().or(z.literal("")),
+  address: z.string().min(5, "Alamat domisili minimal 5 karakter").optional().or(z.literal("")),
+  occupation: z.string().min(2, "Pekerjaan/Profesi minimal 2 karakter").optional().or(z.literal("")),
+  emergency_contact_name: z.string().min(2, "Nama kontak darurat minimal 2 karakter").optional().or(z.literal("")),
+  emergency_contact_relation: z.string().optional().or(z.literal("")),
+  emergency_contact_phone: z.string().trim().min(9, "Nomor telepon kontak darurat minimal 9 digit").max(20, "Nomor telepon kontak darurat maksimal 20 digit").regex(
+    /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
+    "Format nomor telepon kontak darurat tidak valid"
+  ).optional().or(z.literal("")),
+  date_of_birth: z.string().optional().or(z.literal("")),
+  gender: z.string().optional().or(z.literal(""))
 });
 var propertySchema = z.object({
   name: z.string().min(1, "Nama properti wajib diisi"),
@@ -899,6 +948,67 @@ function validateBody(schema) {
       return;
     }
     next();
+  };
+}
+
+// backend/types/index.ts
+function isUserProfileComplete(user) {
+  const missingFields = [];
+  const missingFieldLabels = [];
+  if (!user) {
+    return {
+      complete: false,
+      missingFields: ["user"],
+      missingFieldLabels: ["Data Pengguna"]
+    };
+  }
+  if (!user.name || user.name.trim().length < 2) {
+    missingFields.push("name");
+    missingFieldLabels.push("Nama Lengkap (min. 2 karakter)");
+  }
+  if (!user.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email.trim())) {
+    missingFields.push("email");
+    missingFieldLabels.push("Alamat Email Valid");
+  }
+  const cleanPhone = (user.phone || "").trim().replace(/[\s-]/g, "");
+  if (!cleanPhone || cleanPhone.length < 9) {
+    missingFields.push("phone");
+    missingFieldLabels.push("Nomor HP/WhatsApp (min. 9 digit)");
+  }
+  const idType = user.identity_type || "NIK";
+  const cleanId = (user.identity_number || "").trim();
+  if (idType === "NIK") {
+    if (!/^\d{16}$/.test(cleanId)) {
+      missingFields.push("identity_number");
+      missingFieldLabels.push("Nomor NIK KTP (tepat 16 digit angka)");
+    }
+  } else {
+    if (!/^[A-Za-z0-9]{6,12}$/.test(cleanId)) {
+      missingFields.push("identity_number");
+      missingFieldLabels.push("Nomor Paspor (6-12 karakter alfanumerik)");
+    }
+  }
+  if (!user.address || user.address.trim().length < 5) {
+    missingFields.push("address");
+    missingFieldLabels.push("Alamat Domisili/KTP (min. 5 karakter)");
+  }
+  if (!user.occupation || user.occupation.trim().length < 2) {
+    missingFields.push("occupation");
+    missingFieldLabels.push("Pekerjaan/Profesi/Instansi");
+  }
+  if (!user.emergency_contact_name || user.emergency_contact_name.trim().length < 2) {
+    missingFields.push("emergency_contact_name");
+    missingFieldLabels.push("Nama Kontak Darurat");
+  }
+  const cleanEmerPhone = (user.emergency_contact_phone || "").trim().replace(/[\s-]/g, "");
+  if (!cleanEmerPhone || cleanEmerPhone.length < 9) {
+    missingFields.push("emergency_contact_phone");
+    missingFieldLabels.push("Nomor Telepon Kontak Darurat");
+  }
+  return {
+    complete: missingFields.length === 0,
+    missingFields,
+    missingFieldLabels
   };
 }
 
@@ -977,6 +1087,17 @@ router.post("/upload", upload.single("image"), async (req, res) => {
 var generateId = (prefix) => {
   return `${prefix}-${crypto3.randomBytes(4).toString("hex")}`;
 };
+function formatSafeUser(user) {
+  const safeUser = { ...user };
+  delete safeUser.password;
+  const profileStatus = isUserProfileComplete(user);
+  return {
+    ...safeUser,
+    isProfileComplete: profileStatus.complete,
+    missingProfileFields: profileStatus.missingFields,
+    missingProfileFieldLabels: profileStatus.missingFieldLabels
+  };
+}
 router.post("/auth/login", authLimiter, validateBody(loginSchema), async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -988,8 +1109,7 @@ router.post("/auth/login", authLimiter, validateBody(loginSchema), async (req, r
     if (!user || !user.password || !bcrypt2.compareSync(password, user.password)) {
       return res.status(401).json({ message: "Email atau password salah." });
     }
-    const safeUser = { ...user };
-    delete safeUser.password;
+    const safeUser = formatSafeUser(user);
     const token = generateJwtToken({
       id: user.id,
       email: user.email,
@@ -1007,8 +1127,8 @@ router.post("/auth/login", authLimiter, validateBody(loginSchema), async (req, r
 });
 router.post("/auth/register", authLimiter, validateBody(registerSchema), async (req, res) => {
   const { email, password, name, phone } = req.body;
-  if (!email || !password || !name) {
-    return res.status(400).json({ message: "Nama, email, dan password wajib diisi." });
+  if (!email || !password || !name || !phone) {
+    return res.status(400).json({ message: "Nama, email, password, dan nomor telepon wajib diisi." });
   }
   try {
     const [rows] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
@@ -1020,12 +1140,11 @@ router.post("/auth/register", authLimiter, validateBody(registerSchema), async (
     await pool.query(
       `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
        VALUES (?, ?, ?, ?, 'tenant', ?, 'Virtual Account')`,
-      [userId, email, hashedPassword, name, phone || ""]
+      [userId, email, hashedPassword, name, phone.trim()]
     );
     const [newUsers] = await pool.query("SELECT * FROM users WHERE id = ?", [userId]);
     const newUser = newUsers[0];
-    const safeUser = { ...newUser };
-    delete safeUser.password;
+    const safeUser = formatSafeUser(newUser);
     const token = generateJwtToken({
       id: newUser.id,
       email: newUser.email,
@@ -1041,6 +1160,18 @@ router.post("/auth/register", authLimiter, validateBody(registerSchema), async (
     res.status(500).json({ message: "Terjadi kesalahan pada server." });
   }
 });
+router.get("/auth/me", authenticateToken, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ message: "Otentikasi diperlukan." });
+  try {
+    const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [userId]);
+    const user = rows[0];
+    if (!user) return res.status(404).json({ message: "User tidak ditemukan." });
+    res.json(formatSafeUser(user));
+  } catch (err) {
+    res.status(500).json({ message: "Gagal mengambil profil user." });
+  }
+});
 router.get("/users/profile/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
   const authUser = req.user;
@@ -1053,17 +1184,30 @@ router.get("/users/profile/:id", authenticateToken, async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User tidak ditemukan." });
     }
-    const safeUser = { ...user };
-    delete safeUser.password;
-    res.json(safeUser);
+    res.json(formatSafeUser(user));
   } catch (err) {
     res.status(500).json({ message: "Gagal mengambil profil user." });
   }
 });
-router.put("/users/profile/:id", authenticateToken, async (req, res) => {
+router.put("/users/profile/:id", authenticateToken, validateBody(updateProfileSchema), async (req, res) => {
   const { id } = req.params;
   const authUser = req.user;
-  const { name, phone, paymentMethod, notifications, language } = req.body;
+  const {
+    name,
+    phone,
+    paymentMethod,
+    notifications,
+    language,
+    identity_type,
+    identity_number,
+    address,
+    occupation,
+    emergency_contact_name,
+    emergency_contact_relation,
+    emergency_contact_phone,
+    date_of_birth,
+    gender
+  } = req.body;
   if (authUser?.role !== "admin" && authUser?.id !== id) {
     return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat mengubah profil pengguna lain." });
   }
@@ -1074,15 +1218,43 @@ router.put("/users/profile/:id", authenticateToken, async (req, res) => {
     }
     const notifVal = notifications !== void 0 ? notifications ? 1 : 0 : 1;
     await pool.query(
-      `UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), 
-       paymentMethod = COALESCE(?, paymentMethod), notifications = ?, language = COALESCE(?, language) 
-       WHERE id = ?`,
-      [name, phone, paymentMethod, notifVal, language, id]
+      `UPDATE users SET 
+        name = COALESCE(?, name), 
+        phone = COALESCE(?, phone), 
+        paymentMethod = COALESCE(?, paymentMethod), 
+        notifications = ?, 
+        language = COALESCE(?, language),
+        identity_type = COALESCE(?, identity_type),
+        identity_number = COALESCE(?, identity_number),
+        address = COALESCE(?, address),
+        occupation = COALESCE(?, occupation),
+        emergency_contact_name = COALESCE(?, emergency_contact_name),
+        emergency_contact_relation = COALESCE(?, emergency_contact_relation),
+        emergency_contact_phone = COALESCE(?, emergency_contact_phone),
+        date_of_birth = COALESCE(?, date_of_birth),
+        gender = COALESCE(?, gender)
+      WHERE id = ?`,
+      [
+        name,
+        phone,
+        paymentMethod,
+        notifVal,
+        language,
+        identity_type,
+        identity_number,
+        address,
+        occupation,
+        emergency_contact_name,
+        emergency_contact_relation,
+        emergency_contact_phone,
+        date_of_birth,
+        gender,
+        id
+      ]
     );
     const [updatedUsers] = await pool.query("SELECT * FROM users WHERE id = ?", [id]);
     const updatedUser = updatedUsers[0];
-    const safeUser = { ...updatedUser };
-    delete safeUser.password;
+    const safeUser = formatSafeUser(updatedUser);
     res.json({
       message: "Profil berhasil diperbarui!",
       user: safeUser
@@ -1092,23 +1264,66 @@ router.put("/users/profile/:id", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Gagal memperbarui profil." });
   }
 });
-router.put("/auth/profile", authenticateToken, async (req, res) => {
+router.put("/auth/profile", authenticateToken, validateBody(updateProfileSchema), async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ message: "Otentikasi diperlukan." });
-  const { name, phone, paymentMethod, notifications, language } = req.body;
+  const {
+    name,
+    phone,
+    paymentMethod,
+    notifications,
+    language,
+    identity_type,
+    identity_number,
+    address,
+    occupation,
+    emergency_contact_name,
+    emergency_contact_relation,
+    emergency_contact_phone,
+    date_of_birth,
+    gender
+  } = req.body;
   try {
     const notifVal = notifications !== void 0 ? notifications ? 1 : 0 : 1;
     await pool.query(
-      `UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), 
-       paymentMethod = COALESCE(?, paymentMethod), notifications = ?, language = COALESCE(?, language) 
-       WHERE id = ?`,
-      [name, phone, paymentMethod, notifVal, language, userId]
+      `UPDATE users SET 
+        name = COALESCE(?, name), 
+        phone = COALESCE(?, phone), 
+        paymentMethod = COALESCE(?, paymentMethod), 
+        notifications = ?, 
+        language = COALESCE(?, language),
+        identity_type = COALESCE(?, identity_type),
+        identity_number = COALESCE(?, identity_number),
+        address = COALESCE(?, address),
+        occupation = COALESCE(?, occupation),
+        emergency_contact_name = COALESCE(?, emergency_contact_name),
+        emergency_contact_relation = COALESCE(?, emergency_contact_relation),
+        emergency_contact_phone = COALESCE(?, emergency_contact_phone),
+        date_of_birth = COALESCE(?, date_of_birth),
+        gender = COALESCE(?, gender)
+      WHERE id = ?`,
+      [
+        name,
+        phone,
+        paymentMethod,
+        notifVal,
+        language,
+        identity_type,
+        identity_number,
+        address,
+        occupation,
+        emergency_contact_name,
+        emergency_contact_relation,
+        emergency_contact_phone,
+        date_of_birth,
+        gender,
+        userId
+      ]
     );
     const [updatedUsers] = await pool.query("SELECT * FROM users WHERE id = ?", [userId]);
     const updatedUser = updatedUsers[0];
     if (!updatedUser) return res.status(404).json({ message: "User tidak ditemukan." });
-    const safeUser = { ...updatedUser };
-    delete safeUser.password;
+    const safeUser = formatSafeUser(updatedUser);
     res.json({
       message: "Profil berhasil diperbarui!",
       user: safeUser
@@ -2315,7 +2530,12 @@ router.post(
         tenantName: tenant ? tenant.name : authUser.email,
         tenantEmail: tenant ? tenant.email : authUser.email,
         tenantPhone: tenant ? tenant.phone || "" : "",
-        tenantNikPassport: tenantNikPassport || "-",
+        tenantNikPassport: tenantNikPassport || (tenant ? tenant.identity_number : "") || "-",
+        tenantAddress: tenant ? tenant.address || "" : "",
+        tenantOccupation: tenant ? tenant.occupation || "" : "",
+        emergencyContactName: tenant ? tenant.emergency_contact_name || "" : "",
+        emergencyContactPhone: tenant ? tenant.emergency_contact_phone || "" : "",
+        emergencyContactRelation: tenant ? tenant.emergency_contact_relation || "" : "",
         startDate: startDateStr,
         durationMonths: duration,
         monthlyPrice,
@@ -2336,6 +2556,7 @@ router.post(
       };
       const pdfBuffer = await generateRentalContractBuffer(contractData);
       const contractHash = computeContractHash(pdfBuffer);
+      const profileStatus = tenant ? isUserProfileComplete(tenant) : { complete: false, missingFields: ["user"], missingFieldLabels: ["Data Pengguna"] };
       return res.status(200).json({
         success: true,
         contractData,
@@ -2343,7 +2564,10 @@ router.post(
         monthlyPrice,
         adminFee,
         totalPrice,
-        totalAmount: totalPrice
+        totalAmount: totalPrice,
+        isProfileComplete: profileStatus.complete,
+        missingProfileFields: profileStatus.missingFields,
+        missingProfileFieldLabels: profileStatus.missingFieldLabels
       });
     } catch (err) {
       console.error("Contract preview error:", err);
@@ -2376,6 +2600,16 @@ router.post(
       if (!tenant) {
         await connection.rollback();
         return res.status(404).json({ success: false, message: "Pengguna tidak ditemukan." });
+      }
+      const profileCheck = isUserProfileComplete(tenant);
+      if (!profileCheck.complete) {
+        await connection.rollback();
+        return res.status(422).json({
+          success: false,
+          message: "Profil identitas hukum penyewa belum lengkap. Berdasarkan Pasal 1320 KUHPerdata & UU ITE, Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, dan Kontak Darurat) pada profil Anda sebelum menyewa kos.",
+          missingFields: profileCheck.missingFields,
+          missingFieldLabels: profileCheck.missingFieldLabels
+        });
       }
       const [activeRentals] = await connection.query(
         "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE",
@@ -2426,7 +2660,12 @@ router.post(
         tenantName: tenant ? tenant.name : authUser.email,
         tenantEmail: tenant ? tenant.email : authUser.email,
         tenantPhone: tenant ? tenant.phone || "" : "",
-        tenantNikPassport,
+        tenantNikPassport: tenantNikPassport || (tenant ? tenant.identity_number : "") || "-",
+        tenantAddress: tenant ? tenant.address || "" : "",
+        tenantOccupation: tenant ? tenant.occupation || "" : "",
+        emergencyContactName: tenant ? tenant.emergency_contact_name || "" : "",
+        emergencyContactPhone: tenant ? tenant.emergency_contact_phone || "" : "",
+        emergencyContactRelation: tenant ? tenant.emergency_contact_relation || "" : "",
         startDate: startDateStr,
         durationMonths: duration,
         monthlyPrice: rentalPrice,
@@ -2559,6 +2798,19 @@ router.post("/rentals", authenticateToken, async (req, res) => {
     }
     const [userRows] = await connection.query("SELECT * FROM users WHERE id = ?", [tenantId]);
     const tenant = userRows[0];
+    if (!tenant) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Pengguna tidak ditemukan." });
+    }
+    const profileCheck = isUserProfileComplete(tenant);
+    if (!profileCheck.complete) {
+      await connection.rollback();
+      return res.status(422).json({
+        message: "Profil identitas hukum penyewa belum lengkap. Lengkapi profil Anda terlebih dahulu sebelum menyewa.",
+        missingFields: profileCheck.missingFields,
+        missingFieldLabels: profileCheck.missingFieldLabels
+      });
+    }
     const [activeRentals] = await connection.query(
       "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? LIMIT 1",
       [tenantId, rentalId]
@@ -2579,6 +2831,12 @@ router.post("/rentals", authenticateToken, async (req, res) => {
         tenantName: tenant ? tenant.name : "Penyewa",
         tenantEmail: tenant ? tenant.email : "",
         tenantPhone: tenant ? tenant.phone : "",
+        tenantNikPassport: tenant ? tenant.identity_number : "",
+        tenantAddress: tenant ? tenant.address : "",
+        tenantOccupation: tenant ? tenant.occupation : "",
+        emergencyContactName: tenant ? tenant.emergency_contact_name : "",
+        emergencyContactPhone: tenant ? tenant.emergency_contact_phone : "",
+        emergencyContactRelation: tenant ? tenant.emergency_contact_relation : "",
         propertyName: rentalName,
         propertyAddress: property.address || "",
         pricePerMonth: rentalPrice,
@@ -2722,6 +2980,11 @@ router.get(
           u.name AS tenant_name,
           u.email AS tenant_email,
           u.phone AS tenant_phone,
+          u.address AS tenant_address,
+          u.occupation AS tenant_occupation,
+          u.emergency_contact_name AS tenant_emergency_contact_name,
+          u.emergency_contact_phone AS tenant_emergency_contact_phone,
+          u.emergency_contact_relation AS tenant_emergency_contact_relation,
           l.name AS landlord_name,
           l.email AS landlord_email,
           l.phone AS landlord_phone
@@ -2757,6 +3020,11 @@ router.get(
         tenantEmail: rental.tenant_email || "",
         tenantPhone: rental.tenant_phone || "",
         tenantNikPassport: rental.tenant_nik_passport || "-",
+        tenantAddress: rental.tenant_address || "",
+        tenantOccupation: rental.tenant_occupation || "",
+        emergencyContactName: rental.tenant_emergency_contact_name || "",
+        emergencyContactPhone: rental.tenant_emergency_contact_phone || "",
+        emergencyContactRelation: rental.tenant_emergency_contact_relation || "",
         startDate: rental.rental_start_date || (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
         durationMonths: contractDuration,
         monthlyPrice: contractMonthlyPrice,

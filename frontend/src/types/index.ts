@@ -1,4 +1,5 @@
 export type UserRole = 'tenant' | 'landlord' | 'admin';
+export type IdentityType = 'NIK' | 'PASSPORT';
 
 export interface User {
   id: string;
@@ -16,6 +17,111 @@ export interface User {
   bankName?: string;
   bankAccountNumber?: string;
   bankAccountHolder?: string;
+  identity_type?: IdentityType;
+  identity_number?: string;
+  address?: string;
+  occupation?: string;
+  emergency_contact_name?: string;
+  emergency_contact_relation?: string;
+  emergency_contact_phone?: string;
+  date_of_birth?: string;
+  gender?: string;
+  isProfileComplete?: boolean;
+  missingProfileFields?: string[];
+}
+
+export interface ProfileCompletenessResult {
+  complete: boolean;
+  missingFields: string[];
+  missingFieldLabels: string[];
+}
+
+export function isUserProfileComplete(user: {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  identity_type?: string | null;
+  identity_number?: string | null;
+  address?: string | null;
+  occupation?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
+} | null | undefined): ProfileCompletenessResult {
+  const missingFields: string[] = [];
+  const missingFieldLabels: string[] = [];
+
+  if (!user) {
+    return {
+      complete: false,
+      missingFields: ['user'],
+      missingFieldLabels: ['Data Pengguna']
+    };
+  }
+
+  // 1. Name
+  if (!user.name || user.name.trim().length < 2) {
+    missingFields.push('name');
+    missingFieldLabels.push('Nama Lengkap (min. 2 karakter)');
+  }
+
+  // 2. Email
+  if (!user.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email.trim())) {
+    missingFields.push('email');
+    missingFieldLabels.push('Alamat Email Valid');
+  }
+
+  // 3. Phone
+  const cleanPhone = (user.phone || '').trim().replace(/[\s-]/g, '');
+  if (!cleanPhone || cleanPhone.length < 9) {
+    missingFields.push('phone');
+    missingFieldLabels.push('Nomor HP/WhatsApp (min. 9 digit)');
+  }
+
+  // 4. Identity Document (NIK / Passport)
+  const idType = user.identity_type || 'NIK';
+  const cleanId = (user.identity_number || '').trim();
+  if (idType === 'NIK') {
+    if (!/^\d{16}$/.test(cleanId)) {
+      missingFields.push('identity_number');
+      missingFieldLabels.push('Nomor NIK KTP (tepat 16 digit angka)');
+    }
+  } else {
+    if (!/^[A-Za-z0-9]{6,12}$/.test(cleanId)) {
+      missingFields.push('identity_number');
+      missingFieldLabels.push('Nomor Paspor (6-12 karakter alfanumerik)');
+    }
+  }
+
+  // 5. Permanent / Domicile Address
+  if (!user.address || user.address.trim().length < 5) {
+    missingFields.push('address');
+    missingFieldLabels.push('Alamat Domisili/KTP (min. 5 karakter)');
+  }
+
+  // 6. Occupation
+  if (!user.occupation || user.occupation.trim().length < 2) {
+    missingFields.push('occupation');
+    missingFieldLabels.push('Pekerjaan/Profesi/Instansi');
+  }
+
+  // 7. Emergency Contact Name
+  if (!user.emergency_contact_name || user.emergency_contact_name.trim().length < 2) {
+    missingFields.push('emergency_contact_name');
+    missingFieldLabels.push('Nama Kontak Darurat');
+  }
+
+  // 8. Emergency Contact Phone
+  const cleanEmerPhone = (user.emergency_contact_phone || '').trim().replace(/[\s-]/g, '');
+  if (!cleanEmerPhone || cleanEmerPhone.length < 9) {
+    missingFields.push('emergency_contact_phone');
+    missingFieldLabels.push('Nomor Telepon Kontak Darurat');
+  }
+
+  return {
+    complete: missingFields.length === 0,
+    missingFields,
+    missingFieldLabels
+  };
 }
 
 export interface Property {
@@ -92,6 +198,11 @@ export interface RentalContractData {
   tenantEmail: string;
   tenantPhone?: string;
   tenantNikPassport?: string;
+  tenantAddress?: string;
+  tenantOccupation?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  emergencyContactRelation?: string;
   startDate: string;
   durationMonths?: number;
   monthlyPrice?: number;

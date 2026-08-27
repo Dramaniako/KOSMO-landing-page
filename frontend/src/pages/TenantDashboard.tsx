@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   User as UserIcon, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
-  Plus, LogOut, Globe, MessageSquare, Building, X, Download, Home, Compass, History, Calendar
+  Plus, LogOut, Globe, MessageSquare, Building, X, Download, Home, Compass, History, Calendar,
+  ShieldCheck, AlertTriangle, CheckCircle2, UserCheck, MapPin, Briefcase, PhoneCall
 } from 'lucide-react';
-import { User, Property, Review, Rental } from '../types/index';
+import { User, Property, Review, Rental, isUserProfileComplete } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
 
@@ -22,6 +23,15 @@ interface ProfileFormState {
   paymentMethod: string;
   notifications: boolean;
   language: string;
+  identity_type: 'NIK' | 'PASSPORT';
+  identity_number: string;
+  address: string;
+  occupation: string;
+  emergency_contact_name: string;
+  emergency_contact_relation: string;
+  emergency_contact_phone: string;
+  date_of_birth: string;
+  gender: string;
 }
 
 export default function TenantDashboard() {
@@ -60,7 +70,16 @@ export default function TenantDashboard() {
     phone: currentUser?.phone || '',
     paymentMethod: currentUser?.paymentMethod || 'Virtual Account',
     notifications: currentUser?.notifications !== undefined ? currentUser.notifications : true,
-    language: currentUser?.language || 'Indonesia'
+    language: currentUser?.language || 'Indonesia',
+    identity_type: (currentUser?.identity_type as 'NIK' | 'PASSPORT') || 'NIK',
+    identity_number: currentUser?.identity_number || '',
+    address: currentUser?.address || '',
+    occupation: currentUser?.occupation || '',
+    emergency_contact_name: currentUser?.emergency_contact_name || '',
+    emergency_contact_relation: currentUser?.emergency_contact_relation || 'Orang Tua',
+    emergency_contact_phone: currentUser?.emergency_contact_phone || '',
+    date_of_birth: currentUser?.date_of_birth || '',
+    gender: currentUser?.gender || ''
   }));
 
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
@@ -432,151 +451,405 @@ export default function TenantDashboard() {
         </header>
 
         {/* PROFILE TAB */}
-        {activeTab === 'profile' && (
-          <div className="grid-2">
-            <div className="card" style={{ padding: '32px', backgroundColor: 'white' }}>
-              <div className="flex-between" style={{ marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                <h3 style={{ fontSize: '20px' }}>{t('tenant.accountInfo')}</h3>
-                {!isEditingProfile && (
-                  <button className="btn btn-secondary" style={{ padding: '6px 16px' }} onClick={() => setIsEditingProfile(true)}>
-                    {t('tenant.editProfile')}
-                  </button>
-                )}
-              </div>
-
-              {isEditingProfile ? (
-                <form onSubmit={handleProfileSubmit}>
-                  <div className="form-group">
-                    <label className="form-label">{t('auth.name')}</label>
-                    <input 
-                      type="text" 
-                      className="form-input"
-                      value={profileForm.name}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, name: e.target.value })}
-                      required
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">{t('auth.phone')}</label>
-                    <input 
-                      type="text" 
-                      className="form-input"
-                      value={profileForm.phone}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, phone: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">{t('modal.choosePayment')}</label>
-                    <select 
-                      className="form-select"
-                      value={profileForm.paymentMethod}
-                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProfileForm({ ...profileForm, paymentMethod: e.target.value })}
+        {activeTab === 'profile' && (() => {
+          const profileStatus = isUserProfileComplete(currentUser);
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Statutory Legal Verification Status Banner */}
+              <div 
+                className="card"
+                style={{ 
+                  padding: '24px', 
+                  backgroundColor: profileStatus.complete ? '#f0fdf4' : '#fffbeb',
+                  borderColor: profileStatus.complete ? '#bbf7d0' : '#fde68a',
+                  borderWidth: '1px',
+                  borderStyle: 'solid'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                    <div 
+                      style={{ 
+                        width: '48px', 
+                        height: '48px', 
+                        borderRadius: '12px', 
+                        backgroundColor: profileStatus.complete ? '#dcfce7' : '#fef3c7',
+                        color: profileStatus.complete ? '#16a34a' : '#d97706',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                      }}
                     >
-                      <option value="Virtual Account">Virtual Account (BCA/Mandiri)</option>
-                      <option value="Kartu Kredit">Credit Card / Debit Online</option>
-                      <option value="E-Wallet">GoPay / OVO / ShopeePay</option>
-                    </select>
+                      {profileStatus.complete ? <ShieldCheck size={28} /> : <AlertTriangle size={28} />}
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <h3 style={{ fontSize: '18px', fontWeight: 700, color: profileStatus.complete ? '#166534' : '#92400e', margin: 0 }}>
+                          {profileStatus.complete 
+                            ? 'Profil Identitas Hukum Terverifikasi (KUHPerdata & UU ITE)' 
+                            : 'Profil Identitas Belum Lengkap — Akses Sewa Kos Terkunci'}
+                        </h3>
+                        <span 
+                          className="badge" 
+                          style={{ 
+                            backgroundColor: profileStatus.complete ? '#22c55e' : '#f59e0b',
+                            color: 'white',
+                            fontWeight: 600,
+                            fontSize: '11px'
+                          }}
+                        >
+                          {profileStatus.complete ? '🟢 SIAP MENYEWA KOS' : '⚠️ BUTUH KELENGKAPAN KYC'}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '13px', color: profileStatus.complete ? '#15803d' : '#b45309', marginTop: '6px', lineHeight: '1.5' }}>
+                        {profileStatus.complete 
+                          ? 'Data identitas legal Anda telah lengkap sesuai standar Pasal 1320 KUHPerdata dan UU ITE No. 11/2008 jo. UU No. 1/2024. Anda berhak melakukan penandatanganan digital dan pemesanan kos di KOSMO.'
+                          : 'Berdasarkan hukum perjanjian sewa Indonesia (KUHPerdata Pasal 1320), Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, dan Kontak Darurat) sebelum dapat menandatangani kontrak dan menyewa kos.'}
+                      </p>
+                      {!profileStatus.complete && (
+                        <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: '#92400e', alignSelf: 'center' }}>
+                            Data yang belum lengkap:
+                          </span>
+                          {profileStatus.missingFieldLabels.map((lbl, idx) => (
+                            <span 
+                              key={idx}
+                              style={{ 
+                                backgroundColor: '#fee2e2', 
+                                color: '#b91c1c', 
+                                padding: '3px 10px', 
+                                borderRadius: '6px', 
+                                fontSize: '11px', 
+                                fontWeight: 600 
+                              }}
+                            >
+                              ✕ {lbl}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-
-                  <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-                    <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
-                      {t('tenant.saveProfile')}
+                  {!isEditingProfile && !profileStatus.complete && (
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ padding: '8px 20px', fontSize: '13px', whiteSpace: 'nowrap' }} 
+                      onClick={() => setIsEditingProfile(true)}
+                    >
+                      Lengkapi Profil Sekarang
                     </button>
-                    <button type="button" className="btn btn-secondary" onClick={() => setIsEditingProfile(false)}>
-                      {t('tenant.cancel')}
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>{t('auth.name')}</span>
-                    <strong>{currentUser.name}</strong>
-                  </div>
-                  <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>{t('auth.email')}</span>
-                    <strong>{currentUser.email}</strong>
-                  </div>
-                  <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>{t('auth.phone')}</span>
-                    <strong>{currentUser.phone || '-'}</strong>
-                  </div>
-                  <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>{t('auth.role')}</span>
-                    <span className="badge badge-primary">{currentUser.role.toUpperCase()}</span>
-                  </div>
-                  <div className="flex-between">
-                    <span style={{ color: 'var(--text-muted)' }}>Metode Pembayaran Utama</span>
-                    <strong>{currentUser.paymentMethod || 'Virtual Account'}</strong>
-                  </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
 
-            {/* Profile Settings (Notifications / Language) */}
-            <div className="card" style={{ padding: '32px', backgroundColor: 'white' }}>
-              <h3 style={{ fontSize: '20px', marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                {t('tenant.accountSettings')}
-              </h3>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                <div className="flex-between">
-                  <div>
-                    <strong style={{ display: 'block', fontSize: '14px' }}>Notifikasi Email & WhatsApp</strong>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Kirimkan pengingat jatuh tempo sewa kos otomatis.</span>
+              <div className="grid-2">
+                {/* Left Card: Account & KYC Legal Profile */}
+                <div className="card" style={{ padding: '32px', backgroundColor: 'white' }}>
+                  <div className="flex-between" style={{ marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <UserCheck size={20} style={{ color: 'var(--primary)' }} />
+                      <h3 style={{ fontSize: '18px', fontWeight: 700 }}>Data Identitas Hukum & Akun</h3>
+                    </div>
+                    {!isEditingProfile && (
+                      <button className="btn btn-secondary" style={{ padding: '6px 16px' }} onClick={() => setIsEditingProfile(true)}>
+                        {t('tenant.editProfile')}
+                      </button>
+                    )}
                   </div>
-                  <input 
-                    type="checkbox" 
-                    checked={profileForm.notifications}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      const newNotif = e.target.checked;
-                      setProfileForm({ ...profileForm, notifications: newNotif });
-                      fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ notifications: newNotif })
-                      });
-                    }}
-                  />
+
+                  {isEditingProfile ? (
+                    <form onSubmit={handleProfileSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {/* Subheading: Data Akun */}
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>
+                        1. Informasi Dasar & Kontak
+                      </div>
+                      
+                      <div className="form-group">
+                        <label className="form-label">{t('auth.name')} (Sesuai KTP/Paspor) *</label>
+                        <input 
+                          type="text" 
+                          className="form-input"
+                          placeholder="Nama lengkap sesuai tanda pengenal"
+                          value={profileForm.name}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, name: e.target.value })}
+                          required
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">{t('auth.phone')} / WhatsApp (Aktif) *</label>
+                        <input 
+                          type="tel" 
+                          className="form-input"
+                          placeholder="Contoh: 08123456789 atau +62812..."
+                          value={profileForm.phone}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                          required
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">{t('modal.choosePayment')}</label>
+                        <select 
+                          className="form-select"
+                          value={profileForm.paymentMethod}
+                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProfileForm({ ...profileForm, paymentMethod: e.target.value })}
+                        >
+                          <option value="Virtual Account">Virtual Account (BCA / Mandiri / BNI / BRI)</option>
+                          <option value="Kartu Kredit">Credit Card / Debit Online</option>
+                          <option value="E-Wallet">GoPay / QRIS / ShopeePay</option>
+                        </select>
+                      </div>
+
+                      {/* Subheading: Identitas Hukum */}
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
+                        2. Identitas Legal (Wajib Kontrak Sewa)
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '12px' }}>
+                        <div className="form-group">
+                          <label className="form-label">Jenis ID *</label>
+                          <select
+                            className="form-select"
+                            value={profileForm.identity_type}
+                            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => 
+                              setProfileForm({ ...profileForm, identity_type: e.target.value as 'NIK' | 'PASSPORT' })
+                            }
+                          >
+                            <option value="NIK">NIK (KTP)</option>
+                            <option value="PASSPORT">Paspor</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">
+                            {profileForm.identity_type === 'NIK' ? 'Nomor NIK KTP (16 Digit) *' : 'Nomor Paspor *'}
+                          </label>
+                          <input 
+                            type="text" 
+                            className="form-input"
+                            placeholder={profileForm.identity_type === 'NIK' ? 'Contoh: 5171012308980001' : 'Contoh: A12345678'}
+                            maxLength={profileForm.identity_type === 'NIK' ? 16 : 15}
+                            value={profileForm.identity_number}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                              const val = profileForm.identity_type === 'NIK' 
+                                ? e.target.value.replace(/\D/g, '') 
+                                : e.target.value.toUpperCase();
+                              setProfileForm({ ...profileForm, identity_number: val });
+                            }}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Alamat Domisili / Sesuai KTP *</label>
+                        <textarea 
+                          className="form-input"
+                          rows={2}
+                          placeholder="Jalan, RT/RW, Kelurahan, Kecamatan, Kota/Kabupaten, Provinsi"
+                          value={profileForm.address}
+                          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setProfileForm({ ...profileForm, address: e.target.value })}
+                          required
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Pekerjaan / Profesi / Instansi *</label>
+                        <input 
+                          type="text" 
+                          className="form-input"
+                          placeholder="Contoh: Software Engineer / Mahasiswa / Wirausaha"
+                          value={profileForm.occupation}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, occupation: e.target.value })}
+                          required
+                        />
+                      </div>
+
+                      {/* Subheading: Kontak Darurat */}
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
+                        3. Kontak Darurat (Emergency Contact)
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Nama Lengkap Kontak Darurat *</label>
+                        <input 
+                          type="text" 
+                          className="form-input"
+                          placeholder="Nama kerabat atau orang tua"
+                          value={profileForm.emergency_contact_name}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, emergency_contact_name: e.target.value })}
+                          required
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div className="form-group">
+                          <label className="form-label">Hubungan *</label>
+                          <select
+                            className="form-select"
+                            value={profileForm.emergency_contact_relation}
+                            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProfileForm({ ...profileForm, emergency_contact_relation: e.target.value })}
+                          >
+                            <option value="Orang Tua">Orang Tua</option>
+                            <option value="Saudara Kandung">Saudara Kandung</option>
+                            <option value="Pasangan">Pasangan (Suami/Istri)</option>
+                            <option value="Keluarga/Kerabat">Keluarga / Kerabat</option>
+                            <option value="Teman/Rekan Kerja">Teman / Rekan Kerja</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Nomor Telepon Darurat *</label>
+                          <input 
+                            type="tel" 
+                            className="form-input"
+                            placeholder="Contoh: 081234567899"
+                            value={profileForm.emergency_contact_phone}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfileForm({ ...profileForm, emergency_contact_phone: e.target.value })}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+                        <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                          {t('tenant.saveProfile')}
+                        </button>
+                        <button type="button" className="btn btn-secondary" onClick={() => setIsEditingProfile(false)}>
+                          {t('tenant.cancel')}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>{t('auth.name')}</span>
+                        <strong>{currentUser.name}</strong>
+                      </div>
+                      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>{t('auth.email')}</span>
+                        <strong>{currentUser.email}</strong>
+                      </div>
+                      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>{t('auth.phone')}</span>
+                        <strong>{currentUser.phone || '-'}</strong>
+                      </div>
+                      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Jenis & No. Identitas</span>
+                        <strong>
+                          {currentUser.identity_number ? `${currentUser.identity_type || 'NIK'}: ${currentUser.identity_number}` : <span style={{ color: 'var(--danger)' }}>Belum Diisi</span>}
+                        </strong>
+                      </div>
+                      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Pekerjaan / Profesi</span>
+                        <strong>{currentUser.occupation || <span style={{ color: 'var(--danger)' }}>Belum Diisi</span>}</strong>
+                      </div>
+                      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Alamat Domisili KTP</span>
+                        <strong style={{ maxWidth: '60%', textAlign: 'right' }}>
+                          {currentUser.address || <span style={{ color: 'var(--danger)' }}>Belum Diisi</span>}
+                        </strong>
+                      </div>
+                      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Kontak Darurat</span>
+                        <strong>
+                          {currentUser.emergency_contact_name 
+                            ? `${currentUser.emergency_contact_name} (${currentUser.emergency_contact_relation || 'Darurat'}: ${currentUser.emergency_contact_phone})`
+                            : <span style={{ color: 'var(--danger)' }}>Belum Diisi</span>}
+                        </strong>
+                      </div>
+                      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Metode Pembayaran</span>
+                        <strong>{currentUser.paymentMethod || 'Virtual Account'}</strong>
+                      </div>
+                      <div className="flex-between">
+                        <span style={{ color: 'var(--text-muted)' }}>{t('auth.role')}</span>
+                        <span className="badge badge-primary">{currentUser.role.toUpperCase()}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex-between">
-                  <div>
-                    <strong style={{ display: 'block', fontSize: '14px' }}>Bahasa Aplikasi (Language)</strong>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pilih bahasa antarmuka aplikasi KOSMO.</span>
-                  </div>
-                  <select 
-                    className="form-select" 
-                    style={{ width: '130px' }}
-                    value={profileForm.language}
-                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-                      const newLang = e.target.value;
-                      setProfileForm({ ...profileForm, language: newLang });
-                      fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ language: newLang })
-                      });
-                    }}
-                  >
-                    <option value="Indonesia">Indonesia</option>
-                    <option value="English">English</option>
-                  </select>
-                </div>
+                {/* Right Column: Settings & Statutory Legal Information */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  {/* Account Settings (Notifications / Language) */}
+                  <div className="card" style={{ padding: '32px', backgroundColor: 'white' }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                      {t('tenant.accountSettings')}
+                    </h3>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #f1f5f9', marginTop: '16px' }}>
-                  <HelpCircle size={24} style={{ color: 'var(--primary)' }} />
-                  <div>
-                    <p style={{ fontWeight: 600, fontSize: '13px' }}>Butuh bantuan darurat?</p>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Hubungi Live Chat KOSMO Care 24/7 di WhatsApp.</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      <div className="flex-between">
+                        <div>
+                          <strong style={{ display: 'block', fontSize: '14px' }}>Notifikasi Email & WhatsApp</strong>
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Kirimkan pengingat jatuh tempo sewa kos otomatis.</span>
+                        </div>
+                        <input 
+                          type="checkbox" 
+                          checked={profileForm.notifications}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                            const newNotif = e.target.checked;
+                            setProfileForm({ ...profileForm, notifications: newNotif });
+                            fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
+                              method: 'PUT',
+                              headers: { 
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+                              },
+                              body: JSON.stringify({ notifications: newNotif })
+                            });
+                          }}
+                        />
+                      </div>
+
+                      <div className="flex-between">
+                        <div>
+                          <strong style={{ display: 'block', fontSize: '14px' }}>Bahasa Aplikasi (Language)</strong>
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pilih bahasa antarmuka aplikasi KOSMO.</span>
+                        </div>
+                        <select 
+                          className="form-select" 
+                          style={{ width: '130px' }}
+                          value={profileForm.language}
+                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                            const newLang = e.target.value;
+                            setProfileForm({ ...profileForm, language: newLang });
+                            fetch(`${API_BASE}/users/profile/${currentUser.id}`, {
+                              method: 'PUT',
+                              headers: { 
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+                              },
+                              body: JSON.stringify({ language: newLang })
+                            });
+                          }}
+                        >
+                          <option value="Indonesia">Indonesia</option>
+                          <option value="English">English</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Legal Compliance Card */}
+                  <div className="card" style={{ padding: '24px', backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                      <FileText size={20} style={{ color: 'var(--primary)' }} />
+                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--primary)' }}>
+                        Ketetapan Hukum E-Kontrak Sewa KOSMO
+                      </h4>
+                    </div>
+                    <ul style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.6', paddingLeft: '18px', margin: 0 }}>
+                      <li><strong>Pasal 1320 KUHPerdata:</strong> Perjanjian sewa menyewa sah jika memuat kesepakatan, kecakapan, objek tertentu, dan sebab yang halal.</li>
+                      <li><strong>UU ITE No. 11/2008 jo. UU No. 1/2024:</strong> Tanda tangan digital dan dokumen elektronik memiliki kekuatan hukum dan akibat hukum yang sah.</li>
+                      <li><strong>Ketentuan Domisili & Yurisdiksi:</strong> Seluruh sengketa tunduk pada yurisdiksi Pengadilan Negeri Denpasar / Badung, Bali.</li>
+                    </ul>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* RENTALS TAB */}
         {activeTab === 'rentals' && (() => {

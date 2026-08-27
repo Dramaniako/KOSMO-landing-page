@@ -89,6 +89,25 @@ test('Live MySQL Database Integration & Transaction Safeguards', async (t) => {
     }
   });
 
+  await t.test('verifies users table schema includes statutory legal identity and KYC columns', async () => {
+    const [columns] = await pool.query<RowDataPacket[]>('SHOW COLUMNS FROM users');
+    const columnNames = columns.map((col) => col.Field as string);
+
+    const requiredKycColumns = [
+      'identity_type',
+      'identity_number',
+      'address',
+      'occupation',
+      'emergency_contact_name',
+      'emergency_contact_relation',
+      'emergency_contact_phone'
+    ];
+
+    for (const col of requiredKycColumns) {
+      assert.ok(columnNames.includes(col), `users table must contain column ${col}`);
+    }
+  });
+
   await t.test('verifies seeded default user roles exist in database', async () => {
     const [users] = await pool.query<UserRow[]>('SELECT id, email, role, name FROM users');
     assert.ok(users.length > 0, 'Database should contain users');
@@ -155,7 +174,9 @@ test('Live MySQL Database Integration & Transaction Safeguards', async (t) => {
 
       // 0. Create temporary test user within transaction
       await connection.query(
-        "INSERT INTO users (id, name, email, role, password) VALUES (?, 'Test Tenant M3', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu')",
+        `INSERT INTO users (
+          id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone
+        ) VALUES (?, 'Test Tenant M3', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', '5171012308980001', 'Jl. Teuku Umar No. 14, Denpasar, Bali', 'Software Engineer', 'Emergency Contact', '+6281234567899')`,
         [testTenantId, `tenant-${Date.now()}@kosmo.test`]
       );
 

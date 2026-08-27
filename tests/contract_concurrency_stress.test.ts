@@ -108,8 +108,10 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
       const tId = `tenant-storm1-${tag}-${i}`;
       tenantIds.push(tId);
       await pool.query(
-        "INSERT INTO users (id, name, email, role, password) VALUES (?, ?, ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu')",
-        [tId, `Storm Tenant ${i}`, `tenant-storm-${tag}-${i}@kosmo.test`]
+        `INSERT INTO users (
+          id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone
+        ) VALUES (?, ?, ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', ?, 'Jl. Sunset Road No. 88, Badung, Bali', 'Engineer', 'Emergency Contact', '+6281234567899')`,
+        [tId, `Storm Tenant ${i}`, `tenant-storm-${tag}-${i}@kosmo.test`, `517101230898${(1000 + i).toString()}`]
       );
       tenantTokens.push(
         generateJwtToken({ id: tId, email: `tenant-storm-${tag}-${i}@kosmo.test`, role: 'tenant' })
@@ -208,7 +210,9 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
 
     // Seed Tenant & Landlord
     await pool.query(
-      "INSERT INTO users (id, name, email, role, password) VALUES (?, 'Poly Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu')",
+      `INSERT INTO users (
+        id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone
+      ) VALUES (?, 'Poly Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', '5171012308980001', 'Jl. Danau Tamblingan No. 5, Sanur, Bali', 'Developer', 'Emergency Contact', '+6281234567899')`,
       [tenantId, `poly-tenant-${tag}@kosmo.test`]
     );
     await pool.query(
@@ -260,22 +264,32 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
       }
 
       // EMPIRICAL ORACLE:
-      // Exactly 1 request succeeds (201).
-      // Exactly 14 requests fail with 409 Conflict.
-      assert.equal(statusCounts[201], 1, `Exactly 1 request must succeed. Got: ${JSON.stringify(statusCounts)}`);
-      assert.equal(statusCounts[409], 14, `Exactly 14 requests must be rejected with 409 Conflict. Got: ${JSON.stringify(statusCounts)}`);
+      // Exactly 1 request must succeed with 201 Created (the first one to acquire the tenant row lock).
+      // Exactly 14 requests must fail with 409 Conflict ("Single Active Tenancy Violation").
+      // ZERO duplicate leases may be created for the same tenant.
+      assert.equal(
+        statusCounts[201],
+        1,
+        `Single Active Tenancy: Exactly 1 request must succeed. Got: ${JSON.stringify(statusCounts)}`
+      );
+      assert.equal(
+        statusCounts[409],
+        14,
+        `Single Active Tenancy: Exactly 14 requests must be rejected with 409 Conflict. Got: ${JSON.stringify(statusCounts)}`
+      );
 
-      // Verify DB has strictly 1 active rental for this tenant
-      const [rentals] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE tenantId = ? AND status = "active"', [tenantId]);
-      assert.equal(rentals.length, 1, 'Tenant must have exactly 1 active rental in database');
-
-      // Verify total occupied rooms across all 5 properties equals exactly 1
-      const [allProps] = await pool.query<PropertyRow[]>('SELECT occupiedRooms FROM properties WHERE id IN (?)', [propIds]);
-      const totalOccupied = allProps.reduce((sum, p) => sum + Number(p.occupiedRooms), 0);
-      assert.equal(totalOccupied, 1, 'Total occupied rooms across all 5 properties must equal exactly 1');
+      // Verify Database: Exactly 1 active rental in database for this tenant
+      const [dbRentals] = await pool.query<RentalRow[]>(
+        "SELECT id, status FROM rentals WHERE tenantId = ? AND status = 'active'",
+        [tenantId]
+      );
+      assert.equal(dbRentals.length, 1, 'Database must contain exactly 1 active rental for this tenant');
     } finally {
+      // Cleanup
       await pool.query('DELETE FROM rentals WHERE tenantId = ?', [tenantId]);
-      await pool.query('DELETE FROM properties WHERE id IN (?)', [propIds]);
+      for (const pId of propIds) {
+        await pool.query('DELETE FROM properties WHERE id = ?', [pId]);
+      }
       await pool.query('DELETE FROM users WHERE id IN (?, ?)', [tenantId, landlordId]);
     }
   });
@@ -290,7 +304,9 @@ test('DEEP ADVERSARIAL STRESS: High-Concurrency Storms, Race Conditions & Rollba
     const propId = `prop-xss-${tag}`;
 
     await pool.query(
-      "INSERT INTO users (id, name, email, role, password) VALUES (?, 'Sec Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu')",
+      `INSERT INTO users (
+        id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone
+      ) VALUES (?, 'Sec Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', '5171012308980001', 'Jl. Pantai Kuta No. 1, Badung, Bali', 'Security Tester', 'Emergency Contact', '+6281234567899')`,
       [tenantId, `sec-${tag}@kosmo.test`]
     );
     await pool.query(

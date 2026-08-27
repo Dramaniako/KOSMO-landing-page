@@ -102,12 +102,14 @@ test('Empirical Challenge: Milestone 3 RBAC Authorization Matrix & Preview Side-
   // Seed test users, property, and rental in live DB for end-to-end endpoint verification
   try {
     await pool.query(
-      `INSERT INTO users (id, name, email, role, password, balance, totalRevenue) VALUES
-       (?, ?, ?, ?, '$2a$10$hash', 0, 0),
-       (?, ?, ?, ?, '$2a$10$hash', 0, 0),
-       (?, ?, ?, ?, '$2a$10$hash', 0, 0),
-       (?, ?, ?, ?, '$2a$10$hash', 0, 0),
-       (?, ?, ?, ?, '$2a$10$hash', 0, 0)`,
+      `INSERT INTO users (
+        id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone, balance, totalRevenue
+      ) VALUES
+       (?, ?, ?, ?, '$2a$10$hash', '+6281234567890', 'NIK', '5171012308980001', 'Jl. Test No. 1, Denpasar, Bali', 'Engineer', 'Emergency Contact', '+6281234567899', 0, 0),
+       (?, ?, ?, ?, '$2a$10$hash', '+6281234567890', 'NIK', '5171012308980002', 'Jl. Test No. 2, Denpasar, Bali', 'Engineer', 'Emergency Contact', '+6281234567899', 0, 0),
+       (?, ?, ?, ?, '$2a$10$hash', '+6281234567890', 'NIK', '5171012308980003', 'Jl. Test No. 3, Denpasar, Bali', 'Landlord', 'Emergency Contact', '+6281234567899', 0, 0),
+       (?, ?, ?, ?, '$2a$10$hash', '+6281234567890', 'NIK', '5171012308980004', 'Jl. Test No. 4, Denpasar, Bali', 'Landlord', 'Emergency Contact', '+6281234567899', 0, 0),
+       (?, ?, ?, ?, '$2a$10$hash', '+6281234567890', 'NIK', '5171012308980005', 'Jl. Test No. 5, Denpasar, Bali', 'Admin', 'Emergency Contact', '+6281234567899', 0, 0)`,
       [
         tenant1.id, tenant1.name, tenant1.email, tenant1.role,
         tenant2.id, tenant2.name, tenant2.email, tenant2.role,

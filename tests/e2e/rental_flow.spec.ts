@@ -46,6 +46,24 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     });
     expect(regRes.ok()).toBeTruthy();
     const regData = (await regRes.json()) as { token: string; user: { id: string; name: string; email: string; role: string } };
+
+    // 1b. Complete statutory KYC profile fields before booking
+    const kycProfile = {
+      identity_type: 'NIK',
+      identity_number: '5171012304950001',
+      address: 'Jl. Sunset Road No. 88, Badung, Bali',
+      occupation: 'Software Engineer',
+      emergency_contact_name: 'Made Wipradnyana',
+      emergency_contact_relation: 'Orang Tua',
+      emergency_contact_phone: '+6281234567899'
+    };
+    const profRes = await request.put('/api/auth/profile', {
+      headers: { Authorization: `Bearer ${regData.token}` },
+      data: kycProfile
+    });
+    expect(profRes.ok()).toBeTruthy();
+    const updatedUser = { ...regData.user, ...kycProfile, phone: testTenant.phone };
+
     // Intercept Midtrans Snap SDK network requests
     await page.route('**/snap/snap.js', (route) => {
       route.fulfill({
@@ -80,7 +98,7 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
           }
         };
       }
-    }, { token: regData.token, user: regData.user });
+    }, { token: regData.token, user: updatedUser });
 
     // 3. Navigate to landing page
     await page.goto('/');
@@ -180,6 +198,22 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     expect(regRes.ok()).toBeTruthy();
     const regData = (await regRes.json()) as { token: string; user: { id: string; name: string; email: string; role: string } };
 
+    // 1b. Complete KYC profile before creating active rental
+    const kycData = {
+      identity_type: 'NIK',
+      identity_number: '5171012304950002',
+      address: 'Jl. Teuku Umar No. 88, Denpasar, Bali',
+      occupation: 'Software Engineer',
+      emergency_contact_name: 'Made Wipradnyana',
+      emergency_contact_relation: 'Orang Tua',
+      emergency_contact_phone: '+6281234567899'
+    };
+    await request.put('/api/auth/profile', {
+      headers: { Authorization: `Bearer ${regData.token}` },
+      data: kycData
+    });
+    const updatedTenantUser = { ...regData.user, ...kycData, phone: tenantUser.phone };
+
     // 2. Create the first active rental via API
     const rentRes = await request.post('/api/rentals', {
       headers: { Authorization: `Bearer ${regData.token}` },
@@ -210,7 +244,7 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     await page.addInitScript(({ token, user }) => {
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
-    }, { token: regData.token, user: regData.user });
+    }, { token: regData.token, user: updatedTenantUser });
 
     await page.goto('/');
 
@@ -244,6 +278,20 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     const regRes = await request.post('/api/auth/register', { data: tenantUser });
     expect(regRes.ok()).toBeTruthy();
     const regData = (await regRes.json()) as { token: string; user: { id: string; name: string; email: string; role: string } };
+
+    // 1b. Complete KYC profile before creating active rental
+    await request.put('/api/auth/profile', {
+      headers: { Authorization: `Bearer ${regData.token}` },
+      data: {
+        identity_type: 'NIK',
+        identity_number: '5171012304950003',
+        address: 'Jl. Sunset Road No. 88, Badung, Bali',
+        occupation: 'Software Engineer',
+        emergency_contact_name: 'Made Wipradnyana',
+        emergency_contact_relation: 'Orang Tua',
+        emergency_contact_phone: '+6281234567899'
+      }
+    });
 
     // 2. Create active rental via API
     const rentRes = await request.post('/api/rentals', {

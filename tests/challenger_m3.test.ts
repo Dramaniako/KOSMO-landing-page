@@ -98,7 +98,9 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
 
     // Setup test users & properties
     await pool.query(
-      "INSERT INTO users (id, name, email, role, password) VALUES (?, 'Concurrent Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu')",
+      `INSERT INTO users (
+        id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone
+      ) VALUES (?, 'Concurrent Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', '5171012308980001', 'Jl. Pantai Batu Bolong No. 1, Canggu, Bali', 'Engineer', 'Emergency Contact', '+6281234567899')`,
       [tenantId, `tenant-${uniqueTag}@kosmo.test`]
     );
     await pool.query(
@@ -214,8 +216,10 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
       const tId = `tenant-cap-${uniqueTag}-${i}`;
       tenantIds.push(tId);
       await pool.query(
-        "INSERT INTO users (id, name, email, role, password) VALUES (?, ?, ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu')",
-        [tId, `Cap Tenant ${i}`, `tenant-${uniqueTag}-${i}@kosmo.test`]
+        `INSERT INTO users (
+          id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone
+        ) VALUES (?, ?, ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', ?, 'Jl. Pantai Uluwatu No. 1, Badung, Bali', 'Engineer', 'Emergency Contact', '+6281234567899')`,
+        [tId, `Cap Tenant ${i}`, `tenant-${uniqueTag}-${i}@kosmo.test`, `517101230898${(1000 + i).toString()}`]
       );
       tenantTokens.push(generateJwtToken({ id: tId, email: `tenant-${uniqueTag}-${i}@kosmo.test`, role: 'tenant' }));
     }
@@ -425,7 +429,9 @@ test('CHALLENGER SUITE: Milestone 3 Endpoints, Audit Trail, RBAC & Concurrency G
     const testUserAgent = 'KOSMO-Forensic-Audit-Runner/3.0';
 
     await pool.query(
-      "INSERT INTO users (id, name, email, role, password) VALUES (?, 'Audit Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu')",
+      `INSERT INTO users (
+        id, name, email, role, password, phone, identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_phone
+      ) VALUES (?, 'Audit Tenant', ?, 'tenant', '$2a$10$abcdefghijklmnopqrstuu', '+6281234567890', 'NIK', '5171012308980001', 'Jl. Bypass Ngurah Rai No. 10, Denpasar Selatan, Bali', 'Auditor', 'Emergency Contact', '+6281234567899')`,
       [tenantId, `tenant-audit-${uniqueTag}@kosmo.test`]
     );
     await pool.query(

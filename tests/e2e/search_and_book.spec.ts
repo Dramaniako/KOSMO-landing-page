@@ -126,7 +126,14 @@ test.describe('Search, Filter, and Rental Booking Flow', () => {
         id: 'user-tenant-e2e',
         name: 'Bayu Wipradnyana',
         email: 'bayu.tenant@kosmo.id',
-        role: 'tenant'
+        role: 'tenant',
+        phone: '081234567890',
+        identity_type: 'NIK',
+        identity_number: '5171012304950001',
+        address: 'Jl. Teuku Umar No. 88, Denpasar, Bali',
+        occupation: 'Software Engineer',
+        emergency_contact_name: 'Made Wipradnyana',
+        emergency_contact_phone: '081234567899'
       }));
       localStorage.setItem('token', 'mock-valid-jwt-token-for-e2e');
     });

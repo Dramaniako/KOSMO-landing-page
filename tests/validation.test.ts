@@ -5,12 +5,14 @@ import {
   validateBody,
   loginSchema,
   registerSchema,
+  updateProfileSchema,
   propertySchema,
   withdrawalSchema,
   reviewSchema,
   previewContractSchema,
   signContractSchema
 } from '../backend/middleware/validation';
+import { isUserProfileComplete } from '../backend/types/index';
 import type { Request, Response, NextFunction } from 'express';
 
 test('Zod request body validation middleware & schemas', async (t) => {
@@ -322,5 +324,81 @@ test('Zod request body validation middleware & schemas', async (t) => {
     const oversizedSig = 'data:image/png;base64,' + 'A'.repeat(1_000_100);
     const oversizedResult = signContractSchema.safeParse({ ...base, signatureBase64: oversizedSig });
     assert.equal(oversizedResult.success, false);
+  });
+
+  await t.test('registerSchema strictly requires valid phone number', () => {
+    const valid = registerSchema.safeParse({
+      name: 'Budi Santoso',
+      email: 'budi@example.com',
+      password: 'password123',
+      phone: '08123456789'
+    });
+    assert.equal(valid.success, true);
+
+    const missingPhone = registerSchema.safeParse({
+      name: 'Budi Santoso',
+      email: 'budi@example.com',
+      password: 'password123'
+    });
+    assert.equal(missingPhone.success, false);
+
+    const shortPhone = registerSchema.safeParse({
+      name: 'Budi Santoso',
+      email: 'budi@example.com',
+      password: 'password123',
+      phone: '12345'
+    });
+    assert.equal(shortPhone.success, false);
+  });
+
+  await t.test('updateProfileSchema validates legal identity and KYC fields', () => {
+    const valid = updateProfileSchema.safeParse({
+      name: 'Bayu Wipradnyana',
+      phone: '+6281234567890',
+      identity_type: 'NIK',
+      identity_number: '5171012308980001',
+      address: 'Jl. Teuku Umar No. 88, Denpasar, Bali',
+      occupation: 'Software Engineer',
+      emergency_contact_name: 'Made Wipradnyana',
+      emergency_contact_relation: 'Orang Tua',
+      emergency_contact_phone: '+6281234567899'
+    });
+    assert.equal(valid.success, true);
+
+    const invalidNik = updateProfileSchema.safeParse({
+      identity_number: '123'
+    });
+    assert.equal(invalidNik.success, false);
+  });
+
+  await t.test('isUserProfileComplete evaluates KYC profile requirements according to statutory standards', () => {
+    const completeUser = {
+      id: 'user-01',
+      email: 'bayu@example.com',
+      name: 'Bayu Wipradnyana',
+      role: 'tenant' as const,
+      phone: '081234567890',
+      identity_type: 'NIK' as const,
+      identity_number: '5171012308980001',
+      address: 'Jl. Teuku Umar No. 88, Denpasar, Bali',
+      occupation: 'Software Engineer',
+      emergency_contact_name: 'Made Wipradnyana',
+      emergency_contact_phone: '081234567899'
+    };
+
+    const completeResult = isUserProfileComplete(completeUser);
+    assert.equal(completeResult.complete, true);
+    assert.equal(completeResult.missingFields.length, 0);
+
+    const incompleteUser = {
+      ...completeUser,
+      address: '',
+      emergency_contact_phone: ''
+    };
+
+    const incompleteResult = isUserProfileComplete(incompleteUser);
+    assert.equal(incompleteResult.complete, false);
+    assert.ok(incompleteResult.missingFields.includes('address'));
+    assert.ok(incompleteResult.missingFields.includes('emergency_contact_phone'));
   });
 });

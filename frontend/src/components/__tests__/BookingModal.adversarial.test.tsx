@@ -29,7 +29,13 @@ describe('Adversarial Stress Test: Evidentiary UI & Digital Contract Gating', ()
     name: 'Ketut Test Tenant',
     email: 'ketut.test@example.com',
     role: 'tenant',
-    phone: '081999888777'
+    phone: '081999888777',
+    identity_type: 'NIK',
+    identity_number: '5171012304950001',
+    address: 'Jl. Kayu Tulang No. 12, Canggu, Badung, Bali',
+    occupation: 'Software Engineer',
+    emergency_contact_name: 'Wayan Contact',
+    emergency_contact_phone: '081999888666'
   };
 
   const mockRenderIcon = (name: string) => <span data-testid={`facility-${name}`}>{name}</span>;

@@ -31,6 +31,7 @@ import type { JWTPayload, AuthenticatedRequest } from './middleware/auth';
 import {
   loginSchema,
   registerSchema,
+  updateProfileSchema,
   propertySchema,
   reviewSchema,
   previewContractSchema,
@@ -42,11 +43,13 @@ import type {
   Booking,
   User,
   UserRole,
+  IdentityType,
   Amenity,
   BookingStatus,
   RentalContractData,
   RentalContractJoinedRow
 } from './types/index';
+import { isUserProfileComplete } from './types/index';
 
 export {
   generateJwtToken,
@@ -184,6 +187,31 @@ interface UserRow extends RowDataPacket {
   bankName?: string;
   bankAccountNumber?: string;
   bankAccountHolder?: string;
+  identity_type?: IdentityType;
+  identity_number?: string;
+  address?: string;
+  occupation?: string;
+  emergency_contact_name?: string;
+  emergency_contact_relation?: string;
+  emergency_contact_phone?: string;
+  date_of_birth?: string;
+  gender?: string;
+}
+
+export function formatSafeUser(user: UserRow): Partial<UserRow> & {
+  isProfileComplete: boolean;
+  missingProfileFields: string[];
+  missingProfileFieldLabels: string[];
+} {
+  const safeUser: Partial<UserRow> = { ...user };
+  delete safeUser.password;
+  const profileStatus = isUserProfileComplete(user);
+  return {
+    ...safeUser,
+    isProfileComplete: profileStatus.complete,
+    missingProfileFields: profileStatus.missingFields,
+    missingProfileFieldLabels: profileStatus.missingFieldLabels
+  };
 }
 
 router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req: Request<Record<string, never>, unknown, LoginBody>, res: Response) => {
@@ -200,9 +228,7 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req: R
       return res.status(401).json({ message: "Email atau password salah." });
     }
 
-    // Exclude password from the returned object
-    const safeUser: Partial<UserRow> = { ...user };
-    delete safeUser.password;
+    const safeUser = formatSafeUser(user);
     const token = generateJwtToken({
       id: user.id,
       email: user.email,
@@ -222,8 +248,8 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req: R
 
 router.post('/auth/register', authLimiter, validateBody(registerSchema), async (req: Request<Record<string, never>, unknown, RegisterBody>, res: Response) => {
   const { email, password, name, phone } = req.body;
-  if (!email || !password || !name) {
-    return res.status(400).json({ message: "Nama, email, dan password wajib diisi." });
+  if (!email || !password || !name || !phone) {
+    return res.status(400).json({ message: "Nama, email, password, dan nomor telepon wajib diisi." });
   }
 
   try {
@@ -237,13 +263,12 @@ router.post('/auth/register', authLimiter, validateBody(registerSchema), async (
     await pool.query(
       `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
        VALUES (?, ?, ?, ?, 'tenant', ?, 'Virtual Account')`,
-      [userId, email, hashedPassword, name, phone || '']
+      [userId, email, hashedPassword, name, phone.trim()]
     );
 
     const [newUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [userId]);
     const newUser = newUsers[0];
-    const safeUser: Partial<UserRow> = { ...newUser };
-    delete safeUser.password;
+    const safeUser = formatSafeUser(newUser);
     const token = generateJwtToken({
       id: newUser.id,
       email: newUser.email,
@@ -270,6 +295,15 @@ interface UserProfileBody {
   paymentMethod?: string;
   notifications?: boolean;
   language?: string;
+  identity_type?: IdentityType;
+  identity_number?: string;
+  address?: string;
+  occupation?: string;
+  emergency_contact_name?: string;
+  emergency_contact_relation?: string;
+  emergency_contact_phone?: string;
+  date_of_birth?: string;
+  gender?: string;
 }
 
 interface AdminCreateUserBody {
@@ -290,6 +324,21 @@ interface AdminUpdateUserBody {
   password?: string;
 }
 
+// Current User Profile Getter
+router.get('/auth/me', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ message: "Otentikasi diperlukan." });
+
+  try {
+    const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [userId]);
+    const user = rows[0];
+    if (!user) return res.status(404).json({ message: "User tidak ditemukan." });
+    res.json(formatSafeUser(user));
+  } catch (err) {
+    res.status(500).json({ message: "Gagal mengambil profil user." });
+  }
+});
+
 router.get('/users/profile/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const authUser = req.user;
@@ -304,18 +353,31 @@ router.get('/users/profile/:id', authenticateToken, async (req: AuthenticatedReq
     if (!user) {
       return res.status(404).json({ message: "User tidak ditemukan." });
     }
-    const safeUser: Partial<UserRow> = { ...user };
-    delete safeUser.password;
-    res.json(safeUser);
+    res.json(formatSafeUser(user));
   } catch (err) {
     res.status(500).json({ message: "Gagal mengambil profil user." });
   }
 });
 
-router.put('/users/profile/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/users/profile/:id', authenticateToken, validateBody(updateProfileSchema), async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const authUser = req.user;
-  const { name, phone, paymentMethod, notifications, language } = req.body;
+  const {
+    name,
+    phone,
+    paymentMethod,
+    notifications,
+    language,
+    identity_type,
+    identity_number,
+    address,
+    occupation,
+    emergency_contact_name,
+    emergency_contact_relation,
+    emergency_contact_phone,
+    date_of_birth,
+    gender
+  } = req.body as UserProfileBody;
 
   if (authUser?.role !== 'admin' && authUser?.id !== id) {
     return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat mengubah profil pengguna lain." });
@@ -330,16 +392,44 @@ router.put('/users/profile/:id', authenticateToken, async (req: AuthenticatedReq
     const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : 1;
 
     await pool.query(
-      `UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), 
-       paymentMethod = COALESCE(?, paymentMethod), notifications = ?, language = COALESCE(?, language) 
-       WHERE id = ?`,
-      [name, phone, paymentMethod, notifVal, language, id]
+      `UPDATE users SET 
+        name = COALESCE(?, name), 
+        phone = COALESCE(?, phone), 
+        paymentMethod = COALESCE(?, paymentMethod), 
+        notifications = ?, 
+        language = COALESCE(?, language),
+        identity_type = COALESCE(?, identity_type),
+        identity_number = COALESCE(?, identity_number),
+        address = COALESCE(?, address),
+        occupation = COALESCE(?, occupation),
+        emergency_contact_name = COALESCE(?, emergency_contact_name),
+        emergency_contact_relation = COALESCE(?, emergency_contact_relation),
+        emergency_contact_phone = COALESCE(?, emergency_contact_phone),
+        date_of_birth = COALESCE(?, date_of_birth),
+        gender = COALESCE(?, gender)
+      WHERE id = ?`,
+      [
+        name,
+        phone,
+        paymentMethod,
+        notifVal,
+        language,
+        identity_type,
+        identity_number,
+        address,
+        occupation,
+        emergency_contact_name,
+        emergency_contact_relation,
+        emergency_contact_phone,
+        date_of_birth,
+        gender,
+        id
+      ]
     );
 
     const [updatedUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [id]);
     const updatedUser = updatedUsers[0];
-    const safeUser: Partial<UserRow> = { ...updatedUser };
-    delete safeUser.password;
+    const safeUser = formatSafeUser(updatedUser);
     res.json({
       message: "Profil berhasil diperbarui!",
       user: safeUser
@@ -351,26 +441,69 @@ router.put('/users/profile/:id', authenticateToken, async (req: AuthenticatedReq
 });
 
 // User Profile Update (Authenticated User alias)
-router.put('/auth/profile', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/auth/profile', authenticateToken, validateBody(updateProfileSchema), async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ message: "Otentikasi diperlukan." });
-  const { name, phone, paymentMethod, notifications, language } = req.body as UserProfileBody;
+  const {
+    name,
+    phone,
+    paymentMethod,
+    notifications,
+    language,
+    identity_type,
+    identity_number,
+    address,
+    occupation,
+    emergency_contact_name,
+    emergency_contact_relation,
+    emergency_contact_phone,
+    date_of_birth,
+    gender
+  } = req.body as UserProfileBody;
 
   try {
     const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : 1;
 
     await pool.query(
-      `UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), 
-       paymentMethod = COALESCE(?, paymentMethod), notifications = ?, language = COALESCE(?, language) 
-       WHERE id = ?`,
-      [name, phone, paymentMethod, notifVal, language, userId]
+      `UPDATE users SET 
+        name = COALESCE(?, name), 
+        phone = COALESCE(?, phone), 
+        paymentMethod = COALESCE(?, paymentMethod), 
+        notifications = ?, 
+        language = COALESCE(?, language),
+        identity_type = COALESCE(?, identity_type),
+        identity_number = COALESCE(?, identity_number),
+        address = COALESCE(?, address),
+        occupation = COALESCE(?, occupation),
+        emergency_contact_name = COALESCE(?, emergency_contact_name),
+        emergency_contact_relation = COALESCE(?, emergency_contact_relation),
+        emergency_contact_phone = COALESCE(?, emergency_contact_phone),
+        date_of_birth = COALESCE(?, date_of_birth),
+        gender = COALESCE(?, gender)
+      WHERE id = ?`,
+      [
+        name,
+        phone,
+        paymentMethod,
+        notifVal,
+        language,
+        identity_type,
+        identity_number,
+        address,
+        occupation,
+        emergency_contact_name,
+        emergency_contact_relation,
+        emergency_contact_phone,
+        date_of_birth,
+        gender,
+        userId
+      ]
     );
 
     const [updatedUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [userId]);
     const updatedUser = updatedUsers[0];
     if (!updatedUser) return res.status(404).json({ message: "User tidak ditemukan." });
-    const safeUser: Partial<UserRow> = { ...updatedUser };
-    delete safeUser.password;
+    const safeUser = formatSafeUser(updatedUser);
     res.json({
       message: "Profil berhasil diperbarui!",
       user: safeUser
@@ -1922,7 +2055,12 @@ router.post(
         tenantName: tenant ? tenant.name : authUser.email,
         tenantEmail: tenant ? tenant.email : authUser.email,
         tenantPhone: tenant ? (tenant.phone || '') : '',
-        tenantNikPassport: tenantNikPassport || '-',
+        tenantNikPassport: tenantNikPassport || (tenant ? tenant.identity_number : '') || '-',
+        tenantAddress: tenant ? (tenant.address || '') : '',
+        tenantOccupation: tenant ? (tenant.occupation || '') : '',
+        emergencyContactName: tenant ? (tenant.emergency_contact_name || '') : '',
+        emergencyContactPhone: tenant ? (tenant.emergency_contact_phone || '') : '',
+        emergencyContactRelation: tenant ? (tenant.emergency_contact_relation || '') : '',
         startDate: startDateStr,
         durationMonths: duration,
         monthlyPrice,
@@ -1944,6 +2082,7 @@ router.post(
 
       const pdfBuffer = await generateRentalContractBuffer(contractData);
       const contractHash = computeContractHash(pdfBuffer);
+      const profileStatus = tenant ? isUserProfileComplete(tenant) : { complete: false, missingFields: ['user'], missingFieldLabels: ['Data Pengguna'] };
 
       return res.status(200).json({
         success: true,
@@ -1952,7 +2091,10 @@ router.post(
         monthlyPrice,
         adminFee,
         totalPrice,
-        totalAmount: totalPrice
+        totalAmount: totalPrice,
+        isProfileComplete: profileStatus.complete,
+        missingProfileFields: profileStatus.missingFields,
+        missingProfileFieldLabels: profileStatus.missingFieldLabels
       });
     } catch (err: unknown) {
       console.error('Contract preview error:', err);
@@ -1993,6 +2135,19 @@ router.post(
       if (!tenant) {
         await connection.rollback();
         return res.status(404).json({ success: false, message: 'Pengguna tidak ditemukan.' });
+      }
+
+      // 🛡️ Legal Profile Integrity Gate: Enforce Complete Tenant Identity & KYC (KUHPerdata Art. 1320 & UU ITE)
+      const profileCheck = isUserProfileComplete(tenant);
+      if (!profileCheck.complete) {
+        await connection.rollback();
+        return res.status(422).json({
+          success: false,
+          message:
+            'Profil identitas hukum penyewa belum lengkap. Berdasarkan Pasal 1320 KUHPerdata & UU ITE, Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, dan Kontak Darurat) pada profil Anda sebelum menyewa kos.',
+          missingFields: profileCheck.missingFields,
+          missingFieldLabels: profileCheck.missingFieldLabels
+        });
       }
 
       const [activeRentals] = await connection.query<RentalRow[]>(
@@ -2062,7 +2217,12 @@ router.post(
         tenantName: tenant ? tenant.name : authUser.email,
         tenantEmail: tenant ? tenant.email : authUser.email,
         tenantPhone: tenant ? (tenant.phone || '') : '',
-        tenantNikPassport,
+        tenantNikPassport: tenantNikPassport || (tenant ? tenant.identity_number : '') || '-',
+        tenantAddress: tenant ? (tenant.address || '') : '',
+        tenantOccupation: tenant ? (tenant.occupation || '') : '',
+        emergencyContactName: tenant ? (tenant.emergency_contact_name || '') : '',
+        emergencyContactPhone: tenant ? (tenant.emergency_contact_phone || '') : '',
+        emergencyContactRelation: tenant ? (tenant.emergency_contact_relation || '') : '',
         startDate: startDateStr,
         durationMonths: duration,
         monthlyPrice: rentalPrice,
@@ -2232,6 +2392,21 @@ router.post('/rentals', authenticateToken, async (req: AuthenticatedRequest, res
 
     const [userRows] = await connection.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [tenantId]);
     const tenant = userRows[0];
+    if (!tenant) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Pengguna tidak ditemukan." });
+    }
+
+    // Check legal profile completeness
+    const profileCheck = isUserProfileComplete(tenant);
+    if (!profileCheck.complete) {
+      await connection.rollback();
+      return res.status(422).json({
+        message: "Profil identitas hukum penyewa belum lengkap. Lengkapi profil Anda terlebih dahulu sebelum menyewa.",
+        missingFields: profileCheck.missingFields,
+        missingFieldLabels: profileCheck.missingFieldLabels
+      });
+    }
 
     // Check single active tenancy rule
     const [activeRentals] = await connection.query<RentalRow[]>(
@@ -2256,6 +2431,12 @@ router.post('/rentals', authenticateToken, async (req: AuthenticatedRequest, res
         tenantName: tenant ? tenant.name : 'Penyewa',
         tenantEmail: tenant ? tenant.email : '',
         tenantPhone: tenant ? tenant.phone : '',
+        tenantNikPassport: tenant ? tenant.identity_number : '',
+        tenantAddress: tenant ? tenant.address : '',
+        tenantOccupation: tenant ? tenant.occupation : '',
+        emergencyContactName: tenant ? tenant.emergency_contact_name : '',
+        emergencyContactPhone: tenant ? tenant.emergency_contact_phone : '',
+        emergencyContactRelation: tenant ? tenant.emergency_contact_relation : '',
         propertyName: rentalName,
         propertyAddress: property.address || '',
         pricePerMonth: rentalPrice,
@@ -2419,6 +2600,11 @@ router.get(
           u.name AS tenant_name,
           u.email AS tenant_email,
           u.phone AS tenant_phone,
+          u.address AS tenant_address,
+          u.occupation AS tenant_occupation,
+          u.emergency_contact_name AS tenant_emergency_contact_name,
+          u.emergency_contact_phone AS tenant_emergency_contact_phone,
+          u.emergency_contact_relation AS tenant_emergency_contact_relation,
           l.name AS landlord_name,
           l.email AS landlord_email,
           l.phone AS landlord_phone
@@ -2464,6 +2650,11 @@ router.get(
         tenantEmail: rental.tenant_email || '',
         tenantPhone: rental.tenant_phone || '',
         tenantNikPassport: rental.tenant_nik_passport || '-',
+        tenantAddress: rental.tenant_address || '',
+        tenantOccupation: rental.tenant_occupation || '',
+        emergencyContactName: rental.tenant_emergency_contact_name || '',
+        emergencyContactPhone: rental.tenant_emergency_contact_phone || '',
+        emergencyContactRelation: rental.tenant_emergency_contact_relation || '',
         startDate:
           rental.rental_start_date ||
           new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
