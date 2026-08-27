@@ -63,7 +63,11 @@ export interface AuthenticatedRequest extends Request {
 
 export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+  if (!token && typeof req.query?.token === 'string') {
+    token = req.query.token.trim();
+  }
 
   if (!token) {
     res.status(401).json({ message: 'Akses ditolak. Token otentikasi diperlukan.' });

@@ -21,6 +21,24 @@ export const registerSchema = z.object({
     )
 });
 
+export const adminCreateUserSchema = z.object({
+  name: z.string().min(2, 'Nama wajib diisi minimal 2 karakter'),
+  email: z.string().email('Format email tidak valid'),
+  password: z.string().min(6, 'Password minimal 6 karakter'),
+  role: z.enum(['admin', 'landlord', 'tenant'], { message: 'Role harus admin, landlord, atau tenant' }),
+  phone: z.string().optional().or(z.literal('')),
+  paymentMethod: z.string().optional().or(z.literal(''))
+});
+
+export const adminUpdateUserSchema = z.object({
+  name: z.string().min(2, 'Nama minimal 2 karakter').optional(),
+  email: z.string().email('Format email tidak valid').optional(),
+  password: z.string().min(6, 'Password minimal 6 karakter').optional().or(z.literal('')),
+  role: z.enum(['admin', 'landlord', 'tenant'], { message: 'Role harus admin, landlord, atau tenant' }).optional(),
+  phone: z.string().optional().or(z.literal('')),
+  paymentMethod: z.string().optional().or(z.literal(''))
+});
+
 export const updateProfileSchema = z.object({
   name: z.string().min(2, 'Nama minimal 2 karakter').optional(),
   phone: z

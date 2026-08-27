@@ -396,13 +396,19 @@ export async function generateAndUploadContract(
   const contractHash = computeContractHash(pdfBuffer);
   const sanitizedId = sanitizeRentalId(data.rentalId);
   const filename = `contract_${sanitizedId}.pdf`;
-
-  const uploadRes = await uploadContractStream(pdfBuffer, filename, 'kosmo_contracts');
+  let cloudinaryUrl: string | undefined;
+  try {
+    const uploadRes = await uploadContractStream(pdfBuffer, filename, 'kosmo_contracts');
+    cloudinaryUrl = uploadRes.secure_url;
+  } catch (err) {
+    console.warn('Cloudinary contract upload fallback to local URL due to error:', err);
+    cloudinaryUrl = `/uploads/${filename}`;
+  }
 
   return {
     pdfBuffer,
     contractHash,
-    cloudinaryUrl: uploadRes.secure_url
+    cloudinaryUrl
   };
 }
 

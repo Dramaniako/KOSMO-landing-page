@@ -31,6 +31,8 @@ import type { JWTPayload, AuthenticatedRequest } from './middleware/auth';
 import {
   loginSchema,
   registerSchema,
+  adminCreateUserSchema,
+  adminUpdateUserSchema,
   updateProfileSchema,
   propertySchema,
   reviewSchema,
@@ -540,7 +542,7 @@ router.get('/admin/users', authenticateToken, requireRole(['admin']), async (_re
 });
 
 // Admin Route: Create user
-router.post('/users', authenticateToken, requireRole(['admin']), validateBody(registerSchema), async (req: Request<Record<string, never>, unknown, AdminCreateUserBody>, res: Response) => {
+router.post('/users', authenticateToken, requireRole(['admin']), validateBody(adminCreateUserSchema), async (req: Request<Record<string, never>, unknown, AdminCreateUserBody>, res: Response) => {
   const { email, password, name, role, phone, paymentMethod } = req.body;
   if (!email || !password || !name || !role) {
     return res.status(400).json({ message: "Nama, email, password, dan role wajib diisi." });
@@ -567,7 +569,7 @@ router.post('/users', authenticateToken, requireRole(['admin']), validateBody(re
 });
 
 // Admin Route: Update user role / details
-router.put('/users/:id', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }, unknown, AdminUpdateUserBody>, res: Response) => {
+router.put('/users/:id', authenticateToken, requireRole(['admin']), validateBody(adminUpdateUserSchema), async (req: Request<{ id: string }, unknown, AdminUpdateUserBody>, res: Response) => {
   const { id } = req.params;
   const { name, email, role, phone, paymentMethod, password } = req.body;
 

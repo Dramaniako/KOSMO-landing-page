@@ -281,10 +281,28 @@ export default function AdminDashboard() {
 
   const loadedTabs = useRef<Set<string>>(new Set());
 
+  const getAuthToken = useCallback((): string => {
+    return localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
+  }, []);
+
+  const getAuthHeaders = useCallback((): Record<string, string> => {
+    const token = getAuthToken();
+    return token
+      ? { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+      : { 'Content-Type': 'application/json' };
+  }, [getAuthToken]);
+
+  const getAuthOnlyHeaders = useCallback((): Record<string, string> => {
+    const token = getAuthToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, [getAuthToken]);
+
   const fetchUsers = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, users: true }));
     try {
-      const res = await fetch(`${API_BASE}/users`);
+      const res = await fetch(`${API_BASE}/users`, {
+        headers: getAuthOnlyHeaders()
+      });
       if (!res.ok) {
         setUsers([]);
         return;
@@ -298,12 +316,14 @@ export default function AdminDashboard() {
     } finally {
       setTabLoading(prev => ({ ...prev, users: false }));
     }
-  }, []);
+  }, [getAuthOnlyHeaders]);
 
   const fetchProperties = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, properties: true }));
     try {
-      const res = await fetch(`${API_BASE}/properties`);
+      const res = await fetch(`${API_BASE}/properties`, {
+        headers: getAuthOnlyHeaders()
+      });
       if (!res.ok) {
         setProperties([]);
         return;
@@ -317,12 +337,14 @@ export default function AdminDashboard() {
     } finally {
       setTabLoading(prev => ({ ...prev, properties: false }));
     }
-  }, []);
+  }, [getAuthOnlyHeaders]);
 
   const fetchReviews = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, reviews: true }));
     try {
-      const res = await fetch(`${API_BASE}/reviews`);
+      const res = await fetch(`${API_BASE}/reviews`, {
+        headers: getAuthOnlyHeaders()
+      });
       if (!res.ok) {
         setReviews([]);
         return;
@@ -336,12 +358,14 @@ export default function AdminDashboard() {
     } finally {
       setTabLoading(prev => ({ ...prev, reviews: false }));
     }
-  }, []);
+  }, [getAuthOnlyHeaders]);
 
   const fetchWithdrawals = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, withdrawals: true }));
     try {
-      const res = await fetch(`${API_BASE}/admin/withdrawals`);
+      const res = await fetch(`${API_BASE}/admin/withdrawals`, {
+        headers: getAuthOnlyHeaders()
+      });
       if (!res.ok) {
         setWithdrawals([]);
         return;
@@ -355,29 +379,33 @@ export default function AdminDashboard() {
     } finally {
       setTabLoading(prev => ({ ...prev, withdrawals: false }));
     }
-  }, []);
+  }, [getAuthOnlyHeaders]);
 
   const fetchStats = useCallback(async (): Promise<void> => {
     try {
-      const res = await fetch(`${API_BASE}/admin/stats`);
+      const res = await fetch(`${API_BASE}/admin/stats`, {
+        headers: getAuthOnlyHeaders()
+      });
       if (!res.ok) return;
       const data = (await res.json()) as AdminStats;
       setStats(data);
     } catch (err) {
       console.error('Error loading stats:', err);
     }
-  }, []);
+  }, [getAuthOnlyHeaders]);
 
   const fetchTrackingHistory = useCallback(async (): Promise<void> => {
     try {
-      const res = await fetch(`${API_BASE}/admin/tracking-history`);
+      const res = await fetch(`${API_BASE}/admin/tracking-history`, {
+        headers: getAuthOnlyHeaders()
+      });
       if (!res.ok) return;
       const data = (await res.json()) as TrackingHistory;
       setTrackingHistory(data);
     } catch (err) {
       console.error('Error loading tracking history:', err);
     }
-  }, []);
+  }, [getAuthOnlyHeaders]);
 
   const fetchTrackingTab = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, tracking: true }));
@@ -447,7 +475,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(userForm)
       });
       const data = (await res.json()) as { message: string };
@@ -484,7 +512,10 @@ export default function AdminDashboard() {
     if (!window.confirm("Apakah Anda yakin ingin menghapus user ini?")) return;
 
     try {
-      const res = await fetch(`${API_BASE}/users/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/users/${id}`, {
+        method: 'DELETE',
+        headers: getAuthOnlyHeaders()
+      });
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
@@ -551,7 +582,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       });
       const data = (await res.json()) as { message: string };
@@ -606,7 +637,10 @@ export default function AdminDashboard() {
     if (!window.confirm("Apakah Anda yakin ingin menghapus properti ini?")) return;
 
     try {
-      const res = await fetch(`${API_BASE}/properties/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/properties/${id}`, {
+        method: 'DELETE',
+        headers: getAuthOnlyHeaders()
+      });
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
@@ -634,7 +668,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/reviews/${editingReview.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(reviewForm)
       });
       const data = (await res.json()) as { message: string };
@@ -654,7 +688,10 @@ export default function AdminDashboard() {
     if (!window.confirm("Apakah Anda yakin ingin menghapus review ini?")) return;
 
     try {
-      const res = await fetch(`${API_BASE}/reviews/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/reviews/${id}`, {
+        method: 'DELETE',
+        headers: getAuthOnlyHeaders()
+      });
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
 
@@ -671,7 +708,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/withdrawals/${id}/process`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ status: 'completed' })
       });
       const data = (await res.json()) as { message: string };
@@ -690,7 +727,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`${API_BASE}/admin/withdrawals/${id}/reject`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ reason })
       });
       const data = (await res.json()) as { message: string };
@@ -991,7 +1028,7 @@ export default function AdminDashboard() {
             <div className="flex-between" style={{ marginBottom: '24px' }}>
               <h3 style={{ fontSize: '20px' }}>Tracking Pengunjung Website</h3>
               <a
-                href={`${API_BASE}/reports/tracking/excel`}
+                href={`${API_BASE}/reports/tracking/excel?token=${encodeURIComponent(getAuthToken())}`}
                 className="btn btn-primary"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
               >

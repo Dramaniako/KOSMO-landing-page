@@ -78,7 +78,30 @@ test('Signed JWT Authentication & Middleware', async (t) => {
     assert.equal((mockReq as { user?: JWTPayload }).user?.id, mockPayload.id);
   });
 
-  await t.test('authenticateToken middleware returns 401 when Authorization header is missing', () => {
+  await t.test('authenticateToken middleware accepts valid token from query params and calls next()', () => {
+    const token = generateJwtToken(mockPayload);
+    let nextCalled = false;
+
+    const mockReq = {
+      headers: {},
+      query: { token }
+    } as unknown as Request;
+
+    const mockRes = {
+      status: () => mockRes,
+      json: () => mockRes
+    } as unknown as Response;
+
+    const mockNext: NextFunction = () => {
+      nextCalled = true;
+    };
+
+    authenticateToken(mockReq, mockRes, mockNext);
+    assert.equal(nextCalled, true);
+    assert.equal((mockReq as { user?: JWTPayload }).user?.id, mockPayload.id);
+  });
+
+  await t.test('authenticateToken middleware returns 401 when Authorization header and query token are missing', () => {
     let statusCode = 0;
     let responseBody: unknown = null;
 

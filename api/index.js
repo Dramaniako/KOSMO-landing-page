@@ -695,11 +695,18 @@ async function generateAndUploadContract(data) {
   const contractHash = computeContractHash(pdfBuffer);
   const sanitizedId = sanitizeRentalId(data.rentalId);
   const filename = `contract_${sanitizedId}.pdf`;
-  const uploadRes = await uploadContractStream(pdfBuffer, filename, "kosmo_contracts");
+  let cloudinaryUrl;
+  try {
+    const uploadRes = await uploadContractStream(pdfBuffer, filename, "kosmo_contracts");
+    cloudinaryUrl = uploadRes.secure_url;
+  } catch (err) {
+    console.warn("Cloudinary contract upload fallback to local URL due to error:", err);
+    cloudinaryUrl = `/uploads/${filename}`;
+  }
   return {
     pdfBuffer,
     contractHash,
-    cloudinaryUrl: uploadRes.secure_url
+    cloudinaryUrl
   };
 }
 
@@ -826,7 +833,10 @@ function verifyJwtToken(token, secret = getJwtSecret()) {
 }
 var authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7).trim() : null;
+  let token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7).trim() : null;
+  if (!token && typeof req.query?.token === "string") {
+    token = req.query.token.trim();
+  }
   if (!token) {
     res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
     return;
@@ -868,6 +878,22 @@ var registerSchema = z.object({
     /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
     "Format nomor telepon tidak valid (contoh: 08123456789 atau +628123456789)"
   )
+});
+var adminCreateUserSchema = z.object({
+  name: z.string().min(2, "Nama wajib diisi minimal 2 karakter"),
+  email: z.string().email("Format email tidak valid"),
+  password: z.string().min(6, "Password minimal 6 karakter"),
+  role: z.enum(["admin", "landlord", "tenant"], { message: "Role harus admin, landlord, atau tenant" }),
+  phone: z.string().optional().or(z.literal("")),
+  paymentMethod: z.string().optional().or(z.literal(""))
+});
+var adminUpdateUserSchema = z.object({
+  name: z.string().min(2, "Nama minimal 2 karakter").optional(),
+  email: z.string().email("Format email tidak valid").optional(),
+  password: z.string().min(6, "Password minimal 6 karakter").optional().or(z.literal("")),
+  role: z.enum(["admin", "landlord", "tenant"], { message: "Role harus admin, landlord, atau tenant" }).optional(),
+  phone: z.string().optional().or(z.literal("")),
+  paymentMethod: z.string().optional().or(z.literal(""))
 });
 var updateProfileSchema = z.object({
   name: z.string().min(2, "Nama minimal 2 karakter").optional(),
@@ -1359,7 +1385,7 @@ router.get("/admin/users", authenticateToken, requireRole(["admin"]), async (_re
     res.status(500).json({ message: "Gagal mengambil data user admin." });
   }
 });
-router.post("/users", authenticateToken, requireRole(["admin"]), validateBody(registerSchema), async (req, res) => {
+router.post("/users", authenticateToken, requireRole(["admin"]), validateBody(adminCreateUserSchema), async (req, res) => {
   const { email, password, name, role, phone, paymentMethod } = req.body;
   if (!email || !password || !name || !role) {
     return res.status(400).json({ message: "Nama, email, password, dan role wajib diisi." });
@@ -1381,7 +1407,7 @@ router.post("/users", authenticateToken, requireRole(["admin"]), validateBody(re
     res.status(500).json({ message: "Gagal membuat user." });
   }
 });
-router.put("/users/:id", authenticateToken, requireRole(["admin"]), async (req, res) => {
+router.put("/users/:id", authenticateToken, requireRole(["admin"]), validateBody(adminUpdateUserSchema), async (req, res) => {
   const { id } = req.params;
   const { name, email, role, phone, paymentMethod, password } = req.body;
   try {

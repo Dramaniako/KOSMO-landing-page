@@ -5,6 +5,8 @@ import {
   validateBody,
   loginSchema,
   registerSchema,
+  adminCreateUserSchema,
+  adminUpdateUserSchema,
   updateProfileSchema,
   propertySchema,
   withdrawalSchema,
@@ -400,5 +402,49 @@ test('Zod request body validation middleware & schemas', async (t) => {
     assert.equal(incompleteResult.complete, false);
     assert.ok(incompleteResult.missingFields.includes('address'));
     assert.ok(incompleteResult.missingFields.includes('emergency_contact_phone'));
+  });
+
+  await t.test('adminCreateUserSchema validates full user creation by administrator', () => {
+    const valid = adminCreateUserSchema.safeParse({
+      name: 'Admin User',
+      email: 'newadmin@kosmo.id',
+      password: 'password123',
+      role: 'admin',
+      phone: '08123456789',
+      paymentMethod: 'Bank Transfer'
+    });
+    assert.equal(valid.success, true);
+
+    const validLandlordWithoutPhone = adminCreateUserSchema.safeParse({
+      name: 'Landlord User',
+      email: 'landlord@kosmo.id',
+      password: 'password123',
+      role: 'landlord',
+      phone: '',
+      paymentMethod: ''
+    });
+    assert.equal(validLandlordWithoutPhone.success, true);
+
+    const invalidRole = adminCreateUserSchema.safeParse({
+      name: 'Invalid Role User',
+      email: 'test@kosmo.id',
+      password: 'password123',
+      role: 'superman'
+    });
+    assert.equal(invalidRole.success, false);
+  });
+
+  await t.test('adminUpdateUserSchema allows partial updates and optional password', () => {
+    const valid = adminUpdateUserSchema.safeParse({
+      name: 'Updated Name',
+      role: 'landlord',
+      phone: '081999888777'
+    });
+    assert.equal(valid.success, true);
+
+    const validWithEmptyPassword = adminUpdateUserSchema.safeParse({
+      password: ''
+    });
+    assert.equal(validWithEmptyPassword.success, true);
   });
 });
