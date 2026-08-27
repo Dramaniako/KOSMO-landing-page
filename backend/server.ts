@@ -51,17 +51,40 @@ export function isOriginAllowed(origin: string | undefined): boolean {
     'http://localhost:5000',
     'http://127.0.0.1:5173',
     'http://127.0.0.1:3000',
-    'http://127.0.0.1:5000'
+    'http://127.0.0.1:5000',
+    'https://kosmobali.my.id',
+    'https://www.kosmobali.my.id',
+    'http://kosmobali.my.id',
+    'http://www.kosmobali.my.id'
   ];
 
   const allowedOrigins = [...defaultAllowed, ...envAllowed];
   const normalizedOrigin = origin.toLowerCase().replace(/\/$/, '');
 
-  return allowedOrigins.some((allowed: string) => {
+  const isExactMatch = allowedOrigins.some((allowed: string) => {
     const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, '');
     if (normalizedAllowed === '*' && process.env.NODE_ENV !== 'production') return true;
     return normalizedAllowed === normalizedOrigin;
   });
+
+  if (isExactMatch) return true;
+
+  // Support Vercel deployments and custom domain subdomains
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === 'kosmobali.my.id' ||
+      hostname.endsWith('.kosmobali.my.id') ||
+      hostname.endsWith('.vercel.app')
+    ) {
+      return true;
+    }
+  } catch {
+    // Invalid URL format
+  }
+
+  return false;
 }
 
 export const corsOptions: CorsOptions = {
@@ -69,7 +92,8 @@ export const corsOptions: CorsOptions = {
     if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
-      callback(new Error(`CORS origin blocked: ${origin} is not allowed`));
+      console.warn(`[CORS Blocked] Origin '${origin}' is not allowed.`);
+      callback(null, false);
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],

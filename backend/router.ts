@@ -1541,8 +1541,9 @@ router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['ad
 // ==========================================
 router.post('/tracking/visit', async (req: Request, res: Response) => {
   const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-  const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
-  const userAgent = String(req.headers['user-agent'] || '');
+  const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+  const ip = firstIp.split(',')[0].trim().substring(0, 255);
+  const userAgent = String(req.headers['user-agent'] || '').substring(0, 1000);
   try {
     await pool.query(
       'INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)',

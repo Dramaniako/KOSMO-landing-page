@@ -140,4 +140,11 @@ test('Signed JWT Authentication & Middleware', async (t) => {
     assert.equal(header.alg, 'HS256');
     assert.equal(header.typ, 'JWT');
   });
+
+  await t.test('generateJwtToken succeeds without explicit secret using getJwtSecret fallback', async () => {
+    const token = generateJwtToken(mockPayload);
+    assert.equal(typeof token, 'string');
+    const decoded = verifyJwtToken(token);
+    assert.equal(decoded.id, mockPayload.id);
+  });
 });

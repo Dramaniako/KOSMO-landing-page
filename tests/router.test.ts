@@ -81,7 +81,7 @@ test('Express router endpoints registration', async (t) => {
     }
   });
 
-  await t.test('CORS policy allows trusted origins, localhost and non-browser requests', () => {
+  await t.test('CORS policy allows trusted origins, localhost, production domains, and non-browser requests', () => {
     // Non-browser / server-to-server (origin undefined)
     assert.equal(isOriginAllowed(undefined), true);
     assert.equal(isOriginAllowed(''), true);
@@ -91,6 +91,12 @@ test('Express router endpoints registration', async (t) => {
     assert.equal(isOriginAllowed('http://localhost:3000'), true);
     assert.equal(isOriginAllowed('http://127.0.0.1:5173'), true);
     assert.equal(isOriginAllowed('http://localhost:5173/'), true);
+
+    // Default production domain and subdomains
+    assert.equal(isOriginAllowed('https://kosmobali.my.id'), true);
+    assert.equal(isOriginAllowed('https://www.kosmobali.my.id'), true);
+    assert.equal(isOriginAllowed('http://kosmobali.my.id'), true);
+    assert.equal(isOriginAllowed('https://preview-123.vercel.app'), true);
 
     // Untrusted / malicious origins
     assert.equal(isOriginAllowed('http://attacker.com'), false);
@@ -102,8 +108,8 @@ test('Express router endpoints registration', async (t) => {
     const envObj = process.env as Record<string, string | undefined>;
     const originalEnv = envObj.ALLOWED_ORIGINS;
     try {
-      envObj.ALLOWED_ORIGINS = 'https://kosmo-bali.vercel.app, https://kosmo.id';
-      assert.equal(isOriginAllowed('https://kosmo-bali.vercel.app'), true);
+      envObj.ALLOWED_ORIGINS = 'https://custom-partner.com, https://kosmo.id';
+      assert.equal(isOriginAllowed('https://custom-partner.com'), true);
       assert.equal(isOriginAllowed('https://kosmo.id'), true);
       assert.equal(isOriginAllowed('https://unauthorized-domain.com'), false);
     } finally {
@@ -111,7 +117,7 @@ test('Express router endpoints registration', async (t) => {
     }
   });
 
-  await t.test('corsOptions defines allowed methods, headers, and credentials', () => {
+  await t.test('corsOptions gracefully permits allowed origins and blocks disallowed origins without throwing error', () => {
     assert.ok(corsOptions);
     assert.equal(corsOptions.credentials, true);
     assert.ok(Array.isArray(corsOptions.methods));
@@ -119,6 +125,23 @@ test('Express router endpoints registration', async (t) => {
     assert.ok(corsOptions.methods.includes('POST'));
     assert.ok(corsOptions.methods.includes('PUT'));
     assert.ok(corsOptions.methods.includes('DELETE'));
+
+    if (typeof corsOptions.origin === 'function') {
+      let allowedResult: boolean | undefined = undefined;
+      let blockedResult: boolean | undefined = undefined;
+
+      corsOptions.origin('https://www.kosmobali.my.id', (err, allow) => {
+        assert.equal(err, null);
+        allowedResult = allow;
+      });
+      assert.equal(allowedResult, true);
+
+      corsOptions.origin('https://evil-hacker.com', (err, allow) => {
+        assert.equal(err, null);
+        blockedResult = allow;
+      });
+      assert.equal(blockedResult, false);
+    }
   });
 
   await t.test('verifies contract preview, sign, and download routes are mounted on router stack', () => {

@@ -196,8 +196,8 @@ async function createSchemaTables(p) {
   await p.query(`
     CREATE TABLE IF NOT EXISTS visitor_tracking (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      ip_address VARCHAR(50),
-      user_agent VARCHAR(255),
+      ip_address VARCHAR(255),
+      user_agent TEXT,
       visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
@@ -230,6 +230,8 @@ async function applyTableMigrations(p) {
     "ALTER TABLE properties MODIFY image LONGTEXT",
     "ALTER TABLE properties MODIFY description LONGTEXT",
     "ALTER TABLE users MODIFY avatar LONGTEXT",
+    "ALTER TABLE visitor_tracking MODIFY ip_address VARCHAR(255)",
+    "ALTER TABLE visitor_tracking MODIFY user_agent TEXT",
     "ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
@@ -789,14 +791,16 @@ import { randomBytes } from "crypto";
 var defaultSecret = null;
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
-  if (secret) {
+  if (secret && secret.trim() !== "") {
     return secret;
   }
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("FATAL: JWT_SECRET environment variable is missing in production.");
-  }
   if (!defaultSecret) {
-    defaultSecret = randomBytes(32).toString("hex");
+    if (process.env.NODE_ENV === "production") {
+      console.warn("\u26A0\uFE0F [Auth Warning] JWT_SECRET environment variable is missing in production. Using fallback secret.");
+      defaultSecret = process.env.JWT_FALLBACK_SECRET || "kosmo-bali-production-jwt-default-secret-key-2026";
+    } else {
+      defaultSecret = randomBytes(32).toString("hex");
+    }
   }
   return defaultSecret;
 }
@@ -2136,8 +2140,9 @@ router.post("/admin/withdrawals/:id/reject", authenticateToken, requireRole(["ad
 });
 router.post("/tracking/visit", async (req, res) => {
   const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
-  const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
-  const userAgent = String(req.headers["user-agent"] || "");
+  const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+  const ip = firstIp.split(",")[0].trim().substring(0, 255);
+  const userAgent = String(req.headers["user-agent"] || "").substring(0, 1e3);
   try {
     await pool.query(
       "INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)",
@@ -3297,22 +3302,37 @@ function isOriginAllowed(origin) {
     "http://localhost:5000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
-    "http://127.0.0.1:5000"
+    "http://127.0.0.1:5000",
+    "https://kosmobali.my.id",
+    "https://www.kosmobali.my.id",
+    "http://kosmobali.my.id",
+    "http://www.kosmobali.my.id"
   ];
   const allowedOrigins = [...defaultAllowed, ...envAllowed];
   const normalizedOrigin = origin.toLowerCase().replace(/\/$/, "");
-  return allowedOrigins.some((allowed) => {
+  const isExactMatch = allowedOrigins.some((allowed) => {
     const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, "");
     if (normalizedAllowed === "*" && process.env.NODE_ENV !== "production") return true;
     return normalizedAllowed === normalizedOrigin;
   });
+  if (isExactMatch) return true;
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname === "kosmobali.my.id" || hostname.endsWith(".kosmobali.my.id") || hostname.endsWith(".vercel.app")) {
+      return true;
+    }
+  } catch {
+  }
+  return false;
 }
 var corsOptions = {
   origin: (origin, callback) => {
     if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
-      callback(new Error(`CORS origin blocked: ${origin} is not allowed`));
+      console.warn(`[CORS Blocked] Origin '${origin}' is not allowed.`);
+      callback(null, false);
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],

@@ -219,8 +219,8 @@ async function createSchemaTables(p: typeof pool): Promise<void> {
   await p.query(`
     CREATE TABLE IF NOT EXISTS visitor_tracking (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      ip_address VARCHAR(50),
-      user_agent VARCHAR(255),
+      ip_address VARCHAR(255),
+      user_agent TEXT,
       visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
@@ -256,6 +256,8 @@ async function applyTableMigrations(p: typeof pool): Promise<void> {
     'ALTER TABLE properties MODIFY image LONGTEXT',
     'ALTER TABLE properties MODIFY description LONGTEXT',
     'ALTER TABLE users MODIFY avatar LONGTEXT',
+    'ALTER TABLE visitor_tracking MODIFY ip_address VARCHAR(255)',
+    'ALTER TABLE visitor_tracking MODIFY user_agent TEXT',
     "ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
