@@ -70,6 +70,24 @@ export const authLimiter = rateLimit({
   message: { message: 'Terlalu banyak percobaan masuk/daftar. Silakan coba lagi dalam 1 menit.' }
 });
 
+// Rate Limiter for Uploads
+export const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Terlalu banyak unggahan berkas. Silakan coba lagi nanti.' }
+});
+
+// Rate Limiter for Visitor Tracking
+export const trackingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Terlalu banyak permintaan pelacakan.' }
+});
+
 const router: Router = express.Router();
 
 // System & Infrastructure Health Check
@@ -127,7 +145,7 @@ interface MulterRequest extends Request {
   file?: Express.Multer.File;
 }
 
-router.post('/upload', upload.single('image'), async (req: MulterRequest, res: Response) => {
+router.post('/upload', authenticateToken, uploadLimiter, upload.single('image'), async (req: AuthenticatedRequest & MulterRequest, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ message: 'Tidak ada file yang diunggah.' });
   }
@@ -1140,8 +1158,15 @@ interface MonthlyRevenueAgg extends RowDataPacket {
   transactions: number;
 }
 
-const handleLandlordStats = async (req: Request, res: Response) => {
-  const landlordId = String(req.query.landlordId || 'user-landlord');
+const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => {
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+
+  const landlordId = authUser.role === 'admin' && req.query.landlordId
+    ? String(req.query.landlordId)
+    : authUser.id;
 
   try {
     const [
@@ -1202,8 +1227,8 @@ const handleLandlordStats = async (req: Request, res: Response) => {
   }
 };
 
-router.get('/stats', handleLandlordStats);
-router.get('/landlord/stats', handleLandlordStats);
+router.get('/stats', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordStats);
+router.get('/landlord/stats', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordStats);
 
 router.get('/landlord/financials', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
   const landlordId = String(req.query.landlordId || req.user?.id || 'user-landlord');
@@ -1276,13 +1301,21 @@ router.get('/landlord/financials', authenticateToken, requireRole(['admin', 'lan
 });
 
 router.get('/withdrawals', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
-  const userId = String(req.query.userId || req.user?.id || '');
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+
+  const targetUserId = authUser.role === 'admin'
+    ? (req.query.userId ? String(req.query.userId) : null)
+    : authUser.id;
+
   try {
     let sql = 'SELECT * FROM withdrawals WHERE 1=1';
     const params: string[] = [];
-    if (userId) {
+    if (targetUserId) {
       sql += ' AND userId = ?';
-      params.push(userId);
+      params.push(targetUserId);
     }
     sql += ' ORDER BY id DESC LIMIT 50';
     const [rows] = await pool.query<WithdrawalRow[]>(sql, params);
@@ -1293,7 +1326,11 @@ router.get('/withdrawals', authenticateToken, async (req: AuthenticatedRequest, 
 });
 
 router.get('/withdrawals/me', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
-  const userId = String(req.user?.id || req.query.userId || 'user-landlord');
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+  const userId = authUser.id;
   try {
     const [rows] = await pool.query<WithdrawalRow[]>('SELECT * FROM withdrawals WHERE userId = ? ORDER BY id DESC LIMIT 50', [userId]);
     res.json(rows);
@@ -1542,7 +1579,7 @@ router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['ad
 // ==========================================
 // Tracking & Admin Stats API
 // ==========================================
-router.post('/tracking/visit', async (req: Request, res: Response) => {
+router.post('/tracking/visit', trackingLimiter, async (req: Request, res: Response) => {
   const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
   const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
   const ip = firstIp.split(',')[0].trim().substring(0, 255);
@@ -1779,8 +1816,14 @@ interface RentalRow extends RowDataPacket {
   status: 'active' | 'terminated' | 'pending' | 'cancelled';
 }
 
-router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: Request, res: Response) => {
-  const landlordId = String(req.query.landlordId || '');
+router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
+  const authUser = req.user;
+  if (!authUser) return res.status(401).json({ message: 'Otentikasi diperlukan.' });
+
+  const landlordId = authUser.role === 'admin' && req.query.landlordId
+    ? String(req.query.landlordId)
+    : authUser.id;
+
   if (!landlordId) return res.status(400).json({ message: 'landlordId diperlukan.' });
   try {
     const [landlords] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlordId]);
@@ -1969,7 +2012,12 @@ export function computePaymentSchedule(
   };
 }
 
-router.get('/rentals', authenticateToken, async (req: Request, res: Response) => {
+router.get('/rentals', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+
   const { tenantId } = req.query;
   const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
   const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
@@ -1978,7 +2026,14 @@ router.get('/rentals', authenticateToken, async (req: Request, res: Response) =>
   try {
     let sql = 'SELECT * FROM rentals WHERE 1=1';
     const params: (string | number)[] = [];
-    if (tenantId) {
+
+    if (authUser.role === 'tenant') {
+      sql += ' AND tenantId = ?';
+      params.push(authUser.id);
+    } else if (authUser.role === 'landlord') {
+      sql += ' AND propertyId IN (SELECT id FROM properties WHERE ownerId = ?)';
+      params.push(authUser.id);
+    } else if (authUser.role === 'admin' && tenantId) {
       sql += ' AND tenantId = ?';
       params.push(String(tenantId));
     }

@@ -139,7 +139,10 @@ export default function LandlordDashboard() {
   const fetchOverviewStats = useCallback(async (landlordId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, overview: true }));
     try {
-      const statsRes = await fetch(`${API_BASE}/stats?landlordId=${encodeURIComponent(landlordId)}`);
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const statsRes = await fetch(`${API_BASE}/stats?landlordId=${encodeURIComponent(landlordId)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       if (!statsRes.ok) return;
       const statsData = (await statsRes.json()) as LandlordStats;
       setStats(statsData);

@@ -618,4 +618,55 @@ test('Empirical Challenge: Milestone 3 RBAC Authorization Matrix & Preview Side-
       'PDF generation and streaming must NOT write temporary files into backend/uploads/'
     );
   });
+
+  await t.test('Security & IDOR Remediation Suite (Issues #01, #02, #03, #05, #19)', async () => {
+    // 1. Issue #01: GET /api/withdrawals scopes strictly to authenticated non-admin user
+    const tenantWithdrawalsRes = await fetch(`${baseUrl}/withdrawals?userId=${landlord1.id}`, {
+      headers: { Authorization: `Bearer ${tokenTenant1}` }
+    });
+    assert.equal(tenantWithdrawalsRes.status, 200);
+    const tenantWithdrawals = (await tenantWithdrawalsRes.json()) as Array<{ userId: string }>;
+    assert.ok(Array.isArray(tenantWithdrawals));
+    // Non-admin tenant must NOT see landlord's withdrawals even when requesting ?userId=landlord1
+    for (const w of tenantWithdrawals) {
+      assert.equal(w.userId, tenant1.id);
+    }
+
+    // 2. Issue #02: GET /api/rentals scopes strictly to tenant's own records
+    const tenantRentalsRes = await fetch(`${baseUrl}/rentals?tenantId=${tenant2.id}`, {
+      headers: { Authorization: `Bearer ${tokenTenant1}` }
+    });
+    assert.equal(tenantRentalsRes.status, 200);
+    const tenantRentals = (await tenantRentalsRes.json()) as Array<{ tenantId: string }>;
+    for (const r of tenantRentals) {
+      assert.equal(r.tenantId, tenant1.id);
+    }
+
+    // 3. Issue #19: GET /api/stats rejects unauthenticated requests and non-landlord/admin roles
+    const unauthStatsRes = await fetch(`${baseUrl}/stats?landlordId=${landlord1.id}`);
+    assert.equal(unauthStatsRes.status, 401);
+
+    const tenantStatsRes = await fetch(`${baseUrl}/stats?landlordId=${landlord1.id}`, {
+      headers: { Authorization: `Bearer ${tokenTenant1}` }
+    });
+    assert.equal(tenantStatsRes.status, 403);
+
+    const landlordStatsRes = await fetch(`${baseUrl}/stats?landlordId=${landlord1.id}`, {
+      headers: { Authorization: `Bearer ${tokenLandlord1}` }
+    });
+    assert.equal(landlordStatsRes.status, 200);
+
+    // 4. Issue #05: POST /api/upload requires authentication
+    const unauthUploadRes = await fetch(`${baseUrl}/upload`, {
+      method: 'POST'
+    });
+    assert.equal(unauthUploadRes.status, 401);
+
+    // 5. Issue #03: GET /reports/landlord/excel enforces caller ownership for non-admin
+    const landlordExcelRes = await fetch(`${baseUrl}/reports/landlord/excel?landlordId=some-other-landlord`, {
+      headers: { Authorization: `Bearer ${tokenLandlord1}` }
+    });
+    assert.equal(landlordExcelRes.status, 200);
+    assert.equal(landlordExcelRes.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  });
 });

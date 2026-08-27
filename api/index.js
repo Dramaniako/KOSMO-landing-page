@@ -1054,6 +1054,20 @@ var authLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: "Terlalu banyak percobaan masuk/daftar. Silakan coba lagi dalam 1 menit." }
 });
+var uploadLimiter = rateLimit({
+  windowMs: 60 * 1e3,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Terlalu banyak unggahan berkas. Silakan coba lagi nanti." }
+});
+var trackingLimiter = rateLimit({
+  windowMs: 60 * 1e3,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Terlalu banyak permintaan pelacakan." }
+});
 var router = express.Router();
 router.get("/health", async (_req, res) => {
   try {
@@ -1098,7 +1112,7 @@ var upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }
   // 5MB limit
 });
-router.post("/upload", upload.single("image"), async (req, res) => {
+router.post("/upload", authenticateToken, uploadLimiter, upload.single("image"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: "Tidak ada file yang diunggah." });
   }
@@ -1831,7 +1845,11 @@ router.delete("/reviews/:id", authenticateToken, async (req, res) => {
   }
 });
 var handleLandlordStats = async (req, res) => {
-  const landlordId = String(req.query.landlordId || "user-landlord");
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+  const landlordId = authUser.role === "admin" && req.query.landlordId ? String(req.query.landlordId) : authUser.id;
   try {
     const [
       [userRows],
@@ -1887,8 +1905,8 @@ var handleLandlordStats = async (req, res) => {
     res.status(500).json({ message: "Gagal memuat statistik dasbor." });
   }
 };
-router.get("/stats", handleLandlordStats);
-router.get("/landlord/stats", handleLandlordStats);
+router.get("/stats", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordStats);
+router.get("/landlord/stats", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordStats);
 router.get("/landlord/financials", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
   const landlordId = String(req.query.landlordId || req.user?.id || "user-landlord");
   try {
@@ -1955,13 +1973,17 @@ router.get("/landlord/financials", authenticateToken, requireRole(["admin", "lan
   }
 });
 router.get("/withdrawals", authenticateToken, async (req, res) => {
-  const userId = String(req.query.userId || req.user?.id || "");
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+  const targetUserId = authUser.role === "admin" ? req.query.userId ? String(req.query.userId) : null : authUser.id;
   try {
     let sql = "SELECT * FROM withdrawals WHERE 1=1";
     const params = [];
-    if (userId) {
+    if (targetUserId) {
       sql += " AND userId = ?";
-      params.push(userId);
+      params.push(targetUserId);
     }
     sql += " ORDER BY id DESC LIMIT 50";
     const [rows] = await pool.query(sql, params);
@@ -1971,7 +1993,11 @@ router.get("/withdrawals", authenticateToken, async (req, res) => {
   }
 });
 router.get("/withdrawals/me", authenticateToken, async (req, res) => {
-  const userId = String(req.user?.id || req.query.userId || "user-landlord");
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+  const userId = authUser.id;
   try {
     const [rows] = await pool.query("SELECT * FROM withdrawals WHERE userId = ? ORDER BY id DESC LIMIT 50", [userId]);
     res.json(rows);
@@ -2169,7 +2195,7 @@ router.post("/admin/withdrawals/:id/reject", authenticateToken, requireRole(["ad
     connection.release();
   }
 });
-router.post("/tracking/visit", async (req, res) => {
+router.post("/tracking/visit", trackingLimiter, async (req, res) => {
   const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
   const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
   const ip = firstIp.split(",")[0].trim().substring(0, 255);
@@ -2342,7 +2368,9 @@ router.get("/reports/tracking/excel", authenticateToken, requireRole(["admin"]),
   }
 });
 router.get("/reports/landlord/excel", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
-  const landlordId = String(req.query.landlordId || "");
+  const authUser = req.user;
+  if (!authUser) return res.status(401).json({ message: "Otentikasi diperlukan." });
+  const landlordId = authUser.role === "admin" && req.query.landlordId ? String(req.query.landlordId) : authUser.id;
   if (!landlordId) return res.status(400).json({ message: "landlordId diperlukan." });
   try {
     const [landlords] = await pool.query("SELECT * FROM users WHERE id = ?", [landlordId]);
@@ -2489,6 +2517,10 @@ function computePaymentSchedule(startDateStr, status, durationMonthsOrRef, refer
   };
 }
 router.get("/rentals", authenticateToken, async (req, res) => {
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
   const { tenantId } = req.query;
   const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : void 0;
   const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
@@ -2496,7 +2528,13 @@ router.get("/rentals", authenticateToken, async (req, res) => {
   try {
     let sql = "SELECT * FROM rentals WHERE 1=1";
     const params = [];
-    if (tenantId) {
+    if (authUser.role === "tenant") {
+      sql += " AND tenantId = ?";
+      params.push(authUser.id);
+    } else if (authUser.role === "landlord") {
+      sql += " AND propertyId IN (SELECT id FROM properties WHERE ownerId = ?)";
+      params.push(authUser.id);
+    } else if (authUser.role === "admin" && tenantId) {
       sql += " AND tenantId = ?";
       params.push(String(tenantId));
     }
