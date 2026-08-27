@@ -345,4 +345,113 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     // 7. Verify modal closes and status updates / terminates cleanly
     await expect(modalContainer).not.toBeVisible({ timeout: 10000 });
   });
+
+  test('allows tenant to resume and complete payment for pending rental from Tenant Dashboard', async ({ page, request }) => {
+    // 1. Register a tenant user
+    const uniqueId = Date.now();
+    const tenantUser = {
+      name: `Pending Tenant ${uniqueId}`,
+      email: `pending_${uniqueId}@kosmo-e2e.test`,
+      password: 'Password123!',
+      phone: '081233445566',
+      role: 'tenant'
+    };
+
+    const regRes = await request.post('/api/auth/register', { data: tenantUser });
+    expect(regRes.ok()).toBeTruthy();
+    const regData = (await regRes.json()) as { token: string; user: { id: string; name: string; email: string; role: string } };
+
+    // 1b. Complete KYC profile before contract signing
+    const kycRes = await request.put('/api/auth/profile', {
+      headers: { Authorization: `Bearer ${regData.token}` },
+      data: {
+        identity_type: 'NIK',
+        identity_number: '5171012304950005',
+        address: 'Jl. Kayu Aya No. 45, Seminyak, Badung, Bali',
+        occupation: 'Product Manager',
+        emergency_contact_name: 'Wayan Sudarma',
+        emergency_contact_relation: 'Orang Tua',
+        emergency_contact_phone: '+6281234567811'
+      }
+    });
+    expect(kycRes.ok()).toBeTruthy();
+    const kycData = (await kycRes.json()) as { message?: string; user?: { id: string; name: string; email: string; role: string } };
+    const kycUser = kycData.user || regData.user;
+
+    // 2. Create signed pending rental (simulating leaving checkout before payment)
+    const signRes = await request.post('/api/rentals/contract/sign', {
+      headers: { Authorization: `Bearer ${regData.token}` },
+      data: {
+        propertyId: 'prop-02',
+        durationMonths: 1,
+        startDate: '2026-09-01',
+        tenantNikPassport: '5171012304950005',
+        affirmativeConsent: true,
+        signatureBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+      }
+    });
+    expect(signRes.status()).toBe(201);
+    const signData = (await signRes.json()) as { rentalId: string; propertyName: string };
+
+    // 3. Set auth state in browser and visit tenant dashboard
+    page.on('console', msg => console.log('PW CONSOLE:', msg.text()));
+    page.on('pageerror', err => console.log('PW ERROR:', err.message));
+    page.on('dialog', dialog => dialog.accept());
+
+    await page.addInitScript(({ token, user }) => {
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+      try {
+        Object.defineProperty(window, 'snap', {
+          configurable: false,
+          writable: false,
+          value: {
+            pay: (_snapToken: string, callbacks?: { onSuccess?: (res: unknown) => void }) => {
+              if (callbacks && typeof callbacks.onSuccess === 'function') {
+                callbacks.onSuccess({ status_code: '200', transaction_status: 'settlement' });
+              }
+            }
+          }
+        });
+      } catch {
+        (window as any).snap = {
+          pay: (_snapToken: string, callbacks?: { onSuccess?: (res: unknown) => void }) => {
+            if (callbacks && typeof callbacks.onSuccess === 'function') {
+              callbacks.onSuccess({ status_code: '200', transaction_status: 'settlement' });
+            }
+          }
+        };
+      }
+    }, { token: regData.token, user: kycUser });
+
+    await page.goto('/tenant');
+    await expect(page.locator('body')).toContainText('Halo,');
+    await expect(page.locator('body')).toContainText(tenantUser.name);
+
+    // 4. Switch to 'Kos Saya (Sewa)' tab
+    const rentalsTab = page.locator('button:has-text("Kos Saya (Sewa)")');
+    await rentalsTab.click();
+
+    // 5. Verify pending rental is listed with "Menunggu Pembayaran" badge
+    await expect(page.locator('body')).toContainText('KOSMO Seminyak Tropical Villa Living');
+    await expect(page.locator('body')).toContainText('Menunggu Pembayaran');
+
+    // 6. Click 'Bayar Sekarang' to open pending payment modal
+    const payNowBtn = page.locator('button:has-text("Bayar Sekarang")').first();
+    await expect(payNowBtn).toBeVisible();
+    await payNowBtn.click();
+
+    // 7. Verify pending payment modal contents
+    const paymentModal = page.locator('.modal-container');
+    await expect(paymentModal).toContainText('Selesaikan Pembayaran Sewa');
+    await expect(paymentModal).toContainText('Total Pembayaran');
+
+    // 8. Click 'Bayar Sekarang' inside modal to process payment
+    const modalPaySubmit = paymentModal.locator('button:has-text("Bayar Sekarang")');
+    await modalPaySubmit.click();
+
+    // 9. Verify modal closes and rental transitions to active in 'Hunian Aktif Saya'
+    await expect(paymentModal).not.toBeVisible({ timeout: 15000 });
+    await expect(page.locator('body')).toContainText('Sewa Aktif');
+  });
 });

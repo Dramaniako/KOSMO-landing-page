@@ -344,7 +344,16 @@ export default function LandingPage() {
       const snapToken = data.snapToken || data.token;
 
       // Step 2: Validate Snap readiness or execute fallback
-      if (typeof window === 'undefined' || !window.snap) {
+      if (typeof window === 'undefined' || !window.snap || !snapToken || snapToken.startsWith('snap-token-')) {
+        try {
+          await fetch(`${API_BASE}/payment/finish`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ rentalId: signedContractData.rentalId })
+          });
+        } catch (fallbackErr) {
+          console.warn("Fallback payment finish warning:", fallbackErr);
+        }
         setShowPayment(false);
         setSelectedProperty(null);
         navigate('/tenant');
@@ -359,6 +368,15 @@ export default function LandingPage() {
       window.snap.pay(snapToken, {
         onSuccess: async (result: unknown) => {
           console.log("Midtrans payment success:", result);
+          try {
+            await fetch(`${API_BASE}/payment/finish`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ rentalId: signedContractData.rentalId })
+            });
+          } catch (finishErr) {
+            console.warn("Payment finish notification warning:", finishErr);
+          }
           setShowPayment(false);
           setSelectedProperty(null);
           navigate('/tenant');

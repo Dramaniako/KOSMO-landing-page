@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   User as UserIcon, Bell, HelpCircle, FileText, Star, Edit, Trash2, 
   Plus, LogOut, Globe, MessageSquare, Building, X, Download, Home, Compass, History, Calendar,
-  ShieldCheck, AlertTriangle, CheckCircle2, UserCheck, MapPin, Briefcase, PhoneCall
+  ShieldCheck, AlertTriangle, CheckCircle2, UserCheck, MapPin, Briefcase, PhoneCall,
+  CreditCard, AlertCircle
 } from 'lucide-react';
 import { User, Property, Review, Rental, isUserProfileComplete } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
@@ -53,6 +54,12 @@ export default function TenantDashboard() {
   const [terminateRental, setTerminateRental] = useState<Rental | null>(null);
   const [terminatePassword, setTerminatePassword] = useState<string>('');
   const [terminateProcessing, setTerminateProcessing] = useState<boolean>(false);
+
+  // Pending Payment Modal States
+  const [showPendingPaymentModal, setShowPendingPaymentModal] = useState<boolean>(false);
+  const [selectedPendingRental, setSelectedPendingRental] = useState<Rental | null>(null);
+  const [pendingPaymentProcessing, setPendingPaymentProcessing] = useState<boolean>(false);
+  const [pendingPaymentError, setPendingPaymentError] = useState<string | null>(null);
   
   const [showRevModal, setShowRevModal] = useState<boolean>(false);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
@@ -116,6 +123,107 @@ export default function TenantDashboard() {
     }
   };
 
+  const handleOpenPendingPayment = (rental: Rental): void => {
+    setSelectedPendingRental(rental);
+    setPendingPaymentError(null);
+    setShowPendingPaymentModal(true);
+  };
+
+  const handleProcessPendingPayment = async (): Promise<void> => {
+    if (!selectedPendingRental || !currentUser) return;
+    setPendingPaymentProcessing(true);
+    setPendingPaymentError(null);
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      // 1. Request payment token for this rental
+      const duration = Number(selectedPendingRental.duration_months || 1);
+      const tokenRes = await fetch(`${API_BASE}/payment/token`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          propertyId: selectedPendingRental.propertyId,
+          propertyName: selectedPendingRental.propertyName,
+          price: selectedPendingRental.price,
+          tenantId: currentUser.id,
+          tenantName: currentUser.name,
+          tenantEmail: currentUser.email,
+          durationMonths: duration,
+          rentalId: selectedPendingRental.id
+        })
+      });
+
+      if (!tokenRes.ok) {
+        const errorData = (await tokenRes.json().catch(() => ({}))) as { message?: string };
+        throw new Error(errorData.message || 'Gagal menyiapkan transaksi pembayaran.');
+      }
+
+      const tokenData = (await tokenRes.json()) as {
+        token?: string;
+        snapToken?: string;
+        rentalId: string;
+      };
+      const snapToken = tokenData.snapToken || tokenData.token;
+
+      const finishPayment = async () => {
+        const finishRes = await fetch(`${API_BASE}/payment/finish`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ rentalId: selectedPendingRental.id })
+        });
+        if (!finishRes.ok) {
+          const finishErr = (await finishRes.json().catch(() => ({}))) as { message?: string };
+          throw new Error(finishErr.message || 'Gagal mengaktifkan sewa kos.');
+        }
+        await fetchMyRentals(currentUser.id);
+        setShowPendingPaymentModal(false);
+        setSelectedPendingRental(null);
+      };
+
+      if (typeof window === 'undefined' || !window.snap || !snapToken || snapToken.startsWith('snap-token-')) {
+        await finishPayment();
+        return;
+      }
+
+      if (!snapToken) {
+        throw new Error('Token pembayaran tidak ditemukan dari server.');
+      }
+
+      window.snap.pay(snapToken, {
+        onSuccess: async (result: unknown) => {
+          console.log('Pending payment completed successfully:', result);
+          try {
+            await finishPayment();
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Gagal menyelesaikan sewa.';
+            setPendingPaymentError(msg);
+          }
+        },
+        onPending: (result: unknown) => {
+          console.log('Payment pending in Snap:', result);
+          setShowPendingPaymentModal(false);
+        },
+        onError: (err: unknown) => {
+          console.error('Payment error in Snap:', err);
+          setPendingPaymentError('Pembayaran gagal atau dibatalkan.');
+        },
+        onClose: () => {
+          console.log('Payment popup closed by user.');
+        }
+      });
+    } catch (err: unknown) {
+      console.error('Process pending payment error:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setPendingPaymentError(msg);
+    } finally {
+      setPendingPaymentProcessing(false);
+    }
+  };
 
   const fetchMyRentals = useCallback(async (userId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, rentals: true, bills: true }));
@@ -897,7 +1005,7 @@ export default function TenantDashboard() {
         {/* RENTALS TAB */}
         {activeTab === 'rentals' && (() => {
           const activeRental = myRentals.find((r) => r.status === 'active');
-          const pastRentals = myRentals.filter((r) => r.status !== 'active');
+          const otherRentals = myRentals.filter((r) => r.status !== 'active');
 
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -1027,8 +1135,8 @@ export default function TenantDashboard() {
                 )}
               </div>
 
-              {/* SECTION 2: Riwayat Sewa Masa Lalu */}
-              {pastRentals.length > 0 && (
+              {/* SECTION 2: Riwayat & Transaksi Sewa */}
+              {otherRentals.length > 0 && (
                 <div className="card" style={{ padding: '28px', backgroundColor: 'white' }}>
                   <div className="flex-between" style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1037,45 +1145,109 @@ export default function TenantDashboard() {
                       </div>
                       <div>
                         <h3 style={{ fontSize: '18px', fontWeight: 700 }}>{t('tenant.pastSection')}</h3>
-                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tenant.pastDesc', { count: pastRentals.length })}</p>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tenant.pastDesc', { count: otherRentals.length })}</p>
                       </div>
                     </div>
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    {pastRentals.map((rent) => (
-                      <div key={rent.id} className="flex-between" style={{ padding: '16px 20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#f8fafc' }}>
-                        <div>
-                          <span className="badge badge-secondary" style={{ marginBottom: '6px', fontSize: '10px', display: 'inline-block', backgroundColor: '#e2e8f0', color: '#475569' }}>
-                            {t('tenant.completed')}
-                          </span>
-                          <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#334155' }}>{rent.propertyName}</h4>
-                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>{t('tenant.startDate')}: {rent.startDate}</p>
-                          {rent.contract_hash && (
-                            <p style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
-                              SHA-256: {rent.contract_hash.slice(0, 16)}...
+                    {otherRentals.map((rent) => {
+                      const isPending = rent.status === 'pending';
+
+                      return (
+                        <div
+                          key={rent.id}
+                          className="flex-between flex-wrap gap-3"
+                          style={{
+                            padding: '16px 20px',
+                            border: isPending ? '1px solid #fde68a' : '1px solid var(--border-color)',
+                            borderRadius: 'var(--radius-md)',
+                            background: isPending ? '#fffbeb' : '#f8fafc'
+                          }}
+                        >
+                          <div>
+                            {isPending ? (
+                              <span
+                                className="badge"
+                                style={{
+                                  marginBottom: '6px',
+                                  fontSize: '10px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  backgroundColor: '#fef3c7',
+                                  color: '#92400e',
+                                  border: '1px solid #fde68a',
+                                  fontWeight: 700
+                                }}
+                              >
+                                <AlertCircle size={11} />
+                                {t('tenant.pendingBadge')}
+                              </span>
+                            ) : (
+                              <span
+                                className="badge badge-secondary"
+                                style={{
+                                  marginBottom: '6px',
+                                  fontSize: '10px',
+                                  display: 'inline-block',
+                                  backgroundColor: '#e2e8f0',
+                                  color: '#475569'
+                                }}
+                              >
+                                {rent.status === 'terminated' ? t('tenant.completed') : rent.status === 'cancelled' ? 'Dibatalkan' : t('tenant.completed')}
+                              </span>
+                            )}
+                            <h4 style={{ fontSize: '15px', fontWeight: 600, color: isPending ? '#92400e' : '#334155' }}>
+                              {rent.propertyName}
+                            </h4>
+                            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              {t('tenant.startDate')}: {rent.startDate}
                             </p>
-                          )}
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <strong style={{ fontSize: '16px', color: '#64748b', display: 'block' }}>
-                            Rp {rent.price ? rent.price.toLocaleString('id-ID') : '0'}/bln
-                          </strong>
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '6px' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenContract(rent.id)}
-                              disabled={contractDownloading[rent.id]}
-                              className="btn btn-outline"
-                              style={{ padding: '4px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              <FileText size={12} />
-                              {contractDownloading[rent.id] ? 'Memuat...' : t('tenant.viewContract')}
-                            </button>
+                            {rent.contract_hash && (
+                              <p style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
+                                SHA-256: {rent.contract_hash.slice(0, 16)}...
+                              </p>
+                            )}
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <strong style={{ fontSize: '16px', color: isPending ? '#b45309' : '#64748b', display: 'block' }}>
+                              Rp {rent.price ? rent.price.toLocaleString('id-ID') : '0'}/bln
+                            </strong>
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '6px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenContract(rent.id)}
+                                disabled={contractDownloading[rent.id]}
+                                className="btn btn-outline"
+                                style={{ padding: '4px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <FileText size={12} />
+                                {contractDownloading[rent.id] ? 'Memuat...' : t('tenant.viewContract')}
+                              </button>
+                              {isPending && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenPendingPayment(rent)}
+                                  className="btn btn-primary"
+                                  style={{
+                                    padding: '4px 12px',
+                                    fontSize: '11px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    fontWeight: 600
+                                  }}
+                                >
+                                  <CreditCard size={12} />
+                                  {t('tenant.payNow')}
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1338,6 +1510,179 @@ export default function TenantDashboard() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Payment Modal */}
+      {showPendingPaymentModal && selectedPendingRental && (
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 1100, backgroundColor: 'rgba(0, 0, 0, 0.6)' }}
+          onClick={() => {
+            if (!pendingPaymentProcessing) {
+              setShowPendingPaymentModal(false);
+              setSelectedPendingRental(null);
+            }
+          }}
+        >
+          <div
+            className="modal-container"
+            style={{ maxWidth: '480px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              onClick={() => {
+                if (!pendingPaymentProcessing) {
+                  setShowPendingPaymentModal(false);
+                  setSelectedPendingRental(null);
+                }
+              }}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{ padding: '28px' }}>
+              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <div
+                  className="flex-center"
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    backgroundColor: '#eff6ff',
+                    color: 'var(--primary)',
+                    margin: '0 auto 12px auto'
+                  }}
+                >
+                  <CreditCard size={24} />
+                </div>
+                <h3 style={{ fontSize: '18px', fontWeight: 700 }}>{t('tenant.pendingPaymentTitle')}</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '4px' }}>
+                  {t('tenant.pendingPaymentDesc')}
+                </p>
+              </div>
+
+              {pendingPaymentError && (
+                <div
+                  style={{
+                    backgroundColor: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '10px 14px',
+                    marginBottom: '16px',
+                    color: '#dc2626',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                  <span>{pendingPaymentError}</span>
+                </div>
+              )}
+
+              {/* Cryptographic Verified Contract Hash */}
+              {selectedPendingRental.contract_hash && (
+                <div
+                  style={{
+                    backgroundColor: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '10px 12px',
+                    marginBottom: '16px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                    <ShieldCheck size={14} style={{ color: '#16a34a' }} />
+                    <strong style={{ fontSize: '12px', color: '#166534' }}>
+                      {t('contract.verifiedBadge')}
+                    </strong>
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#15803d', fontFamily: 'monospace' }}>
+                    SHA-256: {selectedPendingRental.contract_hash.slice(0, 24)}...
+                  </div>
+                </div>
+              )}
+
+              {/* Cost Summary Breakdown */}
+              {(() => {
+                const duration = Number(selectedPendingRental.duration_months || 1);
+                const monthlyPrice = Number(selectedPendingRental.price || 0);
+                const totalRent = monthlyPrice * duration;
+                const adminFee = Number(
+                  selectedPendingRental.admin_fee_amount !== undefined && selectedPendingRental.admin_fee_amount !== null
+                    ? selectedPendingRental.admin_fee_amount
+                    : 5000
+                );
+                const grandTotal = totalRent + adminFee;
+
+                return (
+                  <div
+                    style={{
+                      backgroundColor: 'var(--bg-main)',
+                      padding: '16px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      marginBottom: '20px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Properti Kos</span>
+                      <span style={{ fontWeight: 600 }}>{selectedPendingRental.propertyName}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Sewa Kamar ({duration} bln)</span>
+                      <span style={{ fontWeight: 600 }}>Rp {totalRent.toLocaleString('id-ID')}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Biaya Administrasi & Meterai</span>
+                      <span style={{ fontWeight: 600, color: 'var(--primary)' }}>Rp {adminFee.toLocaleString('id-ID')}</span>
+                    </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        paddingTop: '10px',
+                        borderTop: '1px solid var(--border-color)',
+                        fontSize: '15px',
+                        fontWeight: 800
+                      }}
+                    >
+                      <span>Total Pembayaran</span>
+                      <span style={{ color: 'var(--primary)' }}>Rp {grandTotal.toLocaleString('id-ID')}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex-between" style={{ gap: '12px' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ flex: 1 }}
+                  disabled={pendingPaymentProcessing}
+                  onClick={() => {
+                    setShowPendingPaymentModal(false);
+                    setSelectedPendingRental(null);
+                  }}
+                >
+                  {t('tenant.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                  disabled={pendingPaymentProcessing}
+                  onClick={handleProcessPendingPayment}
+                >
+                  <CreditCard size={14} />
+                  {pendingPaymentProcessing ? 'Memproses...' : t('tenant.payNow')}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -701,5 +701,97 @@ describe('Empirical Verification: Challenger Gen 3 Suite (R1, R2, R3)', () => {
       window.URL.createObjectURL = originalCreateObjectURL;
       window.URL.revokeObjectURL = originalRevokeObjectURL;
     });
+
+    it('renders pending rental with Menunggu Pembayaran badge and allows completing payment from modal', async () => {
+      localStorage.setItem('user', JSON.stringify(mockTenant));
+      localStorage.setItem('token', 'mock-jwt-token-123');
+
+      const pendingRental: Rental = {
+        id: 'rent-pending-test-202',
+        tenantId: 'usr-tenant-gen3',
+        propertyId: 'prop-canggu-01',
+        propertyName: 'KOSMO Sunset Villa Canggu',
+        price: 3200000,
+        startDate: '27 Aug 2026',
+        status: 'pending',
+        contract_hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f901234567890abcdef1234567890abcdef',
+        duration_months: 1,
+        admin_fee_amount: 5000
+      };
+
+      const fetchSpy = vi.spyOn(window, 'fetch').mockImplementation((url) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/payment/token')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ token: 'mock-snap-pending-token', rentalId: 'rent-pending-test-202' })
+          }) as Promise<Response>;
+        }
+        if (urlStr.includes('/payment/finish')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ success: true, message: 'Pembayaran berhasil diselesaikan' })
+          }) as Promise<Response>;
+        }
+        if (urlStr.includes('/api/rentals')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => [pendingRental]
+          }) as Promise<Response>;
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => []
+        }) as Promise<Response>;
+      });
+
+      render(
+        <MemoryRouter>
+          <ThemeProvider>
+            <LanguageProvider>
+              <TenantDashboard />
+            </LanguageProvider>
+          </ThemeProvider>
+        </MemoryRouter>
+      );
+
+      const rentalsTab = screen.getByRole('button', { name: /Kos Saya \(Sewa\)/i });
+      fireEvent.click(rentalsTab);
+
+      await waitFor(() => {
+        expect(screen.getByText('KOSMO Sunset Villa Canggu')).toBeInTheDocument();
+      });
+
+      // Assert badge says Menunggu Pembayaran
+      expect(screen.getByText('Menunggu Pembayaran')).toBeInTheDocument();
+
+      // Assert Bayar Sekarang button is present and click it
+      const payNowButton = screen.getByRole('button', { name: /Bayar Sekarang/i });
+      expect(payNowButton).toBeInTheDocument();
+      fireEvent.click(payNowButton);
+
+      // Verify payment modal appears
+      await waitFor(() => {
+        expect(screen.getByText('Selesaikan Pembayaran Sewa')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('Rp 3.205.000')).toBeInTheDocument();
+
+      // Click Bayar Sekarang inside modal
+      const modalPayButtons = screen.getAllByRole('button', { name: /Bayar Sekarang/i });
+      const submitPayBtn = modalPayButtons[modalPayButtons.length - 1];
+      fireEvent.click(submitPayBtn);
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith(
+          expect.stringContaining('/payment/token'),
+          expect.objectContaining({ method: 'POST' })
+        );
+      });
+    });
   });
 });

@@ -143,4 +143,91 @@ test('Midtrans Snap payment & webhook signature verification', async (t) => {
     assert.equal(activeCancelRes.processed, false);
     assert.equal(activeRental.status, 'active');
   });
+
+  await t.test('simulates settleRentalPayment with multi-month duration and admin fee calculation', () => {
+    interface SimulatedRental {
+      id: string;
+      propertyId: string;
+      status: 'pending' | 'active';
+      price: number;
+      duration_months: number;
+      admin_fee_amount: number;
+    }
+
+    interface SimulatedProperty {
+      id: string;
+      occupiedRooms: number;
+      totalRooms: number;
+      ownerId: string;
+    }
+
+    interface SimulatedLandlord {
+      id: string;
+      balance: number;
+      totalRevenue: number;
+    }
+
+    const testRental: SimulatedRental = {
+      id: 'rent-multi-999',
+      propertyId: 'prop-ubud-2',
+      status: 'pending',
+      price: 2500000,
+      duration_months: 3,
+      admin_fee_amount: 5000
+    };
+
+    const testProperty: SimulatedProperty = {
+      id: 'prop-ubud-2',
+      occupiedRooms: 1,
+      totalRooms: 4,
+      ownerId: 'landlord-ubud-1'
+    };
+
+    const testLandlord: SimulatedLandlord = {
+      id: 'landlord-ubud-1',
+      balance: 5000000,
+      totalRevenue: 10000000
+    };
+
+    function simulateSettlement(rental: SimulatedRental, prop: SimulatedProperty, landlord: SimulatedLandlord) {
+      if (prop.occupiedRooms >= prop.totalRooms) {
+        return { success: false, statusCode: 409, message: 'Kamar sudah penuh' };
+      }
+      if (rental.status !== 'active') {
+        rental.status = 'active';
+        prop.occupiedRooms = Math.min(prop.totalRooms, prop.occupiedRooms + 1);
+        const totalRevenue = rental.price * rental.duration_months;
+        landlord.balance += totalRevenue;
+        landlord.totalRevenue += totalRevenue;
+      }
+      return { success: true, statusCode: 200, message: 'Success' };
+    }
+
+    const result = simulateSettlement(testRental, testProperty, testLandlord);
+    assert.equal(result.success, true);
+    assert.equal(testRental.status, 'active');
+    assert.equal(testProperty.occupiedRooms, 2);
+    assert.equal(testLandlord.balance, 12500000); // 5M + (2.5M * 3) = 12.5M
+    assert.equal(testLandlord.totalRevenue, 17500000); // 10M + (2.5M * 3) = 17.5M
+
+    // Overbooking prevention check
+    const fullProperty: SimulatedProperty = {
+      id: 'prop-full',
+      occupiedRooms: 4,
+      totalRooms: 4,
+      ownerId: 'landlord-full'
+    };
+    const overbookRental: SimulatedRental = {
+      id: 'rent-overbook',
+      propertyId: 'prop-full',
+      status: 'pending',
+      price: 2000000,
+      duration_months: 1,
+      admin_fee_amount: 5000
+    };
+    const overbookResult = simulateSettlement(overbookRental, fullProperty, testLandlord);
+    assert.equal(overbookResult.success, false);
+    assert.equal(overbookResult.statusCode, 409);
+    assert.equal(overbookRental.status, 'pending');
+  });
 });

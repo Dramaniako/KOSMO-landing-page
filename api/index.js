@@ -3245,6 +3245,75 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Gagal membuat token pembayaran Midtrans." });
   }
 });
+async function settleRentalPayment(rentalId, paidAmount) {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rentalRows] = await connection.query(
+      "SELECT * FROM rentals WHERE id = ? FOR UPDATE",
+      [rentalId]
+    );
+    const rental = rentalRows[0];
+    if (!rental) {
+      await connection.rollback();
+      return { success: false, statusCode: 404, message: "Data sewa tidak ditemukan." };
+    }
+    const monthlyPrice = Number(rental.price || 0);
+    const durationMonths = Number(rental.duration_months || 1);
+    const adminFee = Number(
+      rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? rental.admin_fee_amount : 5e3
+    );
+    const expectedWithAdmin = monthlyPrice * durationMonths + adminFee;
+    const expectedBase = monthlyPrice * durationMonths;
+    if (paidAmount !== void 0 && !isNaN(paidAmount)) {
+      const isPriceMatch = Math.abs(paidAmount - expectedWithAdmin) <= 1 || Math.abs(paidAmount - expectedBase) <= 1 || Math.abs(paidAmount - monthlyPrice) <= 1;
+      if (!isPriceMatch) {
+        await connection.rollback();
+        console.error(`Midtrans gross_amount mismatch: expected ${expectedWithAdmin} or ${expectedBase}, got ${paidAmount}`);
+        return { success: false, statusCode: 400, message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa." };
+      }
+    }
+    if (rental.status !== "active") {
+      const [propRows] = await connection.query(
+        "SELECT totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
+        [rental.propertyId]
+      );
+      const property = propRows[0];
+      if (property && property.occupiedRooms >= property.totalRooms) {
+        await connection.rollback();
+        console.error(`Overbooking conflict detected for property ${property.id}, rental ${rentalId}`);
+        return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
+      }
+      await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [rentalId]);
+      await connection.query(
+        "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
+        [rental.propertyId]
+      );
+      if (property && property.ownerId) {
+        const totalRentalRevenue = monthlyPrice * durationMonths;
+        await connection.query(
+          "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
+          [totalRentalRevenue, totalRentalRevenue, property.ownerId]
+        );
+      }
+    }
+    await connection.commit();
+    apiCache.invalidatePattern("properties");
+    apiCache.invalidatePattern("rentals");
+    return {
+      success: true,
+      statusCode: 200,
+      message: "Pembayaran berhasil diproses dan status rental diaktifkan.",
+      rental: { ...rental, status: "active" }
+    };
+  } catch (err) {
+    await connection.rollback();
+    console.error("Settle rental payment error:", err);
+    return { success: false, statusCode: 500, message: "Gagal memproses transaksi sewa." };
+  } finally {
+    connection.release();
+  }
+}
 var handlePaymentNotification = async (req, res) => {
   const {
     order_id,
@@ -3271,65 +3340,9 @@ var handlePaymentNotification = async (req, res) => {
   const isSettlement = transaction_status === "settlement";
   const isCaptureSuccess = transaction_status === "capture" && fraud_status === "accept";
   if (isSettlement || isCaptureSuccess) {
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [rentalRows] = await connection.query(
-        "SELECT * FROM rentals WHERE id = ? FOR UPDATE",
-        [order_id]
-      );
-      const rental = rentalRows[0];
-      if (!rental) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Data sewa tidak ditemukan." });
-      }
-      const paidAmount = parseFloat(gross_amount);
-      const monthlyPrice = Number(rental.price || 0);
-      const durationMonths = Number(rental.duration_months || 1);
-      const adminFee = Number(rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? rental.admin_fee_amount : 5e3);
-      const expectedWithAdmin = monthlyPrice * durationMonths + adminFee;
-      const expectedBase = monthlyPrice * durationMonths;
-      const isPriceMatch = Math.abs(paidAmount - expectedWithAdmin) <= 1 || Math.abs(paidAmount - expectedBase) <= 1 || Math.abs(paidAmount - monthlyPrice) <= 1;
-      if (isNaN(paidAmount) || !isPriceMatch) {
-        await connection.rollback();
-        console.error(`Midtrans gross_amount mismatch: expected ${expectedWithAdmin} or ${expectedBase}, got ${paidAmount}`);
-        return res.status(400).json({ message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa." });
-      }
-      if (rental.status !== "active") {
-        const [propRows] = await connection.query(
-          "SELECT totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
-          [rental.propertyId]
-        );
-        const property = propRows[0];
-        if (property && property.occupiedRooms >= property.totalRooms) {
-          await connection.rollback();
-          console.error(`Overbooking conflict detected for property ${property.id}, rental ${order_id}`);
-          return res.status(409).json({ message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." });
-        }
-        await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [order_id]);
-        await connection.query(
-          "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
-          [rental.propertyId]
-        );
-        if (property && property.ownerId) {
-          const totalRentalRevenue = monthlyPrice * durationMonths;
-          await connection.query(
-            "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
-            [totalRentalRevenue, totalRentalRevenue, property.ownerId]
-          );
-        }
-      }
-      await connection.commit();
-      apiCache.invalidatePattern("properties");
-      apiCache.invalidatePattern("rentals");
-      return res.json({ message: "Pembayaran berhasil diproses dan status rental diaktifkan." });
-    } catch (err) {
-      await connection.rollback();
-      console.error("Midtrans webhook processing error:", err);
-      return res.status(500).json({ message: "Gagal memproses transaksi sewa." });
-    } finally {
-      connection.release();
-    }
+    const paidAmount = parseFloat(gross_amount);
+    const result = await settleRentalPayment(order_id, isNaN(paidAmount) ? void 0 : paidAmount);
+    return res.status(result.statusCode || (result.success ? 200 : 400)).json({ message: result.message });
   }
   if (transaction_status === "cancel" || transaction_status === "deny" || transaction_status === "expire") {
     try {
@@ -3346,6 +3359,35 @@ var handlePaymentNotification = async (req, res) => {
 };
 router.post("/payment/webhook", handlePaymentNotification);
 router.post("/payment/notification", handlePaymentNotification);
+router.post("/payment/finish", authenticateToken, async (req, res) => {
+  const { rentalId } = req.body;
+  const authUser = req.user;
+  if (!rentalId || typeof rentalId !== "string" || rentalId.trim() === "") {
+    return res.status(400).json({ success: false, message: "rentalId wajib diisi." });
+  }
+  try {
+    const [rows] = await pool.query("SELECT * FROM rentals WHERE id = ?", [rentalId.trim()]);
+    const rental = rows[0];
+    if (!rental) {
+      return res.status(404).json({ success: false, message: "Data sewa tidak ditemukan." });
+    }
+    if (authUser?.role !== "admin" && authUser?.id !== rental.tenantId) {
+      return res.status(403).json({ success: false, message: "Akses ditolak ke data sewa ini." });
+    }
+    const result = await settleRentalPayment(rentalId.trim());
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({ success: false, message: result.message });
+    }
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      rentalId: rentalId.trim()
+    });
+  } catch (err) {
+    console.error("Payment finish route error:", err);
+    return res.status(500).json({ success: false, message: "Gagal menyelesaikan transaksi pembayaran." });
+  }
+});
 var router_default = router;
 
 // backend/server.ts
