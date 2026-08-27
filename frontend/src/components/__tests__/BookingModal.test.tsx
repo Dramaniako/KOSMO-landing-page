@@ -277,4 +277,68 @@ describe('BookingModal Evidentiary UI & Contract Signing Suite', () => {
     fireEvent.click(payButton);
     expect(handleProcessPaymentMock).toHaveBeenCalledTimes(1);
   });
+
+  it('downloads signed contract PDF blob via authenticated API on payment view', async () => {
+    const mockPdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]);
+    const mockArrayBuffer = mockPdfBytes.buffer;
+
+    let capturedBlob: Blob | null = null;
+    const originalCreateObjectURL = window.URL.createObjectURL;
+    const originalRevokeObjectURL = window.URL.revokeObjectURL;
+
+    window.URL.createObjectURL = vi.fn((blob: Blob) => {
+      capturedBlob = blob;
+      return 'blob:http://localhost:5173/mock-modal-contract-uuid';
+    });
+    window.URL.revokeObjectURL = vi.fn();
+
+    const createdLinks: HTMLAnchorElement[] = [];
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      const el = originalCreateElement(tagName);
+      if (tagName.toLowerCase() === 'a') {
+        createdLinks.push(el as HTMLAnchorElement);
+      }
+      return el;
+    });
+
+    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/contract')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => mockArrayBuffer
+        }) as Promise<Response>;
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({})
+      }) as Promise<Response>;
+    });
+
+    renderWithContext({
+      showContract: false,
+      showPayment: true,
+      contractSigned: true,
+      signedContractData: mockSignedContract
+    });
+
+    const downloadContractBtn = screen.getByRole('button', { name: /Lihat Dokumen Kontrak Sewa \(PDF\)/i });
+    fireEvent.click(downloadContractBtn);
+
+    await waitFor(() => {
+      expect(capturedBlob).not.toBeNull();
+    });
+
+    expect(capturedBlob!.type).toBe('application/pdf');
+    expect(createdLinks.length).toBeGreaterThan(0);
+    const downloadLink = createdLinks[createdLinks.length - 1];
+    expect(downloadLink.download).toBe('kontrak_sewa_rent-bali-test-123.pdf');
+    expect(downloadLink.href).toBe('blob:http://localhost:5173/mock-modal-contract-uuid');
+
+    window.URL.createObjectURL = originalCreateObjectURL;
+    window.URL.revokeObjectURL = originalRevokeObjectURL;
+  });
 });

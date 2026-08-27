@@ -101,6 +101,35 @@ export default function BookingModal({
   const [previewData, setPreviewData] = useState<ContractPreviewResponse | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [downloadingSignedContract, setDownloadingSignedContract] = useState<boolean>(false);
+
+  const handleDownloadSignedContract = async (rentalId: string): Promise<void> => {
+    setDownloadingSignedContract(true);
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const res = await fetch(`${API_BASE}/rentals/${rentalId}/contract?download=true`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) {
+        throw new Error('Gagal mengunduh dokumen kontrak PDF.');
+      }
+      const arrayBuffer = await res.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `kontrak_sewa_${rentalId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengunduh dokumen kontrak PDF.';
+      alert(msg);
+    } finally {
+      setDownloadingSignedContract(false);
+    }
+  };
 
   // Reset or initialize state when opening contract
   useEffect(() => {
@@ -963,17 +992,18 @@ export default function BookingModal({
                   {t('contract.hashLabel')} {signedContractData.contractHash.slice(0, 24)}...
                 </div>
               )}
-              {signedContractData?.contractUrl && (
+              {signedContractData?.rentalId && (
                 <div style={{ marginTop: '8px' }}>
-                  <a
-                    href={signedContractData.contractUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: '11px', color: '#15803d', textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadSignedContract(signedContractData.rentalId)}
+                    disabled={downloadingSignedContract}
+                    className="btn btn-outline"
+                    style={{ fontSize: '11px', color: '#15803d', borderColor: '#86efac', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600, padding: '4px 10px', backgroundColor: '#f0fdf4' }}
                   >
                     <FileText size={12} />
-                    Lihat Dokumen Kontrak Sewa (PDF)
-                  </a>
+                    {downloadingSignedContract ? 'Mengunduh Dokumen PDF...' : 'Lihat Dokumen Kontrak Sewa (PDF)'}
+                  </button>
                 </div>
               )}
             </div>

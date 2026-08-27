@@ -181,6 +181,14 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     const rentalsTabButton = page.locator('button:has-text("Kos Saya (Sewa)")');
     await rentalsTabButton.click();
     await expect(page.locator('body')).toContainText(propertyTitle);
+
+    // 11. Click contract download button and verify PDF download event with correct filename
+    const viewContractBtn = page.locator('button:has-text("Lihat Kontrak")');
+    await expect(viewContractBtn).toBeVisible();
+    const downloadPromise = page.waitForEvent('download');
+    await viewContractBtn.click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^kontrak_sewa_.*\.pdf$/);
   });
 
   test('enforces single active tenancy rule by preventing duplicate active bookings', async ({ page, request }) => {

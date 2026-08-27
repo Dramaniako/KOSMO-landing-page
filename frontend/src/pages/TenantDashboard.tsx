@@ -88,11 +88,7 @@ export default function TenantDashboard() {
   const [contractDownloading, setContractDownloading] = useState<Record<string, boolean>>({});
   const loadedTabs = useRef<Set<string>>(new Set(['profile']));
 
-  const handleOpenContract = async (rentalId: string, directUrl?: string | null): Promise<void> => {
-    if (directUrl && directUrl.startsWith('http')) {
-      window.open(directUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
+  const handleOpenContract = async (rentalId: string): Promise<void> => {
     setContractDownloading(prev => ({ ...prev, [rentalId]: true }));
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
@@ -992,7 +988,7 @@ export default function TenantDashboard() {
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px', flexWrap: 'wrap' }}>
                         <button
                           type="button"
-                          onClick={() => handleOpenContract(activeRental.id, activeRental.contract_url)}
+                          onClick={() => handleOpenContract(activeRental.id)}
                           disabled={contractDownloading[activeRental.id]}
                           className="btn btn-outline"
                           style={{ padding: '6px 14px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
@@ -1068,7 +1064,7 @@ export default function TenantDashboard() {
                           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '6px' }}>
                             <button
                               type="button"
-                              onClick={() => handleOpenContract(rent.id, rent.contract_url)}
+                              onClick={() => handleOpenContract(rent.id)}
                               disabled={contractDownloading[rent.id]}
                               className="btn btn-outline"
                               style={{ padding: '4px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}

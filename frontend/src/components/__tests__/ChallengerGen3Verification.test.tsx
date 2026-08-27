@@ -613,11 +613,32 @@ describe('Empirical Verification: Challenger Gen 3 Suite (R1, R2, R3)', () => {
       window.URL.revokeObjectURL = originalRevokeObjectURL;
     });
 
-    it('opens direct Cloudinary contract URL in a new tab with noopener,noreferrer', async () => {
+    it('downloads authenticated contract PDF with application/pdf blob even when rental has contract_url', async () => {
       localStorage.setItem('user', JSON.stringify(mockTenant));
       localStorage.setItem('token', 'mock-jwt-token-123');
 
-      const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      const mockPdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]); // %PDF-1.4
+      const mockArrayBuffer = mockPdfBytes.buffer;
+
+      let capturedBlob: Blob | null = null;
+      const originalCreateObjectURL = window.URL.createObjectURL;
+      const originalRevokeObjectURL = window.URL.revokeObjectURL;
+
+      window.URL.createObjectURL = vi.fn((blob: Blob) => {
+        capturedBlob = blob;
+        return 'blob:http://localhost:5173/mock-direct-contract-uuid';
+      });
+      window.URL.revokeObjectURL = vi.fn();
+
+      const createdLinks: HTMLAnchorElement[] = [];
+      const originalCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+        const el = originalCreateElement(tagName);
+        if (tagName.toLowerCase() === 'a') {
+          createdLinks.push(el as HTMLAnchorElement);
+        }
+        return el;
+      });
 
       const rentalWithDirectUrl: Rental = {
         ...mockActiveRental,
@@ -626,6 +647,13 @@ describe('Empirical Verification: Challenger Gen 3 Suite (R1, R2, R3)', () => {
 
       vi.spyOn(window, 'fetch').mockImplementation((url) => {
         const urlStr = String(url);
+        if (urlStr.includes('/contract')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => mockArrayBuffer
+          }) as Promise<Response>;
+        }
         if (urlStr.includes('/api/rentals')) {
           return Promise.resolve({
             ok: true,
@@ -660,11 +688,18 @@ describe('Empirical Verification: Challenger Gen 3 Suite (R1, R2, R3)', () => {
       const viewContractBtn = screen.getByRole('button', { name: /Lihat Kontrak/i });
       fireEvent.click(viewContractBtn);
 
-      expect(windowOpenSpy).toHaveBeenCalledWith(
-        'https://res.cloudinary.com/kosmo/image/upload/kosmo_contracts/contract_101.pdf',
-        '_blank',
-        'noopener,noreferrer'
-      );
+      await waitFor(() => {
+        expect(capturedBlob).not.toBeNull();
+      });
+
+      expect(capturedBlob!.type).toBe('application/pdf');
+      expect(createdLinks.length).toBeGreaterThan(0);
+      const downloadLink = createdLinks[createdLinks.length - 1];
+      expect(downloadLink.download).toBe('kontrak_sewa_rent-gen3-test-101.pdf');
+      expect(downloadLink.href).toBe('blob:http://localhost:5173/mock-direct-contract-uuid');
+
+      window.URL.createObjectURL = originalCreateObjectURL;
+      window.URL.revokeObjectURL = originalRevokeObjectURL;
     });
   });
 });

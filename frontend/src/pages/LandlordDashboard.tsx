@@ -69,11 +69,7 @@ export default function LandlordDashboard() {
   const [contractDownloading, setContractDownloading] = useState<Record<string, boolean>>({});
   const loadedTabs = useRef<Set<string>>(new Set());
 
-  const handleLandlordContractDownload = async (rentalId: string, directUrl?: string | null): Promise<void> => {
-    if (directUrl && directUrl.startsWith('http')) {
-      window.open(directUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
+  const handleLandlordContractDownload = async (rentalId: string): Promise<void> => {
     setContractDownloading(prev => ({ ...prev, [rentalId]: true }));
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
@@ -877,7 +873,7 @@ export default function LandlordDashboard() {
                         <td style={{ padding: '16px', textAlign: 'right' }}>
                           <button
                             type="button"
-                            onClick={() => handleLandlordContractDownload(r.id, r.contract_url)}
+                            onClick={() => handleLandlordContractDownload(r.id)}
                             disabled={contractDownloading[r.id]}
                             className="btn btn-outline"
                             style={{ padding: '4px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
