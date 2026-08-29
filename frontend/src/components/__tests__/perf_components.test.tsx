@@ -75,4 +75,56 @@ describe('Frontend Component Render Performance', () => {
     expect(duration).toBeLessThan(500);
     expect(container.querySelector('select')).not.toBeNull();
   });
+
+  it('skips redundant re-renders when wrapped with React.memo', () => {
+    const setDistrict = vi.fn();
+    const setPriceMin = vi.fn();
+    const setPriceMax = vi.fn();
+    const toggleFacility = vi.fn();
+    const handleSearch = vi.fn();
+    const resetFilters = vi.fn();
+    const renderFacilityIcon = vi.fn((name: string) => <span>{name}</span>);
+
+    const { rerender } = render(
+      <SearchFilterBar
+        district="Semua"
+        setDistrict={setDistrict}
+        priceMin={0}
+        setPriceMin={setPriceMin}
+        priceMax={5000000}
+        setPriceMax={setPriceMax}
+        facilities={mockFacilities}
+        toggleFacility={toggleFacility}
+        handleSearch={handleSearch}
+        resetFilters={resetFilters}
+        renderFacilityIcon={renderFacilityIcon}
+        isSearching={false}
+      />
+    );
+
+    const initialCallCount = renderFacilityIcon.mock.calls.length;
+    expect(initialCallCount).toBeGreaterThan(0);
+
+    // Re-render with identical props
+    rerender(
+      <SearchFilterBar
+        district="Semua"
+        setDistrict={setDistrict}
+        priceMin={0}
+        setPriceMin={setPriceMin}
+        priceMax={5000000}
+        setPriceMax={setPriceMax}
+        facilities={mockFacilities}
+        toggleFacility={toggleFacility}
+        handleSearch={handleSearch}
+        resetFilters={resetFilters}
+        renderFacilityIcon={renderFacilityIcon}
+        isSearching={false}
+      />
+    );
+
+    // Because SearchFilterBar is memoized with React.memo, the inner render was skipped
+    expect(renderFacilityIcon.mock.calls.length).toBe(initialCallCount);
+  });
 });
+
