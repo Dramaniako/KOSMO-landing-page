@@ -286,14 +286,18 @@ async function seedDefaultUsers(p) {
     `);
   } else {
     const [existing] = await p.query("SELECT id, password FROM users");
+    const updatePromises = [];
     for (const u of existing) {
       if (u.password) {
         const isHashed = u.password.startsWith("$2a$") || u.password.startsWith("$2b$") || u.password.startsWith("$2y$");
         if (!isHashed) {
           const hashed = bcrypt.hashSync(u.password, 10);
-          await p.query("UPDATE users SET password = ? WHERE id = ?", [hashed, u.id]);
+          updatePromises.push(p.query("UPDATE users SET password = ? WHERE id = ?", [hashed, u.id]));
         }
       }
+    }
+    if (updatePromises.length > 0) {
+      await Promise.all(updatePromises);
     }
   }
 }
@@ -1506,10 +1510,11 @@ router.get("/properties", async (req, res) => {
     }
     let filteredProperties = properties;
     if (facility) {
-      const facilitiesList = Array.isArray(facility) ? facility.map(String) : [String(facility)];
-      filteredProperties = properties.filter(
-        (p) => facilitiesList.every((f) => (p.facilities || []).map((item) => item.toLowerCase()).includes(f.toLowerCase()))
-      );
+      const facilitiesList = (Array.isArray(facility) ? facility.map(String) : [String(facility)]).map((f) => f.toLowerCase());
+      filteredProperties = properties.filter((p) => {
+        const propFacSet = new Set((p.facilities || []).map((item) => item.toLowerCase()));
+        return facilitiesList.every((f) => propFacSet.has(f));
+      });
     }
     const normalized = filteredProperties.map(normalizePropertySummary);
     apiCache.set(cacheKey, normalized, 60);
@@ -1571,12 +1576,11 @@ router.post("/properties", authenticateToken, requireRole(["admin", "landlord", 
       ]
     );
     if (facilities && facilities.length > 0) {
-      for (const fac of facilities) {
-        await connection.query(
-          "INSERT INTO property_facilities (propertyId, facility) VALUES (?, ?)",
-          [propId, fac]
-        );
-      }
+      const facilityValues = facilities.map((fac) => [propId, fac]);
+      await connection.query(
+        "INSERT INTO property_facilities (propertyId, facility) VALUES ?",
+        [facilityValues]
+      );
     }
     await connection.commit();
     apiCache.invalidatePattern("properties");
@@ -1637,9 +1641,11 @@ router.put("/properties/:id", authenticateToken, requireRole(["admin", "landlord
     if (facilities !== void 0) {
       await connection.query("DELETE FROM property_facilities WHERE propertyId = ?", [id]);
       if (facilities.length > 0) {
-        for (const fac of facilities) {
-          await connection.query("INSERT INTO property_facilities (propertyId, facility) VALUES (?, ?)", [id, fac]);
-        }
+        const facilityValues = facilities.map((fac) => [id, fac]);
+        await connection.query(
+          "INSERT INTO property_facilities (propertyId, facility) VALUES ?",
+          [facilityValues]
+        );
       }
     }
     await connection.commit();

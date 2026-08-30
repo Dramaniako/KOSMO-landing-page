@@ -320,14 +320,18 @@ async function seedDefaultUsers(p: typeof pool): Promise<void> {
   } else {
     // Migrate existing plaintext users if any
     const [existing] = await p.query<RowDataPacket[]>('SELECT id, password FROM users');
+    const updatePromises: Promise<unknown>[] = [];
     for (const u of existing) {
       if (u.password) {
         const isHashed = u.password.startsWith('$2a$') || u.password.startsWith('$2b$') || u.password.startsWith('$2y$');
         if (!isHashed) {
           const hashed = bcrypt.hashSync(u.password, 10);
-          await p.query('UPDATE users SET password = ? WHERE id = ?', [hashed, u.id]);
+          updatePromises.push(p.query('UPDATE users SET password = ? WHERE id = ?', [hashed, u.id]));
         }
       }
+    }
+    if (updatePromises.length > 0) {
+      await Promise.all(updatePromises);
     }
   }
 }

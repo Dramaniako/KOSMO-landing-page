@@ -705,10 +705,11 @@ router.get('/properties', async (req: Request, res: Response) => {
     // Filter by facility in JS if requested
     let filteredProperties = properties;
     if (facility) {
-      const facilitiesList = Array.isArray(facility) ? facility.map(String) : [String(facility)];
-      filteredProperties = properties.filter(p =>
-        facilitiesList.every(f => (p.facilities || []).map(item => item.toLowerCase()).includes(f.toLowerCase()))
-      );
+      const facilitiesList = (Array.isArray(facility) ? facility.map(String) : [String(facility)]).map(f => f.toLowerCase());
+      filteredProperties = properties.filter(p => {
+        const propFacSet = new Set((p.facilities || []).map(item => item.toLowerCase()));
+        return facilitiesList.every(f => propFacSet.has(f));
+      });
     }
 
     const normalized = filteredProperties.map(normalizePropertySummary);
@@ -775,12 +776,11 @@ router.post('/properties', authenticateToken, requireRole(['admin', 'landlord', 
     );
 
     if (facilities && facilities.length > 0) {
-      for (const fac of facilities) {
-        await connection.query(
-          'INSERT INTO property_facilities (propertyId, facility) VALUES (?, ?)', 
-          [propId, fac]
-        );
-      }
+      const facilityValues = facilities.map(fac => [propId, fac]);
+      await connection.query(
+        'INSERT INTO property_facilities (propertyId, facility) VALUES ?', 
+        [facilityValues]
+      );
     }
 
     await connection.commit();
@@ -840,9 +840,11 @@ router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord
     if (facilities !== undefined) {
       await connection.query('DELETE FROM property_facilities WHERE propertyId = ?', [id]);
       if (facilities.length > 0) {
-        for (const fac of facilities) {
-          await connection.query('INSERT INTO property_facilities (propertyId, facility) VALUES (?, ?)', [id, fac]);
-        }
+        const facilityValues = facilities.map(fac => [id, fac]);
+        await connection.query(
+          'INSERT INTO property_facilities (propertyId, facility) VALUES ?', 
+          [facilityValues]
+        );
       }
     }
 
