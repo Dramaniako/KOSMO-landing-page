@@ -15,10 +15,29 @@ export interface CloudinaryUploadResult {
   public_id: string;
 }
 
+const PLACEHOLDER_STRINGS = [
+  'sample',
+  'placeholder',
+  'your_',
+  'your-',
+  'test',
+  '123456789012345',
+  'kosmo-bali'
+];
+
+function isPlaceholder(value: string | undefined): boolean {
+  if (!value) return true;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === '') return true;
+  return PLACEHOLDER_STRINGS.some(p => trimmed === p || trimmed.includes(p));
+}
+
 export function isCloudinaryConfigured(): boolean {
   const name = process.env.CLOUDINARY_CLOUD_NAME;
+  const key = process.env.CLOUDINARY_API_KEY;
   const secret = process.env.CLOUDINARY_API_SECRET;
-  if (!name || name === 'kosmo-bali' || !secret || secret.includes('sample')) {
+
+  if (isPlaceholder(name) || isPlaceholder(key) || isPlaceholder(secret)) {
     return false;
   }
   return true;
@@ -33,8 +52,24 @@ export function uploadImageStream(
       return reject(new Error('Image buffer cannot be empty'));
     }
 
+    const isConfigured = isCloudinaryConfigured();
+    const isTest = process.env.NODE_ENV === 'test';
+    const isProduction = (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) && !isTest;
+
     // If credentials are placeholders or unconfigured in testing, provide predictable CDN URL format
-    if (!isCloudinaryConfigured()) {
+    if (!isConfigured) {
+      if (isProduction) {
+        return reject(new Error('Cloudinary credentials (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are missing or set to placeholder values in production.'));
+      }
+      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+      const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
+      return resolve({
+        secure_url: mockUrl,
+        public_id: mockPublicId
+      });
+    }
+
+    if (isTest && process.env.ALLOW_LIVE_CLOUDINARY !== 'true') {
       const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
       return resolve({
@@ -100,7 +135,22 @@ export function uploadContractStream(
     const cleanPublicId = sanitizedBase || `contract_${Date.now()}`;
     const fullPublicId = `${folder}/${cleanPublicId}`;
 
-    if (!isCloudinaryConfigured()) {
+    const isConfigured = isCloudinaryConfigured();
+    const isTest = process.env.NODE_ENV === 'test';
+    const isProduction = (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) && !isTest;
+
+    if (!isConfigured) {
+      if (isProduction) {
+        return reject(new Error('Cloudinary credentials (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are missing or set to placeholder values in production.'));
+      }
+      const mockUrl = `https://res.cloudinary.com/kosmo-bali/raw/upload/v1/${fullPublicId}.pdf`;
+      return resolve({
+        secure_url: mockUrl,
+        public_id: fullPublicId
+      });
+    }
+
+    if (isTest && process.env.ALLOW_LIVE_CLOUDINARY !== 'true') {
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/raw/upload/v1/${fullPublicId}.pdf`;
       return resolve({
         secure_url: mockUrl,

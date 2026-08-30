@@ -2808,6 +2808,30 @@ router.get(
 // ==========================================
 // Midtrans Snap Sandbox Payment Gateway
 // ==========================================
+const MIDTRANS_PLACEHOLDERS = [
+  'placeholder',
+  'your-server-key',
+  'your_server_key',
+  'your-client-key',
+  'your_client_key',
+  'dummy',
+  'sample',
+  'sb-mid-server-placeholder',
+  'sb-mid-client-placeholder'
+];
+
+export function isMidtransConfigured(): boolean {
+  const serverKey = process.env.MIDTRANS_SERVER_KEY;
+  const clientKey = process.env.MIDTRANS_CLIENT_KEY;
+  if (!serverKey || !clientKey) return false;
+  const s = serverKey.trim().toLowerCase();
+  const c = clientKey.trim().toLowerCase();
+  if (s === '' || c === '') return false;
+  if (MIDTRANS_PLACEHOLDERS.some(p => s.includes(p))) return false;
+  if (MIDTRANS_PLACEHOLDERS.some(p => c.includes(p))) return false;
+  return true;
+}
+
 export const snap = new midtransClient.Snap({
   isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
   serverKey: process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder',
@@ -2942,10 +2966,19 @@ router.post('/payment/token', authenticateToken, async (req: AuthenticatedReques
       custom_field1: rentalId
     };
 
+    const isProduction = (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== 'test';
+    const hasMidtransConfig = isMidtransConfigured();
+
+    if (!hasMidtransConfig && isProduction) {
+      return res.status(500).json({
+        message: "Konfigurasi payment gateway Midtrans (MIDTRANS_SERVER_KEY / MIDTRANS_CLIENT_KEY) belum diatur di server produksi."
+      });
+    }
+
     let transactionToken = `snap-token-${rentalId}`;
     let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${rentalId}`;
 
-    if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes('your-server-key') && !process.env.MIDTRANS_SERVER_KEY.includes('placeholder')) {
+    if (hasMidtransConfig) {
       try {
         const transaction = await snap.createTransaction(parameter);
         transactionToken = transaction.token;
@@ -3081,6 +3114,15 @@ export async function settleRentalPayment(
 }
 
 const handlePaymentNotification = async (req: Request<Record<string, never>, unknown, MidtransWebhookBody>, res: Response) => {
+  const isProduction = (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== 'test';
+  const hasMidtransConfig = isMidtransConfigured();
+
+  if (!hasMidtransConfig && isProduction) {
+    return res.status(500).json({
+      message: "Midtrans server key belum dikonfigurasi pada server produksi."
+    });
+  }
+
   const {
     order_id,
     status_code,

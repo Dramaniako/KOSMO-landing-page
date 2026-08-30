@@ -55,9 +55,28 @@ var dbConfig = {
   keepAliveInitialDelay: 1e4,
   queueLimit: 0
 };
+function validateDatabaseConfig(config) {
+  const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+  const host2 = String(config.host || "localhost").toLowerCase();
+  const isLocalhost = host2 === "localhost" || host2 === "127.0.0.1" || host2.startsWith("192.168.");
+  const isRemoteHost = !isLocalhost;
+  const user = String(config.user || "").trim();
+  const password = String(config.password || "").trim();
+  const isPlaceholderPassword = password === "your_database_password" || password.includes("your_password") || password === "placeholder";
+  const isPlaceholderUser = user === "your_db_user" || user.includes("your_db_user") || user === "placeholder";
+  if (isProduction || isRemoteHost) {
+    if (!user || isPlaceholderUser) {
+      throw new Error(`[Database Security] Insecure database configuration: DB_USER is required and cannot be empty or placeholder for host "${host2}".`);
+    }
+    if (!password || isPlaceholderPassword) {
+      throw new Error(`[Database Security] Insecure database configuration: DB_PASSWORD is required and cannot be empty or placeholder in production or remote environments (host: "${host2}").`);
+    }
+  }
+}
 var activePool = null;
 function getPool() {
   if (!activePool) {
+    validateDatabaseConfig(dbConfig);
     const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
     activePool = mysql.createPool({
       ...dbConfig,
@@ -84,7 +103,7 @@ async function ensureDbReady() {
   if (isInitialized) return;
   await initDb();
 }
-async function ensureIndexes() {
+async function ensureIndexes(executor = pool) {
   if (process.env.VERCEL) return;
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
@@ -99,153 +118,155 @@ async function ensureIndexes() {
     "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)"
   ];
-  for (const sql of indexStatements) {
-    try {
-      await pool.query(sql);
-    } catch {
+  await Promise.allSettled(
+    indexStatements.map(async (sql) => {
+      try {
+        await executor.query(sql);
+      } catch {
+      }
+    })
+  );
+}
+async function createTables(executor = pool) {
+  await Promise.all([
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(50) PRIMARY KEY,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password VARCHAR(100) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        role ENUM('admin', 'landlord', 'tenant') NOT NULL,
+        phone VARCHAR(20) DEFAULT '',
+        paymentMethod VARCHAR(100) DEFAULT 'Virtual Account',
+        avatar LONGTEXT,
+        notifications BOOLEAN DEFAULT TRUE,
+        language VARCHAR(20) DEFAULT 'Indonesia',
+        balance DECIMAL(15, 2) DEFAULT 0.00,
+        totalRevenue DECIMAL(15, 2) DEFAULT 0.00,
+        totalWithdrawn DECIMAL(15, 2) DEFAULT 0.00,
+        bankName VARCHAR(50) DEFAULT '',
+        bankAccountNumber VARCHAR(50) DEFAULT '',
+        bankAccountHolder VARCHAR(100) DEFAULT '',
+        identity_type VARCHAR(20) DEFAULT 'NIK',
+        identity_number VARCHAR(50) DEFAULT '',
+        address TEXT,
+        occupation VARCHAR(100) DEFAULT '',
+        emergency_contact_name VARCHAR(100) DEFAULT '',
+        emergency_contact_relation VARCHAR(50) DEFAULT '',
+        emergency_contact_phone VARCHAR(50) DEFAULT '',
+        date_of_birth VARCHAR(30) DEFAULT '',
+        gender VARCHAR(20) DEFAULT ''
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS visitor_tracking (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ip_address VARCHAR(255),
+        user_agent TEXT,
+        visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `)
+  ]);
+  await Promise.all([
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS properties (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        district VARCHAR(50) NOT NULL,
+        address TEXT NOT NULL,
+        price INT NOT NULL,
+        rating DECIMAL(3, 1) DEFAULT 0.0,
+        image LONGTEXT,
+        description LONGTEXT,
+        latitude VARCHAR(50) DEFAULT '-8.6500',
+        longitude VARCHAR(50) DEFAULT '115.2166',
+        totalRooms INT NOT NULL,
+        occupiedRooms INT DEFAULT 0,
+        ownerId VARCHAR(50),
+        document VARCHAR(100) DEFAULT 'sertifikat_kepemilikan.pdf',
+        FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS withdrawals (
+        id VARCHAR(50) PRIMARY KEY,
+        userId VARCHAR(50) NOT NULL,
+        bankName VARCHAR(50) NOT NULL,
+        accountNumber VARCHAR(50) NOT NULL,
+        accountHolder VARCHAR(100) DEFAULT '',
+        amount DECIMAL(15, 2) NOT NULL,
+        date VARCHAR(50) NOT NULL,
+        status ENUM('pending','processing','completed','rejected') DEFAULT 'pending',
+        referenceId VARCHAR(100) DEFAULT '',
+        rejectionReason TEXT,
+        processedAt VARCHAR(50) DEFAULT '',
+        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `)
+  ]);
+  await Promise.all([
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS property_facilities (
+        propertyId VARCHAR(50),
+        facility VARCHAR(50),
+        PRIMARY KEY (propertyId, facility),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS reviews (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        propertyName VARCHAR(100) NOT NULL,
+        userId VARCHAR(50) NOT NULL,
+        userName VARCHAR(100) NOT NULL,
+        rating INT NOT NULL,
+        comment TEXT NOT NULL,
+        date VARCHAR(50) NOT NULL,
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
+        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS rentals (
+        id VARCHAR(50) PRIMARY KEY,
+        tenantId VARCHAR(50) NOT NULL,
+        propertyId VARCHAR(50) NOT NULL,
+        propertyName VARCHAR(100) NOT NULL,
+        price INT NOT NULL,
+        startDate VARCHAR(50) NOT NULL,
+        status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending',
+        document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
+        contract_url VARCHAR(500),
+        contract_hash VARCHAR(64),
+        contract_signed_at DATETIME,
+        signer_ip VARCHAR(50),
+        signer_user_agent VARCHAR(255),
+        tenant_nik_passport VARCHAR(50),
+        tenant_signature_data LONGTEXT,
+        admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
+        duration_months INT DEFAULT 1,
+        FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `)
+  ]);
+}
+async function applyMigrations(executor = pool) {
+  const runTableQueries = async (queries) => {
+    for (const sql of queries) {
+      try {
+        await executor.query(sql);
+      } catch {
+      }
     }
-  }
-}
-async function createSchemaTables(p) {
-  await p.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id VARCHAR(50) PRIMARY KEY,
-      email VARCHAR(100) UNIQUE NOT NULL,
-      password VARCHAR(100) NOT NULL,
-      name VARCHAR(100) NOT NULL,
-      role ENUM('admin', 'landlord', 'tenant') NOT NULL,
-      phone VARCHAR(20) DEFAULT '',
-      paymentMethod VARCHAR(100) DEFAULT 'Virtual Account',
-      avatar LONGTEXT,
-      notifications BOOLEAN DEFAULT TRUE,
-      language VARCHAR(20) DEFAULT 'Indonesia',
-      balance DECIMAL(15, 2) DEFAULT 0.00,
-      totalRevenue DECIMAL(15, 2) DEFAULT 0.00,
-      totalWithdrawn DECIMAL(15, 2) DEFAULT 0.00,
-      bankName VARCHAR(50) DEFAULT '',
-      bankAccountNumber VARCHAR(50) DEFAULT '',
-      bankAccountHolder VARCHAR(100) DEFAULT '',
-      identity_type VARCHAR(20) DEFAULT 'NIK',
-      identity_number VARCHAR(50) DEFAULT '',
-      address TEXT,
-      occupation VARCHAR(100) DEFAULT '',
-      emergency_contact_name VARCHAR(100) DEFAULT '',
-      emergency_contact_relation VARCHAR(50) DEFAULT '',
-      emergency_contact_phone VARCHAR(50) DEFAULT '',
-      date_of_birth VARCHAR(30) DEFAULT '',
-      gender VARCHAR(20) DEFAULT ''
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
-  await p.query(`
-    CREATE TABLE IF NOT EXISTS properties (
-      id VARCHAR(50) PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      district VARCHAR(50) NOT NULL,
-      address TEXT NOT NULL,
-      price INT NOT NULL,
-      rating DECIMAL(3, 1) DEFAULT 0.0,
-      image LONGTEXT,
-      description LONGTEXT,
-      latitude VARCHAR(50) DEFAULT '-8.6500',
-      longitude VARCHAR(50) DEFAULT '115.2166',
-      totalRooms INT NOT NULL,
-      occupiedRooms INT DEFAULT 0,
-      ownerId VARCHAR(50),
-      document VARCHAR(100) DEFAULT 'sertifikat_kepemilikan.pdf',
-      FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE SET NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
-  await p.query(`
-    CREATE TABLE IF NOT EXISTS property_facilities (
-      propertyId VARCHAR(50),
-      facility VARCHAR(50),
-      PRIMARY KEY (propertyId, facility),
-      FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
-  await p.query(`
-    CREATE TABLE IF NOT EXISTS reviews (
-      id VARCHAR(50) PRIMARY KEY,
-      propertyId VARCHAR(50) NOT NULL,
-      propertyName VARCHAR(100) NOT NULL,
-      userId VARCHAR(50) NOT NULL,
-      userName VARCHAR(100) NOT NULL,
-      rating INT NOT NULL,
-      comment TEXT NOT NULL,
-      date VARCHAR(50) NOT NULL,
-      FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
-      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
-  await p.query(`
-    CREATE TABLE IF NOT EXISTS withdrawals (
-      id VARCHAR(50) PRIMARY KEY,
-      userId VARCHAR(50) NOT NULL,
-      bankName VARCHAR(50) NOT NULL,
-      accountNumber VARCHAR(50) NOT NULL,
-      accountHolder VARCHAR(100) DEFAULT '',
-      amount DECIMAL(15, 2) NOT NULL,
-      date VARCHAR(50) NOT NULL,
-      status ENUM('pending','processing','completed','rejected') DEFAULT 'pending',
-      referenceId VARCHAR(100) DEFAULT '',
-      rejectionReason TEXT,
-      processedAt VARCHAR(50) DEFAULT '',
-      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
-  await p.query(`
-    CREATE TABLE IF NOT EXISTS visitor_tracking (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      ip_address VARCHAR(255),
-      user_agent TEXT,
-      visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
-  await p.query(`
-    CREATE TABLE IF NOT EXISTS rentals (
-      id VARCHAR(50) PRIMARY KEY,
-      tenantId VARCHAR(50) NOT NULL,
-      propertyId VARCHAR(50) NOT NULL,
-      propertyName VARCHAR(100) NOT NULL,
-      price INT NOT NULL,
-      startDate VARCHAR(50) NOT NULL,
-      status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending',
-      document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
-      contract_url VARCHAR(500),
-      contract_hash VARCHAR(64),
-      contract_signed_at DATETIME,
-      signer_ip VARCHAR(50),
-      signer_user_agent VARCHAR(255),
-      tenant_nik_passport VARCHAR(50),
-      tenant_signature_data LONGTEXT,
-      admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
-      duration_months INT DEFAULT 1,
-      FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
-}
-async function applyTableMigrations(p) {
-  const alterQueries = [
+  };
+  const propertiesQueries = [
     "ALTER TABLE properties MODIFY image LONGTEXT",
-    "ALTER TABLE properties MODIFY description LONGTEXT",
+    "ALTER TABLE properties MODIFY description LONGTEXT"
+  ];
+  const usersQueries = [
     "ALTER TABLE users MODIFY avatar LONGTEXT",
-    "ALTER TABLE visitor_tracking MODIFY ip_address VARCHAR(255)",
-    "ALTER TABLE visitor_tracking MODIFY user_agent TEXT",
-    "ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'",
-    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
-    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
-    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT",
-    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_url VARCHAR(500)",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_hash VARCHAR(64)",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_signed_at DATETIME",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_ip VARCHAR(50)",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_user_agent VARCHAR(255)",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_type VARCHAR(20) DEFAULT 'NIK'",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_number VARCHAR(50) DEFAULT ''",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT",
@@ -256,21 +277,44 @@ async function applyTableMigrations(p) {
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(30) DEFAULT ''",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(20) DEFAULT ''"
   ];
-  for (const query of alterQueries) {
-    try {
-      await p.query(query);
-    } catch {
-    }
-  }
-  await ensureIndexes();
+  const visitorTrackingQueries = [
+    "ALTER TABLE visitor_tracking MODIFY ip_address VARCHAR(255)",
+    "ALTER TABLE visitor_tracking MODIFY user_agent TEXT"
+  ];
+  const withdrawalsQueries = [
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''"
+  ];
+  const rentalsQueries = [
+    "ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_url VARCHAR(500)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_hash VARCHAR(64)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_signed_at DATETIME",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_ip VARCHAR(50)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_user_agent VARCHAR(255)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1"
+  ];
+  await Promise.all([
+    runTableQueries(propertiesQueries),
+    runTableQueries(usersQueries),
+    runTableQueries(visitorTrackingQueries),
+    runTableQueries(withdrawalsQueries),
+    runTableQueries(rentalsQueries)
+  ]);
+  await ensureIndexes(executor);
 }
-async function seedDefaultUsers(p) {
-  const [userRows] = await p.query("SELECT COUNT(*) as count FROM users");
+async function seedUsers(executor = pool) {
+  const [userRows] = await executor.query("SELECT COUNT(*) as count FROM users");
   if (userRows[0].count === 0) {
     const adminHash = bcrypt.hashSync("admin", 10);
     const landlordHash = bcrypt.hashSync("landlord", 10);
     const tenantHash = bcrypt.hashSync("tenant", 10);
-    await p.query(`
+    await executor.query(`
       INSERT INTO users (
         id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder,
         identity_type, identity_number, address, occupation, emergency_contact_name, emergency_contact_relation, emergency_contact_phone
@@ -280,19 +324,19 @@ async function seedDefaultUsers(p) {
         ('user-landlord', 'landlord@kosmo.com', ?, 'Admin Landlord', 'landlord', '+62 811-2233-4455', 'Virtual Account', NULL, 650000.0, 1650000.0, 1000000.0, 'BCA', '1234567890', 'Admin Landlord', 'NIK', '5171012204850002', 'Jl. Sunset Road No. 88, Seminyak, Badung, Bali', 'Pengelola Properti', 'Wayan Landlord', 'Keluarga', '+6281122334400'),
         ('user-tenant', 'tenant@kosmo.com', ?, 'Bayu', 'tenant', '+62 812-3456-7890', 'Kartu Kredit, Virtual Account', NULL, 0.00, 0.00, 0.00, '', '', '', 'NIK', '5171012308980001', 'Jl. Teuku Umar No. 88, Denpasar Barat, Kota Denpasar, Bali', 'Software Engineer', 'Made Wipradnyana', 'Orang Tua', '+6281234567899');
     `, [adminHash, landlordHash, tenantHash]);
-    await p.query(`
+    await executor.query(`
       INSERT INTO withdrawals (id, userId, bankName, accountNumber, amount, date, status)
       VALUES ('w-01', 'user-landlord', 'BCA', '1234567890', 1000000.0, '3 Jun 2026', 'completed');
     `);
   } else {
-    const [existing] = await p.query("SELECT id, password FROM users");
+    const [existing] = await executor.query("SELECT id, password FROM users");
     const updatePromises = [];
     for (const u of existing) {
       if (u.password) {
         const isHashed = u.password.startsWith("$2a$") || u.password.startsWith("$2b$") || u.password.startsWith("$2y$");
         if (!isHashed) {
           const hashed = bcrypt.hashSync(u.password, 10);
-          updatePromises.push(p.query("UPDATE users SET password = ? WHERE id = ?", [hashed, u.id]));
+          updatePromises.push(executor.query("UPDATE users SET password = ? WHERE id = ?", [hashed, u.id]));
         }
       }
     }
@@ -301,17 +345,17 @@ async function seedDefaultUsers(p) {
     }
   }
 }
-async function seedDefaultPropertiesAndReviews(p) {
-  const [propRows] = await p.query("SELECT COUNT(*) as count FROM properties");
+async function seedPropertiesAndFacilities(executor = pool) {
+  const [propRows] = await executor.query("SELECT COUNT(*) as count FROM properties");
   if (propRows[0].count === 0) {
-    await p.query(`
+    await executor.query(`
       INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document)
       VALUES 
         ('prop-01', 'KOSMO Hub Denpasar', 'Denpasar', 'Jl. Teuku Umar No. 14, Denpasar, Bali', 3500000, 4.7, 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=800&q=80', 'Modern co-living space di Denpasar dengan konsep smart home. Dilengkapi dengan communal area luas, rooftop area, cafe, gym kecil, dan coworking space untuk penghuni. Fasilitas listrik, air, wifi, kebersihan, keamanan, dan parkir.', '-8.6725', '115.2166', 10, 8, 'user-landlord', 'sertifikat_denpasar.pdf'),
         ('prop-02', 'KOSMO Hub Seminyak', 'Badung', 'Jl. Sunset Road No. 88, Badung, Bali', 4500000, 4.8, 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=800&q=80', 'Premium co-living space di Seminyak dekat pantai. Sangat cocok untuk digital nomad dengan internet super cepat, area kerja nyaman, kolam renang, dan parkir luas.', '-8.6913', '115.1682', 8, 5, 'user-landlord', 'sertifikat_seminyak.pdf'),
         ('prop-03', 'KOSMO Hub Ubud', 'Gianyar', 'Jl. Raya Ubud No. 12, Gianyar, Bali', 2500000, 4.5, 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=800&q=80', 'Co-living asri di Ubud yang dikelilingi sawah. Dilengkapi dengan kitchen bersama, yoga shala, dan suasana tenang untuk fokus bekerja atau bersantai.', '-8.5069', '115.2625', 12, 6, 'user-landlord', 'sertifikat_ubud.pdf');
     `);
-    await p.query(`
+    await executor.query(`
       INSERT INTO property_facilities (propertyId, facility)
       VALUES 
         ('prop-01', 'Listrik'), ('prop-01', 'Air'), ('prop-01', 'Wifi'), ('prop-01', 'Kebersihan'), ('prop-01', 'Keamanan'), ('prop-01', 'Parkir'),
@@ -319,9 +363,11 @@ async function seedDefaultPropertiesAndReviews(p) {
         ('prop-03', 'Wifi'), ('prop-03', 'Kebersihan'), ('prop-03', 'Air'), ('prop-03', 'Keamanan');
     `);
   }
-  const [revRows] = await p.query("SELECT COUNT(*) as count FROM reviews");
+}
+async function seedReviews(executor = pool) {
+  const [revRows] = await executor.query("SELECT COUNT(*) as count FROM reviews");
   if (revRows[0].count === 0) {
-    await p.query(`
+    await executor.query(`
       INSERT INTO reviews (id, propertyId, propertyName, userId, userName, rating, comment, date)
       VALUES 
         ('rev-01', 'prop-01', 'KOSMO Hub Denpasar', 'user-tenant', 'Bayu', 5, 'Sangat nyaman dan lokasinya sangat strategis di Denpasar! Internetnya cepat banget cocok buat WFH.', '15 Jun 2026'),
@@ -329,6 +375,11 @@ async function seedDefaultPropertiesAndReviews(p) {
         ('rev-03', 'prop-02', 'KOSMO Hub Seminyak', 'user-tenant', 'Bayu', 5, 'Keren banget kolam renangnya! Kamar bersih dan smart lock-nya aman sekali.', '18 Jun 2026');
     `);
   }
+}
+async function seedDatabase(executor = pool) {
+  await seedUsers(executor);
+  await seedPropertiesAndFacilities(executor);
+  await seedReviews(executor);
 }
 async function initDb() {
   if (isInitialized) return;
@@ -362,21 +413,21 @@ async function initDb() {
       ];
       const missingTables = requiredTables.filter((t) => !existingTables.includes(t));
       if (missingTables.length === 0) {
-        await applyTableMigrations(pool);
+        await applyMigrations(pool);
         isInitialized = true;
         console.log("MySQL Database Kosmo tables already initialized and migrations applied.");
         return;
       }
-      console.log(`Database tables missing: ${missingTables.join(", ")}. Initializing...`);
-      await createSchemaTables(pool);
-      await applyTableMigrations(pool);
-      await seedDefaultUsers(pool);
-      await seedDefaultPropertiesAndReviews(pool);
+      console.log(`Database tables missing: ${missingTables.join(", ")}. Initializing modular schema...`);
+      await createTables(pool);
+      await applyMigrations(pool);
+      await seedDatabase(pool);
       isInitialized = true;
       console.log("MySQL Database Kosmo initialized, tables created, and seeded successfully!");
     } catch (err) {
       console.error("Failed to initialize database tables or seed default values:", err);
       initPromise = null;
+      throw err;
     }
   })();
   return initPromise;
@@ -408,10 +459,26 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET || "",
   secure: true
 });
+var PLACEHOLDER_STRINGS = [
+  "sample",
+  "placeholder",
+  "your_",
+  "your-",
+  "test",
+  "123456789012345",
+  "kosmo-bali"
+];
+function isPlaceholder(value) {
+  if (!value) return true;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === "") return true;
+  return PLACEHOLDER_STRINGS.some((p) => trimmed === p || trimmed.includes(p));
+}
 function isCloudinaryConfigured() {
   const name = process.env.CLOUDINARY_CLOUD_NAME;
+  const key = process.env.CLOUDINARY_API_KEY;
   const secret = process.env.CLOUDINARY_API_SECRET;
-  if (!name || name === "kosmo-bali" || !secret || secret.includes("sample")) {
+  if (isPlaceholder(name) || isPlaceholder(key) || isPlaceholder(secret)) {
     return false;
   }
   return true;
@@ -421,7 +488,21 @@ function uploadImageStream(buffer, folder = "kosmo_properties") {
     if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
       return reject(new Error("Image buffer cannot be empty"));
     }
-    if (!isCloudinaryConfigured()) {
+    const isConfigured = isCloudinaryConfigured();
+    const isTest = process.env.NODE_ENV === "test";
+    const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && !isTest;
+    if (!isConfigured) {
+      if (isProduction) {
+        return reject(new Error("Cloudinary credentials (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are missing or set to placeholder values in production."));
+      }
+      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+      const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
+      return resolve({
+        secure_url: mockUrl,
+        public_id: mockPublicId
+      });
+    }
+    if (isTest && process.env.ALLOW_LIVE_CLOUDINARY !== "true") {
       const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
       return resolve({
@@ -466,7 +547,20 @@ function uploadContractStream(buffer, filename, folder = "kosmo_contracts") {
     const sanitizedBase = filename ? path2.basename(filename.replace(/\\/g, "/")).replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9_-]/g, "_") : `contract_${Date.now()}`;
     const cleanPublicId = sanitizedBase || `contract_${Date.now()}`;
     const fullPublicId = `${folder}/${cleanPublicId}`;
-    if (!isCloudinaryConfigured()) {
+    const isConfigured = isCloudinaryConfigured();
+    const isTest = process.env.NODE_ENV === "test";
+    const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && !isTest;
+    if (!isConfigured) {
+      if (isProduction) {
+        return reject(new Error("Cloudinary credentials (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are missing or set to placeholder values in production."));
+      }
+      const mockUrl = `https://res.cloudinary.com/kosmo-bali/raw/upload/v1/${fullPublicId}.pdf`;
+      return resolve({
+        secure_url: mockUrl,
+        public_id: fullPublicId
+      });
+    }
+    if (isTest && process.env.ALLOW_LIVE_CLOUDINARY !== "true") {
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/raw/upload/v1/${fullPublicId}.pdf`;
       return resolve({
         secure_url: mockUrl,
@@ -934,7 +1028,7 @@ var propertySchema = z.object({
   address: z.string().min(1, "Alamat wajib diisi"),
   price: z.number().positive("Harga harus lebih besar dari 0"),
   totalRooms: z.number().int().positive("Total kamar harus lebih besar dari 0"),
-  ownerId: z.string().min(1, "ownerId wajib diisi")
+  ownerId: z.string().min(1, "ownerId wajib diisi").optional()
 });
 var withdrawalSchema = z.object({
   amount: z.number().positive("Jumlah penarikan harus lebih besar dari 0"),
@@ -3179,6 +3273,28 @@ router.get(
     }
   }
 );
+var MIDTRANS_PLACEHOLDERS = [
+  "placeholder",
+  "your-server-key",
+  "your_server_key",
+  "your-client-key",
+  "your_client_key",
+  "dummy",
+  "sample",
+  "sb-mid-server-placeholder",
+  "sb-mid-client-placeholder"
+];
+function isMidtransConfigured() {
+  const serverKey = process.env.MIDTRANS_SERVER_KEY;
+  const clientKey = process.env.MIDTRANS_CLIENT_KEY;
+  if (!serverKey || !clientKey) return false;
+  const s = serverKey.trim().toLowerCase();
+  const c = clientKey.trim().toLowerCase();
+  if (s === "" || c === "") return false;
+  if (MIDTRANS_PLACEHOLDERS.some((p) => s.includes(p))) return false;
+  if (MIDTRANS_PLACEHOLDERS.some((p) => c.includes(p))) return false;
+  return true;
+}
 var snap = new midtransClient.Snap({
   isProduction: process.env.MIDTRANS_IS_PRODUCTION === "true",
   serverKey: process.env.MIDTRANS_SERVER_KEY || "SB-Mid-server-placeholder",
@@ -3277,9 +3393,16 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
       ],
       custom_field1: rentalId
     };
+    const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
+    const hasMidtransConfig = isMidtransConfigured();
+    if (!hasMidtransConfig && isProduction) {
+      return res.status(500).json({
+        message: "Konfigurasi payment gateway Midtrans (MIDTRANS_SERVER_KEY / MIDTRANS_CLIENT_KEY) belum diatur di server produksi."
+      });
+    }
     let transactionToken = `snap-token-${rentalId}`;
     let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${rentalId}`;
-    if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes("your-server-key") && !process.env.MIDTRANS_SERVER_KEY.includes("placeholder")) {
+    if (hasMidtransConfig) {
       try {
         const transaction = await snap.createTransaction(parameter);
         transactionToken = transaction.token;
@@ -3380,6 +3503,13 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
   }
 }
 var handlePaymentNotification = async (req, res) => {
+  const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
+  const hasMidtransConfig = isMidtransConfigured();
+  if (!hasMidtransConfig && isProduction) {
+    return res.status(500).json({
+      message: "Midtrans server key belum dikonfigurasi pada server produksi."
+    });
+  }
   const {
     order_id,
     status_code,
@@ -3536,10 +3666,10 @@ app.use(bodyParser.json({ limit: "5mb" }));
 app.use(bodyParser.urlencoded({ limit: "5mb", extended: true }));
 app.use(morgan("dev"));
 app.use("/uploads", express2.static(uploadsDir));
-app.use(async (req, res, next) => {
+async function dbReadinessMiddleware(req, res, next, dbReadyFn = ensureDbReady) {
   if (req.path.startsWith("/api") && req.path !== "/api/health") {
     try {
-      await ensureDbReady();
+      await dbReadyFn();
     } catch (error) {
       console.error("Database readiness check failed in middleware:", error);
       return res.status(500).json({
@@ -3549,7 +3679,8 @@ app.use(async (req, res, next) => {
     }
   }
   next();
-});
+}
+app.use((req, res, next) => dbReadinessMiddleware(req, res, next));
 app.use("/api", router_default);
 app.use((err, _req, res, _next) => {
   console.error("Unhandled API Error:", err);

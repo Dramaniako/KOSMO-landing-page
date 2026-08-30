@@ -122,10 +122,15 @@ export function ensureDbInitialized(): Promise<void> {
 }
 
 // Serverless DB Middleware intercepting /api/*
-app.use(async (req: Request, res: Response, next: NextFunction) => {
+export async function dbReadinessMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  dbReadyFn: () => Promise<void> = ensureDbReady
+): Promise<Response | void> {
   if (req.path.startsWith('/api') && req.path !== '/api/health') {
     try {
-      await ensureDbReady();
+      await dbReadyFn();
     } catch (error: unknown) {
       console.error("Database readiness check failed in middleware:", error);
       return res.status(500).json({
@@ -135,7 +140,9 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
     }
   }
   next();
-});
+}
+
+app.use((req: Request, res: Response, next: NextFunction) => dbReadinessMiddleware(req, res, next));
 
 // Mount API router
 app.use('/api', router);
