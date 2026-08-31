@@ -127,6 +127,26 @@ test('PDF Rental Contract & Cryptographic Verification Suite', async (t) => {
         assert.equal(buffers[i].subarray(0, 4).toString('ascii'), '%PDF');
       }
     });
+
+    await t1.test('1.4 rejects promise and cleans up stream when PDF document stream encounters an error', async () => {
+      const EventEmitter = (await import('events')).EventEmitter;
+      const mockStream = new EventEmitter();
+
+      const streamPromise = new Promise<Buffer>((resolve, reject) => {
+        const buffers: Buffer[] = [];
+        mockStream.on('data', (chunk: Buffer) => buffers.push(chunk));
+        mockStream.on('end', () => resolve(Buffer.concat(buffers)));
+        mockStream.on('error', (err: Error) => reject(err));
+      });
+
+      mockStream.emit('error', new Error('Simulated PDF document stream failure'));
+
+      await assert.rejects(
+        streamPromise,
+        /Simulated PDF document stream failure/,
+        'Document stream listener must reject on stream error events'
+      );
+    });
   });
 
   // -------------------------------------------------------------

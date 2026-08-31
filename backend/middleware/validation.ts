@@ -95,7 +95,7 @@ export const propertySchema = z.object({
   address: z.string().min(1, 'Alamat wajib diisi'),
   price: z.number().positive('Harga harus lebih besar dari 0'),
   totalRooms: z.number().int().positive('Total kamar harus lebih besar dari 0'),
-  ownerId: z.string().min(1, 'ownerId wajib diisi')
+  ownerId: z.string().min(1, 'ownerId wajib diisi').optional()
 });
 
 export const withdrawalSchema = z.object({

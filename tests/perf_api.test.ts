@@ -103,6 +103,7 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
   await t.test('POST /api/properties creates property with bulk facility insertion and PUT updates facilities', async () => {
     const adminToken = generateJwtToken({ id: 'user-admin', email: 'admin@kosmo.local', role: 'admin' });
 
+    const uniqueName = `KOSMO Performance Suite Test ${Date.now()}`;
     // 1. Create property with multiple facilities
     const createRes = await fetch(`http://localhost:${PORT}/api/properties`, {
       method: 'POST',
@@ -111,7 +112,7 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
         Authorization: `Bearer ${adminToken}`
       },
       body: JSON.stringify({
-        name: 'KOSMO Performance Suite Test',
+        name: uniqueName,
         district: 'Denpasar',
         address: 'Jl. Gatot Subroto No. 99',
         price: 2500000,
@@ -121,33 +122,37 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
     });
     assert.equal(createRes.status, 201);
 
-    // Fetch created property to verify facilities
-    const listRes = await fetch(`http://localhost:${PORT}/api/properties?district=Denpasar`);
-    assert.equal(listRes.status, 200);
-    const list = (await listRes.json()) as Array<{ id: string; name: string; facilities: string[] }>;
-    const createdProp = list.find((p) => p.name === 'KOSMO Performance Suite Test');
-    assert.ok(createdProp, 'Created property must be found in catalog');
-    assert.equal(createdProp.facilities.length, 5);
+    try {
+      // Fetch created property to verify facilities
+      const listRes = await fetch(`http://localhost:${PORT}/api/properties?district=Denpasar`);
+      assert.equal(listRes.status, 200);
+      const list = (await listRes.json()) as Array<{ id: string; name: string; facilities: string[] }>;
+      const createdProp = list.find((p) => p.name === uniqueName);
+      assert.ok(createdProp, 'Created property must be found in catalog');
+      assert.equal(createdProp.facilities.length, 5);
 
-    // 2. Update property facilities using bulk insertion
-    const updateRes = await fetch(`http://localhost:${PORT}/api/properties/${createdProp.id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${adminToken}`
-      },
-      body: JSON.stringify({
-        facilities: ['Wifi', 'Air', 'Gym']
-      })
-    });
-    assert.equal(updateRes.status, 200);
+      // 2. Update property facilities using bulk insertion
+      const updateRes = await fetch(`http://localhost:${PORT}/api/properties/${createdProp.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`
+        },
+        body: JSON.stringify({
+          facilities: ['Wifi', 'Air', 'Gym']
+        })
+      });
+      assert.equal(updateRes.status, 200);
 
-    // Verify detail reflects updated facilities
-    const detailRes = await fetch(`http://localhost:${PORT}/api/properties/${createdProp.id}`);
-    assert.equal(detailRes.status, 200);
-    const detail = (await detailRes.json()) as { facilities: string[] };
-    assert.equal(detail.facilities.length, 3);
-    assert.ok(detail.facilities.includes('Gym'));
+      // Verify detail reflects updated facilities
+      const detailRes = await fetch(`http://localhost:${PORT}/api/properties/${createdProp.id}`);
+      assert.equal(detailRes.status, 200);
+      const detail = (await detailRes.json()) as { facilities: string[] };
+      assert.equal(detail.facilities.length, 3);
+      assert.ok(detail.facilities.includes('Gym'));
+    } finally {
+      await pool.query('DELETE FROM properties WHERE name LIKE "KOSMO Performance Suite Test%"');
+    }
   });
 
   server.close();
