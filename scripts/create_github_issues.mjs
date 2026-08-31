@@ -153,6 +153,41 @@ const allIssues = [
     title: '🧩 Code Health: High Code Complexity: normalizePropertySummary',
     body: `### Overview\n\`normalizePropertySummary\` and \`normalizeProperty\` in \`backend/router.ts\` handle several manual type casts and fallbacks inline.\n\n### Affected File\n- \`backend/router.ts\` (lines 496-517)\n\n### Recommended Fix\nExtract property normalization and response sanitization to a dedicated data transformer module.`,
     labels: ['enhancement']
+  },
+  {
+    title: '🛡️ Security & Privacy: Involuntary Notification Setting Reset on Partial Profile Update',
+    body: `### Overview\nIn \`PUT /api/users/profile/:id\` and \`PUT /api/auth/profile\`, \`notifVal\` defaults to \`1\` when \`notifications\` is undefined in the request body. If a user previously set notifications to disabled (\`0\`), updating any other field (e.g. phone or address) involuntarily resets notifications to enabled (\`1\`).\n\n### Affected File\n- \`backend/router.ts\` (lines 413, 486)\n\n### Recommended Fix\nUse \`notifications !== undefined ? (notifications ? 1 : 0) : null\` and \`notifications = COALESCE(?, notifications)\` in the SQL update statement to preserve existing user preference.`,
+    labels: ['bug', 'security']
+  },
+  {
+    title: '🛡️ Security & Financial Integrity: Guard Property Deletion Against Pending Rental Leases',
+    body: `### Overview\n\`DELETE /api/properties/:id\` strictly checks for \`status = 'active'\` rentals, allowing deletion when there are \`pending\` rentals. If a tenant completes payment on a pending rental after property deletion, Midtrans webhook settlement will attempt to settle and activate a rental for a non-existent property.\n\n### Affected File\n- \`backend/router.ts\` (lines 895-905)\n\n### Recommended Fix\nExtend deletion guard to check \`status IN ('active', 'pending')\` to prevent orphaned payments.`,
+    labels: ['bug', 'security']
+  },
+  {
+    title: '⚡ Performance & Cache Integrity: Missing Rental Cache Invalidation on Rental Termination',
+    body: `### Overview\n\`POST /api/rentals/:id/terminate\` calls \`apiCache.invalidatePattern('properties')\` but misses \`apiCache.invalidatePattern('rentals')\`, leaving stale rental statuses in API cache responses until TTL expires.\n\n### Affected File\n- \`backend/router.ts\` (line 2660)\n\n### Recommended Fix\nAdd \`apiCache.invalidatePattern('rentals')\` to the rental termination handler.`,
+    labels: ['bug', 'performance']
+  },
+  {
+    title: '⚖️ Legal & Audit Compliance: Persist Explicit terminated_at Timestamp for Tenancy Lifecycle',
+    body: `### Overview\nWhen a rental is terminated, only the \`status\` column is updated to \`'terminated'\`. Lacking a \`terminated_at\` DATETIME audit column makes statutory dispute resolution and lease duration verification ambiguous under Indonesian Civil Code (KUHPerdata) and UU ITE standards.\n\n### Affected Files\n- \`backend/db.ts\`\n- \`backend/router.ts\` (\`POST /api/rentals/:id/terminate\`)\n- \`backend/types/index.ts\`\n\n### Recommended Fix\nAdd non-destructive migration \`ALTER TABLE rentals ADD COLUMN IF NOT EXISTS terminated_at DATETIME NULL\` and populate \`terminated_at = NOW()\` on termination.`,
+    labels: ['enhancement', 'legal']
+  },
+  {
+    title: '⚡ Performance: Missing Composite Database Indexes on rentals Table for Status Filtering',
+    body: `### Overview\n\`rentals\` queries frequently query by \`(propertyId, status)\` and \`(tenantId, status)\`. Under high concurrency and large rental history tables, these queries cause full table scans without composite indexes.\n\n### Affected File\n- \`backend/db.ts\` (\`ensureIndexes\`)\n\n### Recommended Fix\nAdd composite indexes \`idx_rentals_property_status (propertyId, status)\` and \`idx_rentals_tenant_status (tenantId, status)\` during schema initialization.`,
+    labels: ['performance', 'enhancement']
+  },
+  {
+    title: '🧩 Code Health: Extract Shared User Formatter to Transformers Service',
+    body: `### Overview\n\`formatSafeUser\` is declared as a local helper in \`backend/router.ts\` rather than being shared through \`backend/services/transformers.ts\` alongside other domain sanitizers.\n\n### Affected Files\n- \`backend/router.ts\`\n- \`backend/services/transformers.ts\`\n\n### Recommended Fix\nMove \`formatSafeUser\` to \`backend/services/transformers.ts\` with strict typing and unit test coverage.`,
+    labels: ['enhancement']
+  },
+  {
+    title: '🧪 Testing: Adversarial Concurrent Booking Overbooking Race Condition Test',
+    body: `### Overview\nWhile transaction locking (\`SELECT ... FOR UPDATE\`) is implemented for room allocations in \`settleRentalPayment\`, there is no explicit concurrency test simulating two simultaneous payments competing for the last remaining room.\n\n### Affected File\n- \`tests/perf_api.test.ts\` / \`tests/challenger_m3_rbac.test.ts\`\n\n### Recommended Fix\nAdd an adversarial integration test asserting that when 2 concurrent settlement requests compete for 1 remaining room, exactly one succeeds (200) and the other is safely rejected (409 Overbooking).`,
+    labels: ['testing', 'security']
   }
 ];
 
