@@ -618,13 +618,26 @@ router.put('/users/:id', authenticateToken, requireRole(['admin']), validateBody
 });
 
 // Admin Route: Delete user
-router.delete('/users/:id', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }>, res: Response) => {
+router.delete('/users/:id', authenticateToken, requireRole(['admin']), async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
+  const { password } = req.body as { password?: string };
+  const authUser = req.user;
+
   if (id === 'user-admin') {
     return res.status(400).json({ message: "Admin utama tidak dapat dihapus." });
   }
 
+  if (!password) {
+    return res.status(400).json({ message: "Password konfirmasi administrator diperlukan." });
+  }
+
   try {
+    const [adminRows] = await pool.query<UserRow[]>('SELECT password FROM users WHERE id = ?', [authUser?.id]);
+    const admin = adminRows[0];
+    if (!admin || !admin.password || !bcrypt.compareSync(password, admin.password)) {
+      return res.status(401).json({ message: "Password administrator salah." });
+    }
+
     await pool.query('DELETE FROM users WHERE id = ?', [id]);
     res.json({ message: "User berhasil dihapus!" });
   } catch (err) {
