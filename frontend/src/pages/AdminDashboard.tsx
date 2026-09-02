@@ -509,12 +509,15 @@ export default function AdminDashboard() {
       alert("Admin utama tidak dapat dihapus.");
       return;
     }
-    if (!window.confirm("Apakah Anda yakin ingin menghapus user ini?")) return;
+
+    const password = window.prompt("Masukkan password administrator untuk konfirmasi penghapusan user:");
+    if (!password) return; // User cancelled or entered empty password
 
     try {
       const res = await fetch(`${API_BASE}/users/${id}`, {
         method: 'DELETE',
-        headers: getAuthOnlyHeaders()
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ password })
       });
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
