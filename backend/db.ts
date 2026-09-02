@@ -125,6 +125,11 @@ export async function ensureIndexes(executor: QueryExecutor = pool): Promise<voi
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
+    // ⚡ Bolt Performance Optimization:
+    // Added index on property_facilities.propertyId to optimize the GROUP_CONCAT join query in GET /api/properties.
+    // Why: property_facilities is frequently joined by propertyId, causing slow full table scans as the table grows.
+    // Impact: Significantly reduces query execution time (O(n) -> O(log n)) when filtering or fetching properties with facilities.
+    "ALTER TABLE property_facilities ADD INDEX idx_property_facilities_property (propertyId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_contract_hash (contract_hash)",
