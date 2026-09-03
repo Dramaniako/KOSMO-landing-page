@@ -509,12 +509,14 @@ export default function AdminDashboard() {
       alert("Admin utama tidak dapat dihapus.");
       return;
     }
-    if (!window.confirm("Apakah Anda yakin ingin menghapus user ini?")) return;
+    const password = window.prompt("Harap masukkan password administrator Anda untuk konfirmasi penghapusan user:");
+    if (!password) return;
 
     try {
       const res = await fetch(`${API_BASE}/users/${id}`, {
         method: 'DELETE',
-        headers: getAuthOnlyHeaders()
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ password })
       });
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);
@@ -634,12 +636,14 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteProperty = async (id: string): Promise<void> => {
-    if (!window.confirm("Apakah Anda yakin ingin menghapus properti ini?")) return;
+    const password = window.prompt("Harap masukkan password administrator Anda untuk konfirmasi penghapusan properti:");
+    if (!password) return;
 
     try {
       const res = await fetch(`${API_BASE}/properties/${id}`, {
         method: 'DELETE',
-        headers: getAuthOnlyHeaders()
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ password })
       });
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);

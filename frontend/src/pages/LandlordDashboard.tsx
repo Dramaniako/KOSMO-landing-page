@@ -234,7 +234,10 @@ export default function LandlordDashboard() {
   useEffect(() => {
     if (!showPropModal) return;
 
+    let mapInstance: unknown = null;
     const timer = setTimeout(() => {
+      if (!showPropModal) return;
+
       const initialLat = parseFloat(propertyForm.latitude) || -8.6500;
       const initialLng = parseFloat(propertyForm.longitude) || 115.2166;
 
@@ -248,6 +251,7 @@ export default function LandlordDashboard() {
       }
 
       const map = window.L.map('map-picker').setView([initialLat, initialLng], 12);
+      mapInstance = map;
       
       window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
@@ -281,7 +285,13 @@ export default function LandlordDashboard() {
       setTimeout(() => map.invalidateSize(), 300);
     }, 100);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (mapInstance && typeof (mapInstance as { remove: () => void }).remove === 'function') {
+        (mapInstance as { remove: () => void }).remove();
+        mapInstance = null;
+      }
+    };
   }, [showPropModal, propertyForm.latitude, propertyForm.longitude]);
 
   const handleLogout = (): void => {
@@ -298,10 +308,14 @@ export default function LandlordDashboard() {
       alert("Masukkan jumlah penarikan yang valid.");
       return;
     }
+    const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
     try {
       const res = await fetch(`${API_BASE}/withdraw`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           ...withdrawForm,
           userId: landlordUser.id
@@ -398,10 +412,14 @@ export default function LandlordDashboard() {
 
     const method = editingProperty ? 'PUT' : 'POST';
 
+    const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
     try {
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(payload)
       });
       const data = (await res.json()) as { message: string };
@@ -535,7 +553,7 @@ export default function LandlordDashboard() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
             <ThemeLanguageToggle />
             <a 
-              href={`${API_BASE}/reports/landlord/excel?landlordId=${landlordUser?.id || ''}`}
+              href={`${API_BASE}/reports/landlord/excel?landlordId=${landlordUser?.id || ''}&token=${encodeURIComponent(localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '')}`}
               className="btn btn-primary"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
             >
@@ -1148,9 +1166,13 @@ export default function LandlordDashboard() {
                 if (!landlordUser) return;
                 setDeleteProcessing(true);
                 try {
+                  const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
                   const res = await fetch(`${API_BASE}/properties/${deletingPropertyId}`, {
                     method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                      'Content-Type': 'application/json',
+                      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                    },
                     body: JSON.stringify({ password: deletePassword, landlordId: landlordUser.id })
                   });
                   const data = (await res.json()) as { message: string };

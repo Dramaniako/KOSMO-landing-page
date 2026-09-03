@@ -163,7 +163,8 @@ async function createTables(executor = pool) {
         id INT AUTO_INCREMENT PRIMARY KEY,
         ip_address VARCHAR(255),
         user_agent TEXT,
-        visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        visited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_visited_at (visited_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
   ]);
@@ -184,6 +185,8 @@ async function createTables(executor = pool) {
         occupiedRooms INT DEFAULT 0,
         ownerId VARCHAR(50),
         document VARCHAR(100) DEFAULT 'sertifikat_kepemilikan.pdf',
+        INDEX idx_properties_district_price (district, price),
+        INDEX idx_properties_owner (ownerId),
         FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `),
@@ -200,6 +203,8 @@ async function createTables(executor = pool) {
         referenceId VARCHAR(100) DEFAULT '',
         rejectionReason TEXT,
         processedAt VARCHAR(50) DEFAULT '',
+        INDEX idx_withdrawals_user_date (userId, date),
+        INDEX idx_withdrawals_user_status (userId, status),
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
@@ -223,6 +228,8 @@ async function createTables(executor = pool) {
         rating INT NOT NULL,
         comment TEXT NOT NULL,
         date VARCHAR(50) NOT NULL,
+        INDEX idx_reviews_property (propertyId),
+        INDEX idx_reviews_user (userId),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -246,6 +253,10 @@ async function createTables(executor = pool) {
         tenant_signature_data LONGTEXT,
         admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
         duration_months INT DEFAULT 1,
+        INDEX idx_rentals_tenant_status (tenantId, status),
+        INDEX idx_rentals_property_status (propertyId, status),
+        INDEX idx_rentals_contract_hash (contract_hash),
+        INDEX idx_rentals_signed_at (contract_signed_at),
         FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -1551,10 +1562,32 @@ router.put("/users/:id", authenticateToken, requireRole(["admin"]), validateBody
 });
 router.delete("/users/:id", authenticateToken, requireRole(["admin"]), async (req, res) => {
   const { id } = req.params;
+  const { password } = req.body || {};
+  const authUser = req.user;
   if (id === "user-admin") {
     return res.status(400).json({ message: "Admin utama tidak dapat dihapus." });
   }
+  if (authUser?.id === id) {
+    return res.status(400).json({ message: "Anda tidak dapat menghapus akun Anda sendiri." });
+  }
+  if (!password) {
+    return res.status(400).json({ message: "Password konfirmasi administrator diperlukan." });
+  }
   try {
+    const [adminRows] = await pool.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
+    const admin = adminRows[0];
+    if (!admin || !admin.password || !bcrypt2.compareSync(password, admin.password)) {
+      return res.status(401).json({ message: "Password administrator salah." });
+    }
+    const [activeRentals] = await pool.query(
+      "SELECT COUNT(*) as activeCount FROM rentals WHERE tenantId = ? AND status = 'active'",
+      [id]
+    );
+    if (Number(activeRentals[0]?.activeCount || 0) > 0) {
+      return res.status(409).json({
+        message: "Pengguna tidak dapat dihapus karena masih memiliki sewa aktif berjalan."
+      });
+    }
     await pool.query("DELETE FROM users WHERE id = ?", [id]);
     res.json({ message: "User berhasil dihapus!" });
   } catch (err) {
@@ -1644,6 +1677,7 @@ router.get("/properties/:id", async (req, res) => {
 });
 router.post("/properties", authenticateToken, requireRole(["admin", "landlord", "owner"]), validateBody(propertySchema), async (req, res) => {
   const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image, ownerId } = req.body;
+  const authUser = req.user;
   if (!name || !district || !address || !price) {
     return res.status(400).json({ message: "Nama, wilayah, alamat, dan harga wajib diisi." });
   }
@@ -1651,7 +1685,7 @@ router.post("/properties", authenticateToken, requireRole(["admin", "landlord", 
   try {
     await connection.beginTransaction();
     const propId = generateId("prop");
-    const landlordId = ownerId || "user-landlord";
+    const landlordId = authUser?.role === "admin" && ownerId ? ownerId : authUser?.id || ownerId || "user-landlord";
     await connection.query(
       `INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document) 
        VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, 0, ?, 'sertifikat_kepemilikan.pdf')`,
@@ -1776,13 +1810,13 @@ router.delete("/properties/:id", authenticateToken, requireRole(["admin", "landl
       return res.status(403).json({ message: "Anda bukan pemilik properti ini." });
     }
     const [activeRentals] = await connection.query(
-      "SELECT COUNT(*) as activeCount FROM rentals WHERE propertyId = ? AND status = 'active'",
+      "SELECT COUNT(*) as activeCount FROM rentals WHERE propertyId = ? AND status IN ('active', 'pending')",
       [id]
     );
     if (Number(activeRentals[0]?.activeCount || 0) > 0) {
       await connection.rollback();
       return res.status(409).json({
-        message: "Properti tidak dapat dihapus karena masih memiliki sewa aktif berjalan."
+        message: "Properti tidak dapat dihapus karena masih memiliki sewa aktif berjalan atau menunggu pembayaran."
       });
     }
     const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [callerId]);
@@ -1856,9 +1890,15 @@ router.post("/reviews", authenticateToken, validateBody(reviewSchema), async (re
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [revId, propertyId, property.name, userId, userName, parseInt(String(rating), 10), comment, dateStr]
     );
-    const [revRows] = await connection.query("SELECT rating FROM reviews WHERE propertyId = ?", [propertyId]);
-    const avgRating = revRows.reduce((sum, r) => sum + r.rating, 0) / revRows.length;
-    await connection.query("UPDATE properties SET rating = ? WHERE id = ?", [parseFloat(avgRating.toFixed(1)), propertyId]);
+    await connection.query(`
+      UPDATE properties
+      SET rating = COALESCE((
+        SELECT ROUND(AVG(rating), 1)
+        FROM reviews
+        WHERE propertyId = ?
+      ), 0.0)
+      WHERE id = ?
+    `, [propertyId, propertyId]);
     await connection.commit();
     apiCache.invalidatePattern("reviews");
     apiCache.invalidatePattern("properties");
@@ -1894,9 +1934,15 @@ router.put("/reviews/:id", authenticateToken, async (req, res) => {
       "UPDATE reviews SET rating = ?, comment = ? WHERE id = ?",
       [updatedRating, updatedComment, id]
     );
-    const [revRows] = await connection.query("SELECT rating FROM reviews WHERE propertyId = ?", [review.propertyId]);
-    const avgRating = revRows.reduce((sum, r) => sum + r.rating, 0) / revRows.length;
-    await connection.query("UPDATE properties SET rating = ? WHERE id = ?", [parseFloat(avgRating.toFixed(1)), review.propertyId]);
+    await connection.query(`
+      UPDATE properties
+      SET rating = COALESCE((
+        SELECT ROUND(AVG(rating), 1)
+        FROM reviews
+        WHERE propertyId = ?
+      ), 0.0)
+      WHERE id = ?
+    `, [review.propertyId, review.propertyId]);
     await connection.commit();
     apiCache.invalidatePattern("reviews");
     apiCache.invalidatePattern("properties");
@@ -1926,12 +1972,15 @@ router.delete("/reviews/:id", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk menghapus ulasan ini." });
     }
     await connection.query("DELETE FROM reviews WHERE id = ?", [id]);
-    const [revRows] = await connection.query("SELECT rating FROM reviews WHERE propertyId = ?", [review.propertyId]);
-    let avgRating = 0;
-    if (revRows.length > 0) {
-      avgRating = revRows.reduce((sum, r) => sum + r.rating, 0) / revRows.length;
-    }
-    await connection.query("UPDATE properties SET rating = ? WHERE id = ?", [parseFloat(avgRating.toFixed(1)), review.propertyId]);
+    await connection.query(`
+      UPDATE properties
+      SET rating = COALESCE((
+        SELECT ROUND(AVG(rating), 1)
+        FROM reviews
+        WHERE propertyId = ?
+      ), 0.0)
+      WHERE id = ?
+    `, [review.propertyId, review.propertyId]);
     await connection.commit();
     apiCache.invalidatePattern("reviews");
     apiCache.invalidatePattern("properties");
@@ -2008,7 +2057,11 @@ var handleLandlordStats = async (req, res) => {
 router.get("/stats", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordStats);
 router.get("/landlord/stats", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordStats);
 router.get("/landlord/financials", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
-  const landlordId = String(req.query.landlordId || req.user?.id || "user-landlord");
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+  const landlordId = authUser.role === "admin" && req.query.landlordId ? String(req.query.landlordId) : authUser.id;
   try {
     const [
       [userRows],
@@ -2028,13 +2081,13 @@ router.get("/landlord/financials", authenticateToken, requireRole(["admin", "lan
       ),
       pool.query(
         `SELECT 
-           DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m') as month,
+           COALESCE(DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m'), DATE_FORMAT(r.contract_signed_at, '%Y-%m')) as month,
            COALESCE(SUM(r.price), 0) as revenue,
            COUNT(r.id) as transactions
          FROM rentals r
          JOIN properties p ON r.propertyId = p.id
          WHERE p.ownerId = ? AND r.status IN ('active', 'completed')
-         GROUP BY DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m')
+         GROUP BY month
          ORDER BY month DESC
          LIMIT 12`,
         [landlordId]
@@ -2106,7 +2159,11 @@ router.get("/withdrawals/me", authenticateToken, async (req, res) => {
   }
 });
 router.get("/landlord/rentals", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
-  const landlordId = String(req.query.landlordId || req.user?.id || "user-landlord");
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+  const landlordId = authUser.role === "admin" && req.query.landlordId ? String(req.query.landlordId) : authUser.id;
   try {
     const [rows] = await pool.query(
       `SELECT r.*, p.name as propertyName FROM rentals r 
@@ -2667,7 +2724,11 @@ router.get("/rentals", authenticateToken, async (req, res) => {
   }
 });
 router.get("/tenant/rentals", authenticateToken, async (req, res) => {
-  const tenantId = req.query.tenantId || req.user?.id;
+  const authUser = req.user;
+  if (!authUser) {
+    return res.status(401).json({ message: "Otentikasi diperlukan." });
+  }
+  const tenantId = authUser.role === "admin" && req.query.tenantId ? String(req.query.tenantId) : authUser.id;
   if (!tenantId) {
     return res.status(400).json({ message: "tenantId diperlukan." });
   }
@@ -2739,7 +2800,7 @@ router.post(
       const monthlyPrice = Number(property.price) || 0;
       const adminFee = 5e3;
       const totalPrice = monthlyPrice * duration + adminFee;
-      const startDateStr = startDate || signedAtDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+      const startDateStr = startDate || signedAtIso.split("T")[0];
       const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : "preview-draft";
       const contractData = {
         rentalId,
@@ -2870,7 +2931,7 @@ router.post(
       const rentalPrice = Number(property.price) || 0;
       const totalAmount = rentalPrice * duration + adminFee;
       const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
-      const startDateStr = startDate || signedAtDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+      const startDateStr = startDate || signedAtIso.split("T")[0];
       const contractData = {
         rentalId,
         propertyName: property.name,
@@ -3032,7 +3093,7 @@ router.post("/rentals", authenticateToken, async (req, res) => {
         message: "Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
       });
     }
-    const startDate = (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     const rentalPrice = price || property.price;
     const rentalName = propertyName || property.name;
     let documentPath = "sertifikat_kepemilikan.pdf";
@@ -3146,6 +3207,7 @@ router.post("/rentals/:id/terminate", authenticateToken, async (req, res) => {
     }
     await connection.commit();
     apiCache.invalidatePattern("properties");
+    apiCache.invalidatePattern("rentals");
     res.json({ message: "Sewa kos berhasil diberhentikan." });
   } catch (err) {
     await connection.rollback();
@@ -3354,7 +3416,7 @@ router.post("/payment/token", authenticateToken, async (req, res) => {
       });
     }
     const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
-    const startDate = (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
     const monthlyRent = Number(property.price);
     const adminFee = 5e3;
     const totalAmount = monthlyRent * duration + adminFee;

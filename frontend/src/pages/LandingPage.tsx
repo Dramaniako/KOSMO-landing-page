@@ -65,7 +65,7 @@ export default function LandingPage() {
     }
   }, []);
 
-  const fetchProperties = async (queryParams: string = ''): Promise<void> => {
+  const fetchProperties = useCallback(async (queryParams: string = ''): Promise<void> => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/properties${queryParams}`);
@@ -83,7 +83,7 @@ export default function LandingPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchReviews = async (): Promise<void> => {
     try {
@@ -112,6 +112,7 @@ export default function LandingPage() {
   useEffect(() => {
     if (!showMap || !selectedProperty) return;
 
+    let mapInstance: unknown = null;
     const timer = setTimeout(() => {
       if (typeof window.L === 'undefined') return;
       const mapContainer = document.getElementById('property-detail-map') as (HTMLElement & { _leaflet_id?: number }) | null;
@@ -122,6 +123,7 @@ export default function LandingPage() {
       const lng = parseFloat(selectedProperty.longitude) || 115.2166;
 
       const map = window.L.map('property-detail-map').setView([lat, lng], 14);
+      mapInstance = map;
       window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(map);
@@ -134,17 +136,23 @@ export default function LandingPage() {
       setTimeout(() => map.invalidateSize(), 300);
     }, 100);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (mapInstance && typeof (mapInstance as { remove: () => void }).remove === 'function') {
+        (mapInstance as { remove: () => void }).remove();
+        mapInstance = null;
+      }
+    };
   }, [showMap, selectedProperty]);
 
-  const toggleFacility = (facilityName: string): void => {
+  const toggleFacility = useCallback((facilityName: string): void => {
     setFacilities((prev) => ({
       ...prev,
       [facilityName as keyof FacilityFilterState]: !prev[facilityName as keyof FacilityFilterState]
     }));
-  };
+  }, []);
 
-  const handleSearch = (e: React.FormEvent): void => {
+  const handleSearch = useCallback((e: React.FormEvent): void => {
     e.preventDefault();
     const params = new URLSearchParams();
     if (district && district !== 'Semua') {
@@ -173,9 +181,9 @@ export default function LandingPage() {
 
     const queryString = params.toString() ? `?${params.toString()}` : '';
     fetchProperties(queryString);
-  };
+  }, [district, priceMin, priceMax, facilities, fetchProperties]);
 
-  const resetFilters = (): void => {
+  const resetFilters = useCallback((): void => {
     setDistrict('Semua');
     setPriceMin(0);
     setPriceMax(10000000);
@@ -188,7 +196,7 @@ export default function LandingPage() {
       Parkir: false
     });
     fetchProperties('');
-  };
+  }, [fetchProperties]);
 
   // ⚡ Bolt Performance Optimization:
   // Wrapped in useCallback to provide a stable reference.

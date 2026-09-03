@@ -184,7 +184,8 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         id INT AUTO_INCREMENT PRIMARY KEY,
         ip_address VARCHAR(255),
         user_agent TEXT,
-        visited_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        visited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_visited_at (visited_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
   ]);
@@ -207,6 +208,8 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         occupiedRooms INT DEFAULT 0,
         ownerId VARCHAR(50),
         document VARCHAR(100) DEFAULT 'sertifikat_kepemilikan.pdf',
+        INDEX idx_properties_district_price (district, price),
+        INDEX idx_properties_owner (ownerId),
         FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `),
@@ -223,6 +226,8 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         referenceId VARCHAR(100) DEFAULT '',
         rejectionReason TEXT,
         processedAt VARCHAR(50) DEFAULT '',
+        INDEX idx_withdrawals_user_date (userId, date),
+        INDEX idx_withdrawals_user_status (userId, status),
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
@@ -248,6 +253,8 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         rating INT NOT NULL,
         comment TEXT NOT NULL,
         date VARCHAR(50) NOT NULL,
+        INDEX idx_reviews_property (propertyId),
+        INDEX idx_reviews_user (userId),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -271,6 +278,10 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         tenant_signature_data LONGTEXT,
         admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
         duration_months INT DEFAULT 1,
+        INDEX idx_rentals_tenant_status (tenantId, status),
+        INDEX idx_rentals_property_status (propertyId, status),
+        INDEX idx_rentals_contract_hash (contract_hash),
+        INDEX idx_rentals_signed_at (contract_signed_at),
         FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
