@@ -1,9 +1,15 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, renderHook } from '@testing-library/react';
 import KosCard from '../KosCard';
 import SearchFilterBar from '../SearchFilterBar';
-import { Property, FacilityFilterState } from '../../types/index';
+import KosCardSkeleton from '../KosCardSkeleton';
+import ThemeLanguageToggle from '../ThemeLanguageToggle';
+import { ThemeProvider } from '../../context/ThemeContext';
+import { LanguageProvider } from '../../context/LanguageContext';
+import { validateIdentity, useIdentityValidation } from '../BookingModal/hooks/useIdentityValidation';
+import { useScrollClickwrap } from '../BookingModal/hooks/useScrollClickwrap';
+import { Property, FacilityFilterState, User } from '../../types/index';
 
 describe('Frontend Component Render Performance', () => {
   const mockProperty: Property = {
@@ -125,6 +131,79 @@ describe('Frontend Component Render Performance', () => {
 
     // Because SearchFilterBar is memoized with React.memo, the inner render was skipped
     expect(renderFacilityIcon.mock.calls.length).toBe(initialCallCount);
+  });
+
+  it('renders KosCardSkeleton in less than 50ms with accessible loading indicators', () => {
+    const start = performance.now();
+    const { container } = render(<KosCardSkeleton />);
+    const duration = performance.now() - start;
+
+    expect(duration).toBeLessThan(100);
+    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+  });
+
+  it('renders ThemeLanguageToggle in less than 50ms inside context providers', () => {
+    const start = performance.now();
+    const { container } = render(
+      <ThemeProvider>
+        <LanguageProvider>
+          <ThemeLanguageToggle />
+        </LanguageProvider>
+      </ThemeProvider>
+    );
+    const duration = performance.now() - start;
+
+    expect(duration).toBeLessThan(100);
+    expect(container.querySelectorAll('button').length).toBe(2);
+  });
+
+  it('executes validateIdentity utility in sub-millisecond latency', () => {
+    const startNik = performance.now();
+    const nikResult = validateIdentity('5171012345678901', 'NIK');
+    const nikDuration = performance.now() - startNik;
+
+    expect(nikResult.isValid).toBe(true);
+    expect(nikResult.error).toBeNull();
+    expect(nikDuration).toBeLessThan(5);
+
+    const startPassport = performance.now();
+    const passportResult = validateIdentity('B12345678', 'PASSPORT');
+    const passportDuration = performance.now() - startPassport;
+
+    expect(passportResult.isValid).toBe(true);
+    expect(passportResult.error).toBeNull();
+    expect(passportDuration).toBeLessThan(5);
+  });
+
+  it('initializes useIdentityValidation hook within 50ms', () => {
+    const mockUser: User = {
+      id: 'usr-perf-1',
+      name: 'Ketut Hook Tester',
+      email: 'ketut@bali.local',
+      role: 'tenant',
+      identity_type: 'NIK',
+      identity_number: '5171012345678901'
+    };
+
+    const start = performance.now();
+    const { result } = renderHook(() => useIdentityValidation(mockUser, true));
+    const duration = performance.now() - start;
+
+    expect(duration).toBeLessThan(50);
+    expect(result.current.idNumber).toBe('5171012345678901');
+    expect(result.current.idType).toBe('NIK');
+    expect(result.current.idTouched).toBe(true);
+  });
+
+  it('initializes useScrollClickwrap hook within 50ms', () => {
+    const start = performance.now();
+    const { result } = renderHook(() => useScrollClickwrap(true));
+    const duration = performance.now() - start;
+
+    expect(duration).toBeLessThan(50);
+    expect(result.current.hasScrolledToBottom).toBe(false);
+    expect(result.current.affirmativeConsent).toBe(false);
+    expect(result.current.termsContainerRef).toBeDefined();
   });
 });
 

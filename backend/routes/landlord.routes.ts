@@ -1,6 +1,7 @@
 import type { Request, Response, Router } from 'express';
 import type { RowDataPacket } from 'mysql2/promise';
 import { pool } from '../db';
+import { apiCache } from '../services/cache';
 import { authenticateToken, requireRole } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { generateId } from '../utils/id';
@@ -59,6 +60,12 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
     ? String(req.query.landlordId)
     : authUser.id;
 
+  const cacheKey = `landlord:stats:${landlordId}`;
+  const cached = apiCache.get<Record<string, unknown>>(cacheKey);
+  if (cached) {
+    return res.json(cached);
+  }
+
   try {
     const [
       [userRows],
@@ -100,7 +107,7 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
     const occupancyRate = totalRooms > 0 ? parseFloat(((occupiedRooms / totalRooms) * 100).toFixed(1)) : 0;
     const reviewsCount = Number(reviewCountRows[0]?.reviewsCount || 0);
 
-    res.json({
+    const responseData = {
       balance: parseFloat(String(landlord.balance || 0)),
       totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
       totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
@@ -111,7 +118,10 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
       activeTenants: occupiedRooms,
       withdrawals,
       reviewsCount
-    });
+    };
+
+    apiCache.set(cacheKey, responseData, 15000);
+    res.json(responseData);
   } catch (err) {
     console.error("Get stats error:", err);
     res.status(500).json({ message: "Gagal memuat statistik dasbor." });
@@ -131,6 +141,12 @@ export function registerLandlordRoutes(router: Router): void {
     const landlordId = (authUser.role === 'admin' && req.query.landlordId)
       ? String(req.query.landlordId)
       : authUser.id;
+
+    const cacheKey = `landlord:financials:${landlordId}`;
+    const cached = apiCache.get<Record<string, unknown>>(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
 
     try {
       const [
@@ -178,7 +194,7 @@ export function registerLandlordRoutes(router: Router): void {
       const occupiedRooms = Number(propAggRows[0]?.occupiedRooms || 0);
       const occupancyRate = totalRooms > 0 ? parseFloat(((occupiedRooms / totalRooms) * 100).toFixed(1)) : 0;
 
-      res.json({
+      const responseData = {
         balance: parseFloat(String(landlord.balance || 0)),
         totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
         totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
@@ -192,7 +208,10 @@ export function registerLandlordRoutes(router: Router): void {
         activeTenants: occupiedRooms,
         monthlyRevenue: monthlyRevenueRows,
         withdrawals
-      });
+      };
+
+      apiCache.set(cacheKey, responseData, 15000);
+      res.json(responseData);
     } catch (err) {
       console.error("Get landlord financials error:", err);
       res.status(500).json({ message: "Gagal memuat data keuangan landlord." });
@@ -315,6 +334,7 @@ export function registerLandlordRoutes(router: Router): void {
       );
 
       await connection.commit();
+      apiCache.invalidatePattern('landlord:');
       res.json({
         message: "Permintaan penarikan dana berhasil diajukan dan sedang menunggu proses.",
         withdrawalId,
@@ -399,6 +419,7 @@ export function registerLandlordRoutes(router: Router): void {
       );
 
       await connection.commit();
+      apiCache.invalidatePattern('landlord:');
       res.json({
         message: targetStatus === 'completed' 
           ? "Disbursement berhasil diproses dan status diselesaikan." 
@@ -458,6 +479,7 @@ export function registerLandlordRoutes(router: Router): void {
       );
 
       await connection.commit();
+      apiCache.invalidatePattern('landlord:');
       res.json({
         message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
         withdrawalId: id,

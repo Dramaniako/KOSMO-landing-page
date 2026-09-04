@@ -7,6 +7,7 @@ import { authenticateToken, requireRole } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { PropertyRow } from '../services/transformers';
 import type { UserRow } from './auth.routes';
+import { apiCache } from '../services/cache';
 
 // Rate Limiter for Visitor Tracking
 export const trackingLimiter = rateLimit({
@@ -58,6 +59,7 @@ export function registerTrackingRoutes(router: Router): void {
         'INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)',
         [ip, userAgent]
       );
+      apiCache.del('admin:stats');
       res.status(201).json({ message: "Kunjungan berhasil dilacak." });
     } catch (err: unknown) {
       console.error("Error in POST /api/tracking/visit:", err);
@@ -67,6 +69,12 @@ export function registerTrackingRoutes(router: Router): void {
 
   router.get('/admin/stats', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
     try {
+      const cacheKey = 'admin:stats';
+      const cached = apiCache.get<Record<string, number>>(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+
       const [
         [visitorRows],
         [userRows],
@@ -85,15 +93,17 @@ export function registerTrackingRoutes(router: Router): void {
       const totalUsers = userRows[0]?.count || 0;
       const totalLandlords = landlordRows[0]?.count || 0;
       const totalProperties = propertyRows[0]?.count || 0;
-      const totalRooms = roomsRows[0]?.sum || 0;
+      const totalRooms = Number(roomsRows[0]?.sum) || 0;
 
-      res.json({
+      const statsData = {
         totalVisitors,
         totalUsers,
         totalLandlords,
         totalProperties,
         totalRooms
-      });
+      };
+      apiCache.set(cacheKey, statsData, 15000);
+      res.json(statsData);
     } catch (err) {
       console.error("Admin stats error:", err);
       res.status(500).json({ message: "Gagal mengambil statistik admin." });

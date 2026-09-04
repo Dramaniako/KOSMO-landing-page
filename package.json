@@ -17,7 +17,7 @@
     "dev:backend": "tsx watch backend/server.ts",
     "start": "tsx backend/server.ts",
     "test": "node --import tsx --test --test-force-exit tests/auth.test.ts tests/cache.test.ts tests/contract.test.ts tests/db_init.test.ts tests/jwt.test.ts tests/payment.test.ts tests/rentals.test.ts tests/router.test.ts tests/search.test.ts tests/types.test.ts tests/upload.test.ts tests/validation.test.ts tests/withdrawals.test.ts",
-    "test:integration": "node --import tsx --test --test-force-exit tests/db_integration.test.ts tests/perf_api.test.ts tests/perf_db.test.ts",
+    "test:integration": "node --import tsx --test --test-force-exit tests/db_integration.test.ts tests/perf_api.test.ts tests/perf_db.test.ts tests/perf_all_functions.test.ts",
     "test:e2e": "playwright test",
     "db:diagnose": "tsx scripts/diagnose_db.ts",
     "db:seed": "tsx scripts/seed.ts",
@@ -25,7 +25,8 @@
     "db:check-occupancy": "tsx scripts/check_property_occupancy.ts",
     "db:sync-occupancy": "tsx scripts/check_property_occupancy.ts --sync",
     "perf:audit": "tsx scripts/audit_performance.ts",
-    "perf:benchmark": "tsx scripts/benchmark_api.ts"
+    "perf:benchmark": "tsx scripts/benchmark_api.ts",
+    "perf:functions": "tsx scripts/benchmark_all_functions.ts"
   },
   "dependencies": {
     "@types/compression": "^1.8.1",

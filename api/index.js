@@ -1875,6 +1875,11 @@ var handleLandlordStats = async (req, res) => {
     return res.status(401).json({ message: "Otentikasi diperlukan." });
   }
   const landlordId = authUser.role === "admin" && req.query.landlordId ? String(req.query.landlordId) : authUser.id;
+  const cacheKey = `landlord:stats:${landlordId}`;
+  const cached = apiCache.get(cacheKey);
+  if (cached) {
+    return res.json(cached);
+  }
   try {
     const [
       [userRows],
@@ -1913,7 +1918,7 @@ var handleLandlordStats = async (req, res) => {
     const occupiedRooms = Number(propAggRows[0]?.occupiedRooms || 0);
     const occupancyRate = totalRooms > 0 ? parseFloat((occupiedRooms / totalRooms * 100).toFixed(1)) : 0;
     const reviewsCount = Number(reviewCountRows[0]?.reviewsCount || 0);
-    res.json({
+    const responseData = {
       balance: parseFloat(String(landlord.balance || 0)),
       totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
       totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
@@ -1924,7 +1929,9 @@ var handleLandlordStats = async (req, res) => {
       activeTenants: occupiedRooms,
       withdrawals,
       reviewsCount
-    });
+    };
+    apiCache.set(cacheKey, responseData, 15e3);
+    res.json(responseData);
   } catch (err) {
     console.error("Get stats error:", err);
     res.status(500).json({ message: "Gagal memuat statistik dasbor." });
@@ -1939,6 +1946,11 @@ function registerLandlordRoutes(router2) {
       return res.status(401).json({ message: "Otentikasi diperlukan." });
     }
     const landlordId = authUser.role === "admin" && req.query.landlordId ? String(req.query.landlordId) : authUser.id;
+    const cacheKey = `landlord:financials:${landlordId}`;
+    const cached = apiCache.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
     try {
       const [
         [userRows],
@@ -1982,7 +1994,7 @@ function registerLandlordRoutes(router2) {
       const totalRooms = Number(propAggRows[0]?.totalRooms || 0);
       const occupiedRooms = Number(propAggRows[0]?.occupiedRooms || 0);
       const occupancyRate = totalRooms > 0 ? parseFloat((occupiedRooms / totalRooms * 100).toFixed(1)) : 0;
-      res.json({
+      const responseData = {
         balance: parseFloat(String(landlord.balance || 0)),
         totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
         totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
@@ -1996,7 +2008,9 @@ function registerLandlordRoutes(router2) {
         activeTenants: occupiedRooms,
         monthlyRevenue: monthlyRevenueRows,
         withdrawals
-      });
+      };
+      apiCache.set(cacheKey, responseData, 15e3);
+      res.json(responseData);
     } catch (err) {
       console.error("Get landlord financials error:", err);
       res.status(500).json({ message: "Gagal memuat data keuangan landlord." });
@@ -2096,6 +2110,7 @@ function registerLandlordRoutes(router2) {
         [withdrawalId, targetUserId, bankName, accountNumber, holder, withdrawAmount, dateStr]
       );
       await connection.commit();
+      apiCache.invalidatePattern("landlord:");
       res.json({
         message: "Permintaan penarikan dana berhasil diajukan dan sedang menunggu proses.",
         withdrawalId,
@@ -2167,6 +2182,7 @@ function registerLandlordRoutes(router2) {
         [targetStatus, refId, processedAt, id]
       );
       await connection.commit();
+      apiCache.invalidatePattern("landlord:");
       res.json({
         message: targetStatus === "completed" ? "Disbursement berhasil diproses dan status diselesaikan." : "Status pencairan dana diperbarui ke sedang diproses.",
         withdrawalId: id,
@@ -2214,6 +2230,7 @@ function registerLandlordRoutes(router2) {
         [rejectionReason, processedAt, id]
       );
       await connection.commit();
+      apiCache.invalidatePattern("landlord:");
       res.json({
         message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
         withdrawalId: id,
@@ -2252,6 +2269,7 @@ function registerTrackingRoutes(router2) {
         "INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)",
         [ip, userAgent]
       );
+      apiCache.del("admin:stats");
       res.status(201).json({ message: "Kunjungan berhasil dilacak." });
     } catch (err) {
       console.error("Error in POST /api/tracking/visit:", err);
@@ -2260,6 +2278,11 @@ function registerTrackingRoutes(router2) {
   });
   router2.get("/admin/stats", authenticateToken, requireRole(["admin"]), async (_req, res) => {
     try {
+      const cacheKey = "admin:stats";
+      const cached = apiCache.get(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
       const [
         [visitorRows],
         [userRows],
@@ -2277,14 +2300,16 @@ function registerTrackingRoutes(router2) {
       const totalUsers = userRows[0]?.count || 0;
       const totalLandlords = landlordRows[0]?.count || 0;
       const totalProperties = propertyRows[0]?.count || 0;
-      const totalRooms = roomsRows[0]?.sum || 0;
-      res.json({
+      const totalRooms = Number(roomsRows[0]?.sum) || 0;
+      const statsData = {
         totalVisitors,
         totalUsers,
         totalLandlords,
         totalProperties,
         totalRooms
-      });
+      };
+      apiCache.set(cacheKey, statsData, 15e3);
+      res.json(statsData);
     } catch (err) {
       console.error("Admin stats error:", err);
       res.status(500).json({ message: "Gagal mengambil statistik admin." });
