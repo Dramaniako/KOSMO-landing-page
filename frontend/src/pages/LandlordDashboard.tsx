@@ -1,298 +1,68 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { 
-  Building, DollarSign, Star, Percent, Trash2, Edit, Plus, LogOut, 
-  ArrowUpRight, Landmark, CreditCard, LayoutDashboard, MessageSquare,
-  Download, FileText, Users, X
-} from 'lucide-react';
-import { User, Property, Review, Rental, LandlordStats, FacilityFilterState } from '../types/index';
-import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
-import { useTranslation } from '../context/LanguageContext';
-import { formatRupiah } from '../utils/format';
-
-const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
-
-interface WithdrawFormState {
-  amount: string;
-  bankName: string;
-  accountNumber: string;
-}
-
-interface PropertyFormState {
-  name: string;
-  district: string;
-  address: string;
-  description: string;
-  price: string;
-  latitude: string;
-  longitude: string;
-  totalRooms: string;
-  image: string;
-  facilities: FacilityFilterState;
-  document?: string;
-}
-
-const shimmerStyle: React.CSSProperties = {
-  background: 'linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%)',
-  backgroundSize: '200% 100%',
-  animation: 'kosmoShimmer 1.5s infinite',
-  borderRadius: '8px'
-};
+import React from 'react';
+import { useLandlordData } from './LandlordDashboard/hooks/useLandlordData';
+import { useLandlordWithdraw } from './LandlordDashboard/hooks/useLandlordWithdraw';
+import { useLandlordPropertyForm } from './LandlordDashboard/hooks/useLandlordPropertyForm';
+import { useDeleteProperty } from './LandlordDashboard/hooks/useDeleteProperty';
+import { useContractDownload } from './LandlordDashboard/hooks/useContractDownload';
+import LandlordSidebar from './LandlordDashboard/components/LandlordSidebar';
+import LandlordHeader from './LandlordDashboard/components/LandlordHeader';
+import OverviewTab from './LandlordDashboard/components/OverviewTab';
+import PropertiesTab from './LandlordDashboard/components/PropertiesTab';
+import ReviewsTab from './LandlordDashboard/components/ReviewsTab';
+import TenantsTab from './LandlordDashboard/components/TenantsTab';
+import WithdrawModal from './LandlordDashboard/components/WithdrawModal';
+import PropertyFormModal from './LandlordDashboard/components/PropertyFormModal';
+import DeletePropertyModal from './LandlordDashboard/components/DeletePropertyModal';
 
 export default function LandlordDashboard() {
-  const navigate = useNavigate();
-  const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'reviews' | 'tenants'>('overview');
-  
-  const [landlordUser, setLandlordUser] = useState<User | null>(() => {
-    const raw = localStorage.getItem('user');
-    return raw ? (JSON.parse(raw) as User) : null;
-  });
+  const {
+    navigate,
+    activeTab,
+    setActiveTab,
+    landlordUser,
+    setLandlordUser,
+    stats,
+    properties,
+    reviews,
+    rentals,
+    tabLoading,
+    loadedTabs,
+    fetchOverviewStats,
+    fetchLandlordProperties
+  } = useLandlordData();
 
-  const [stats, setStats] = useState<LandlordStats>({
-    balance: 0,
-    totalRevenue: 0,
-    totalWithdrawn: 0,
-    totalProperti: 0,
-    totalRooms: 0,
-    occupiedRooms: 0,
-    occupancyRate: 0,
-    activeTenants: 0,
-    withdrawals: [],
-    reviewsCount: 0
-  });
+  const {
+    showWithdrawModal,
+    setShowWithdrawModal,
+    withdrawForm,
+    setWithdrawForm,
+    handleWithdrawSubmit
+  } = useLandlordWithdraw(landlordUser, setLandlordUser, fetchOverviewStats);
 
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [rentals, setRentals] = useState<Rental[]>([]);
-  const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ overview: true });
-  const [contractDownloading, setContractDownloading] = useState<Record<string, boolean>>({});
-  const loadedTabs = useRef<Set<string>>(new Set());
+  const {
+    showPropModal,
+    setShowPropModal,
+    editingProperty,
+    propertyForm,
+    setPropertyForm,
+    uploadingImage,
+    handleImageUpload,
+    resetPropertyForm,
+    handlePropertySubmit,
+    handleEditProperty
+  } = useLandlordPropertyForm(landlordUser, loadedTabs, fetchLandlordProperties);
 
-  const handleLandlordContractDownload = async (rentalId: string): Promise<void> => {
-    setContractDownloading(prev => ({ ...prev, [rentalId]: true }));
-    try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
-      const res = await fetch(`${API_BASE}/rentals/${rentalId}/contract?download=true`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      if (!res.ok) throw new Error('Gagal mengunduh dokumen kontrak PDF.');
-      const arrayBuffer = await res.arrayBuffer();
-      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-      const objectUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = `kontrak_sewa_${rentalId}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60000);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal mengunduh dokumen.';
-      alert(msg);
-    } finally {
-      setContractDownloading(prev => ({ ...prev, [rentalId]: false }));
-    }
-  };
+  const {
+    showDeleteModal,
+    setShowDeleteModal,
+    deletePassword,
+    setDeletePassword,
+    deleteProcessing,
+    handleDeleteProperty,
+    handleDeleteSubmit
+  } = useDeleteProperty(landlordUser, loadedTabs, fetchLandlordProperties);
 
-  // Modals
-  const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
-  const [showPropModal, setShowPropModal] = useState<boolean>(false);
-
-  // Delete Property Password Modal States
-  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
-  const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
-  const [deletePassword, setDeletePassword] = useState<string>('');
-  const [deleteProcessing, setDeleteProcessing] = useState<boolean>(false);
-
-  // Withdrawal form
-  const [withdrawForm, setWithdrawForm] = useState<WithdrawFormState>(() => ({
-    amount: '',
-    bankName: 'BCA',
-    accountNumber: landlordUser?.bankAccountNumber || ''
-  }));
-
-  // Property form
-  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
-  const [propertyForm, setPropertyForm] = useState<PropertyFormState>({
-    name: '',
-    district: 'Denpasar',
-    address: '',
-    description: '',
-    price: '',
-    latitude: '-8.6700',
-    longitude: '115.2166',
-    totalRooms: '5',
-    image: '',
-    facilities: {
-      Listrik: true,
-      Air: true,
-      Wifi: true,
-      Kebersihan: true,
-      Keamanan: false,
-      Parkir: false
-    }
-  });
-
-  const [uploadingImage, setUploadingImage] = useState<boolean>(false);
-
-  const fetchOverviewStats = useCallback(async (landlordId: string): Promise<void> => {
-    setTabLoading(prev => ({ ...prev, overview: true }));
-    try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
-      const statsRes = await fetch(`${API_BASE}/stats?landlordId=${encodeURIComponent(landlordId)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      if (!statsRes.ok) return;
-      const statsData = (await statsRes.json()) as LandlordStats;
-      setStats(statsData);
-      loadedTabs.current.add('overview');
-    } catch (err) {
-      console.error("Error loading landlord stats:", err);
-    } finally {
-      setTabLoading(prev => ({ ...prev, overview: false }));
-    }
-  }, []);
-
-  const fetchLandlordProperties = useCallback(async (landlordId: string): Promise<void> => {
-    setTabLoading(prev => ({ ...prev, properties: true }));
-    try {
-      const propRes = await fetch(`${API_BASE}/properties?ownerId=${encodeURIComponent(landlordId)}`);
-      if (!propRes.ok) {
-        setProperties([]);
-        return;
-      }
-      const propData = (await propRes.json()) as Property[];
-      const safeProps = Array.isArray(propData) ? propData : [];
-      setProperties(safeProps);
-      loadedTabs.current.add('properties');
-    } catch (err) {
-      console.error("Error loading landlord properties:", err);
-      setProperties([]);
-    } finally {
-      setTabLoading(prev => ({ ...prev, properties: false }));
-    }
-  }, []);
-
-  const fetchLandlordReviews = useCallback(async (landlordId: string): Promise<void> => {
-    setTabLoading(prev => ({ ...prev, reviews: true }));
-    try {
-      const [propRes, revRes] = await Promise.all([
-        fetch(`${API_BASE}/properties?ownerId=${encodeURIComponent(landlordId)}`),
-        fetch(`${API_BASE}/reviews`)
-      ]);
-      const propData = propRes.ok ? ((await propRes.json()) as Property[]) : [];
-      const revData = revRes.ok ? ((await revRes.json()) as Review[]) : [];
-      const safeProps = Array.isArray(propData) ? propData : [];
-      const safeReviews = Array.isArray(revData) ? revData : [];
-      const propIds = safeProps.map((p) => p.id);
-      const landlordReviews = safeReviews.filter((r) => propIds.includes(r.propertyId));
-      setReviews(landlordReviews);
-      loadedTabs.current.add('reviews');
-    } catch (err) {
-      console.error("Error loading landlord reviews:", err);
-      setReviews([]);
-    } finally {
-      setTabLoading(prev => ({ ...prev, reviews: false }));
-    }
-  }, []);
-
-  const fetchLandlordRentals = useCallback(async (landlordId: string): Promise<void> => {
-    setTabLoading(prev => ({ ...prev, tenants: true }));
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE}/landlord/rentals?landlordId=${encodeURIComponent(landlordId)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      const data = (await res.json()) as Rental[];
-      setRentals(Array.isArray(data) ? data : []);
-      loadedTabs.current.add('tenants');
-    } catch (err) {
-      console.error("Error loading landlord rentals:", err);
-    } finally {
-      setTabLoading(prev => ({ ...prev, tenants: false }));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!landlordUser || landlordUser.role !== 'landlord') {
-      navigate('/login');
-      return;
-    }
-
-    if (activeTab === 'overview' && !loadedTabs.current.has('overview')) {
-      fetchOverviewStats(landlordUser.id);
-    } else if (activeTab === 'properties' && !loadedTabs.current.has('properties')) {
-      fetchLandlordProperties(landlordUser.id);
-    } else if (activeTab === 'reviews' && !loadedTabs.current.has('reviews')) {
-      fetchLandlordReviews(landlordUser.id);
-    } else if (activeTab === 'tenants' && !loadedTabs.current.has('tenants')) {
-      fetchLandlordRentals(landlordUser.id);
-    }
-  }, [landlordUser, navigate, activeTab, fetchOverviewStats, fetchLandlordProperties, fetchLandlordReviews, fetchLandlordRentals]);
-
-  useEffect(() => {
-    if (!showPropModal) return;
-
-    let mapInstance: unknown = null;
-    const timer = setTimeout(() => {
-      if (!showPropModal) return;
-
-      const initialLat = parseFloat(propertyForm.latitude) || -8.6500;
-      const initialLng = parseFloat(propertyForm.longitude) || 115.2166;
-
-      if (typeof window.L === 'undefined') return;
-
-      const mapContainer = document.getElementById('map-picker') as (HTMLElement & { _leaflet_id?: number }) | null;
-      if (!mapContainer) return;
-
-      if (mapContainer._leaflet_id) {
-        return; 
-      }
-
-      const map = window.L.map('map-picker').setView([initialLat, initialLng], 12);
-      mapInstance = map;
-      
-      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(map);
-
-      const marker = window.L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
-
-      const updateCoords = (lat: number, lng: number) => {
-        setPropertyForm((prev) => ({
-          ...prev,
-          latitude: lat.toFixed(6),
-          longitude: lng.toFixed(6)
-        }));
-      };
-
-      marker.on('dragend', () => {
-        const markerWithLatLng = marker as unknown as { getLatLng: () => { lat: number; lng: number } };
-        if (markerWithLatLng.getLatLng) {
-          const position = markerWithLatLng.getLatLng();
-          updateCoords(position.lat, position.lng);
-        }
-      });
-
-      map.on('click', (e: { latlng: { lat: number; lng: number } }) => {
-        const lat = e.latlng.lat;
-        const lng = e.latlng.lng;
-        marker.setLatLng([lat, lng] as unknown as [number, number]);
-        updateCoords(lat, lng);
-      });
-
-      setTimeout(() => map.invalidateSize(), 300);
-    }, 100);
-
-    return () => {
-      clearTimeout(timer);
-      if (mapInstance && typeof (mapInstance as { remove: () => void }).remove === 'function') {
-        (mapInstance as { remove: () => void }).remove();
-        mapInstance = null;
-      }
-    };
-  }, [showPropModal, propertyForm.latitude, propertyForm.longitude]);
+  const { contractDownloading, handleLandlordContractDownload } = useContractDownload();
 
   const handleLogout = (): void => {
     localStorage.removeItem('user');
@@ -300,239 +70,14 @@ export default function LandlordDashboard() {
     navigate('/');
   };
 
-  // Withdraw money submit
-  const handleWithdrawSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    e.preventDefault();
-    if (!landlordUser) return;
-    if (!withdrawForm.amount || parseFloat(withdrawForm.amount) <= 0) {
-      alert("Masukkan jumlah penarikan yang valid.");
-      return;
-    }
-    const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
-    try {
-      const res = await fetch(`${API_BASE}/withdraw`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          ...withdrawForm,
-          userId: landlordUser.id
-        })
-      });
-      const data = (await res.json()) as { message: string; balance: number; totalWithdrawn: number };
-      if (!res.ok) throw new Error(data.message);
-
-      alert(data.message);
-      setShowWithdrawModal(false);
-      setWithdrawForm((prev) => ({ ...prev, amount: '' }));
-      
-      // Update local storage user balance
-      const updatedUser: User = {
-        ...landlordUser,
-        balance: data.balance,
-        totalWithdrawn: data.totalWithdrawn
-      };
-      setLandlordUser(updatedUser);
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-
-      await fetchOverviewStats(landlordUser.id);
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      alert(errorMsg);
-    }
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploadingImage(true);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setPropertyForm((prev) => ({ ...prev, image: reader.result as string }));
-      setUploadingImage(false);
-    };
-    reader.onerror = () => {
-      alert("Gagal membaca berkas gambar.");
-      setUploadingImage(false);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const resetPropertyForm = (): void => {
-    setEditingProperty(null);
-    setPropertyForm({
-      name: '',
-      district: 'Denpasar',
-      address: '',
-      description: '',
-      price: '',
-      latitude: '-8.6700',
-      longitude: '115.2166',
-      totalRooms: '5',
-      image: '',
-      facilities: {
-        Listrik: true,
-        Air: true,
-        Wifi: true,
-        Kebersihan: true,
-        Keamanan: false,
-        Parkir: false
-      }
-    });
-  };
-
-  // Property Form Submit (Add / Edit)
-  const handlePropertySubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    e.preventDefault();
-    if (!landlordUser) return;
-    const facilityList = Object.keys(propertyForm.facilities).filter(
-      (fac) => propertyForm.facilities[fac]
-    );
-
-    const payload = {
-      name: propertyForm.name,
-      district: propertyForm.district,
-      address: propertyForm.address,
-      description: propertyForm.description,
-      price: parseInt(propertyForm.price, 10),
-      latitude: propertyForm.latitude,
-      longitude: propertyForm.longitude,
-      totalRooms: parseInt(propertyForm.totalRooms, 10),
-      image: propertyForm.image || undefined,
-      ownerId: landlordUser.id,
-      facilities: facilityList
-    };
-
-    const url = editingProperty 
-      ? `${API_BASE}/properties/${editingProperty.id}`
-      : `${API_BASE}/properties`;
-
-    const method = editingProperty ? 'PUT' : 'POST';
-
-    const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = (await res.json()) as { message: string };
-
-      if (!res.ok) throw new Error(data.message);
-
-      alert(data.message);
-      setShowPropModal(false);
-      resetPropertyForm();
-      loadedTabs.current.delete('overview');
-      loadedTabs.current.delete('reviews');
-      await fetchLandlordProperties(landlordUser.id);
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      alert(errorMsg);
-    }
-  };
-
-  const handleEditProperty = (prop: Property): void => {
-    setEditingProperty(prop);
-    
-    // Map facilities array back to checkbox states
-    const facilitiesMap: FacilityFilterState = {
-      Listrik: false,
-      Air: false,
-      Wifi: false,
-      Kebersihan: false,
-      Keamanan: false,
-      Parkir: false
-    };
-    prop.facilities.forEach((fac) => {
-      if (facilitiesMap[fac] !== undefined) {
-        facilitiesMap[fac] = true;
-      }
-    });
-
-    setPropertyForm({
-      name: prop.name,
-      district: prop.district,
-      address: prop.address,
-      description: prop.description,
-      price: prop.price.toString(),
-      latitude: prop.latitude,
-      longitude: prop.longitude,
-      totalRooms: prop.totalRooms.toString(),
-      image: prop.image || '',
-      facilities: facilitiesMap
-    });
-    setShowPropModal(true);
-  };
-
-  const handleDeleteProperty = (id: string): void => {
-    setDeletingPropertyId(id);
-    setShowDeleteModal(true);
-  };
-
   return (
     <div className="dashboard-layout">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div>
-          <div className="nav-brand" style={{ marginBottom: '40px', paddingLeft: '16px' }}>
-            <Building size={26} />
-            <span>KOSMO Landlord</span>
-          </div>
-
-          <ul className="sidebar-links">
-            <li>
-              <button 
-                className={`sidebar-link ${activeTab === 'overview' ? 'active' : ''}`}
-                onClick={() => setActiveTab('overview')}
-              >
-                <LayoutDashboard size={18} />
-                Dasbor Keuangan
-              </button>
-            </li>
-            <li>
-              <button 
-                className={`sidebar-link ${activeTab === 'properties' ? 'active' : ''}`}
-                onClick={() => setActiveTab('properties')}
-              >
-                <Building size={18} />
-                Kelola Properti
-              </button>
-            </li>
-            <li>
-              <button 
-                className={`sidebar-link ${activeTab === 'reviews' ? 'active' : ''}`}
-                onClick={() => setActiveTab('reviews')}
-              >
-                <MessageSquare size={18} />
-                Kelola Review
-              </button>
-            </li>
-            <li>
-              <button 
-                className={`sidebar-link ${activeTab === 'tenants' ? 'active' : ''}`}
-                onClick={() => setActiveTab('tenants')}
-              >
-                <Users size={18} />
-                Sesi Penyewa
-              </button>
-            </li>
-          </ul>
-        </div>
-
-        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
-          <button className="sidebar-link" style={{ width: '100%', border: 'none', background: 'none', color: 'var(--danger)' }} onClick={handleLogout}>
-            <LogOut size={18} />
-            Keluar Dashboard
-          </button>
-        </div>
-      </aside>
+      {/* Sidebar Navigation */}
+      <LandlordSidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onLogout={handleLogout}
+      />
 
       {/* Main Content Area */}
       <main className="dashboard-content">
@@ -543,680 +88,98 @@ export default function LandlordDashboard() {
           }
         `}</style>
 
-        <header style={{ marginBottom: '32px' }} className="flex-between flex-wrap gap-4">
-          <div>
-            <h1 style={{ fontSize: '28px' }}>{t('landlord.title')} &bull; {landlordUser?.name || 'Landlord'}</h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '2px' }}>
-              Pantau laporan transaksi dan properti aktif Anda di sini.
-            </p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            <ThemeLanguageToggle />
-            <a 
-              href={`${API_BASE}/reports/landlord/excel?landlordId=${landlordUser?.id || ''}&token=${encodeURIComponent(localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '')}`}
-              className="btn btn-primary"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
-            >
-              <Download size={16} /> Unduh Laporan Excel
-            </a>
-            <button className="btn btn-outline" onClick={() => navigate('/')}>
-              Lihat Landing Page
-            </button>
-          </div>
-        </header>
+        {/* Dashboard Header */}
+        <LandlordHeader
+          landlordUser={landlordUser}
+          onNavigateHome={() => navigate('/')}
+        />
 
-        {/* Overview / Finance Tab */}
+        {/* Tab 1: Overview & Finance */}
         {activeTab === 'overview' && (
-          <div>
-            {tabLoading.overview && !loadedTabs.current.has('overview') ? (
-              <div>
-                <div className="stats-grid">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} style={{ height: '110px', ...shimmerStyle }} />
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: '16px', marginBottom: '40px' }}>
-                  <div style={{ width: '180px', height: '42px', ...shimmerStyle }} />
-                  <div style={{ width: '180px', height: '42px', ...shimmerStyle }} />
-                </div>
-                <div className="grid-2">
-                  <div className="card" style={{ height: '240px', ...shimmerStyle }} />
-                  <div className="card" style={{ height: '240px', ...shimmerStyle }} />
-                </div>
-              </div>
-            ) : (
-              <>
-                {/* Stats Cards Row */}
-                <div className="stats-grid">
-                  <div className="stats-card">
-                    <div className="stats-icon" style={{ backgroundColor: '#eff6ff', color: '#2563eb' }}>
-                      <DollarSign size={24} />
-                    </div>
-                    <div className="stats-info">
-                      <h4>Saldo Bisa Ditarik</h4>
-                      <p>{formatRupiah(stats.balance)}</p>
-                    </div>
-                  </div>
-
-                  <div className="stats-card">
-                    <div className="stats-icon" style={{ backgroundColor: '#ecfdf5', color: '#10b981' }}>
-                      <ArrowUpRight size={24} />
-                    </div>
-                    <div className="stats-info">
-                      <h4>Total Pendapatan</h4>
-                      <p>{formatRupiah(stats.totalRevenue)}</p>
-                    </div>
-                  </div>
-
-                  <div className="stats-card">
-                    <div className="stats-icon" style={{ backgroundColor: '#fffbeb', color: '#f59e0b' }}>
-                      <CreditCard size={24} />
-                    </div>
-                    <div className="stats-info">
-                      <h4>Total Ditarik</h4>
-                      <p>{formatRupiah(stats.totalWithdrawn)}</p>
-                    </div>
-                  </div>
-
-                  <div className="stats-card">
-                    <div className="stats-icon" style={{ backgroundColor: '#fdf2f8', color: '#db2777' }}>
-                      <Percent size={24} />
-                    </div>
-                    <div className="stats-info">
-                      <h4>Rasio Okupansi</h4>
-                      <p>{stats.occupancyRate}%</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Main Action Buttons */}
-                <div style={{ display: 'flex', gap: '16px', marginBottom: '40px' }}>
-                  <button className="btn btn-primary" onClick={() => setShowWithdrawModal(true)}>
-                    <Landmark size={16} />
-                    Tarik Dana (Withdraw)
-                  </button>
-                  <button className="btn btn-secondary" onClick={() => { resetPropertyForm(); setShowPropModal(true); }}>
-                    <Plus size={16} />
-                    Tambah Properti Baru
-                  </button>
-                </div>
-
-                {/* Financial Summary & Withdrawal History */}
-                <div className="grid-2">
-                  <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                    <h3 style={{ fontSize: '18px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                      Rincian Operasional
-                    </h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      <div className="flex-between">
-                        <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Properti Anda</span>
-                        <strong style={{ fontSize: '16px' }}>{stats.totalProperti} Unit</strong>
-                      </div>
-                      <div className="flex-between">
-                        <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Kamar Terisi (Penghuni)</span>
-                        <strong style={{ fontSize: '16px' }}>{stats.occupiedRooms} / {stats.totalRooms} Kamar</strong>
-                      </div>
-                      <div className="flex-between">
-                        <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Jumlah Review Masuk</span>
-                        <strong style={{ fontSize: '16px' }}>{stats.reviewsCount} Ulasan</strong>
-                      </div>
-                      <div className="flex-between">
-                        <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Metode Pencairan Utama</span>
-                        <strong style={{ fontSize: '16px' }}>{landlordUser?.bankName} - {landlordUser?.bankAccountNumber}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-                    <h3 style={{ fontSize: '18px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                      Riwayat Penarikan Dana
-                    </h3>
-                    {stats.withdrawals.length === 0 ? (
-                      <p style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic' }}>Belum ada riwayat penarikan dana.</p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '180px', overflowY: 'auto' }}>
-                        {stats.withdrawals.map((w) => {
-                          const isRejected = w.status === 'rejected';
-                          const isCompleted = w.status === 'completed';
-                          const isProcessing = w.status === 'processing';
-                          return (
-                            <div key={w.id} className="flex-between" style={{ padding: '10px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #f1f5f9' }}>
-                              <div>
-                                <p style={{ fontWeight: 600, fontSize: '13px' }}>Transfer ke {w.bankName}</p>
-                                <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.date} &bull; Rek: {w.accountNumber}</p>
-                                {isRejected && w.rejectionReason && (
-                                  <p style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '2px' }}>
-                                    Alasan: {w.rejectionReason} (Saldo telah dikembalikan)
-                                  </p>
-                                )}
-                              </div>
-                              <div style={{ textAlign: 'right' }}>
-                                <p style={{ fontWeight: 700, fontSize: '14px', color: isRejected ? 'var(--text-muted)' : 'var(--danger)', textDecoration: isRejected ? 'line-through' : 'none' }}>
-                                  -{formatRupiah(w.amount)}
-                                </p>
-                                <span 
-                                  className={`badge ${isCompleted ? 'badge-success' : isRejected ? 'badge-danger' : isProcessing ? 'badge-warning' : 'badge-secondary'}`} 
-                                  style={{ fontSize: '10px', padding: '2px 6px', display: 'inline-block', marginTop: '2px' }}
-                                  title={w.rejectionReason ? `Alasan penolakan: ${w.rejectionReason}` : undefined}
-                                >
-                                  {isCompleted ? 'Selesai' : isRejected ? 'Ditolak' : isProcessing ? 'Diproses' : 'Menunggu'}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          <OverviewTab
+            stats={stats}
+            landlordUser={landlordUser}
+            loading={tabLoading.overview && !loadedTabs.current.has('overview')}
+            onOpenWithdraw={() => setShowWithdrawModal(true)}
+            onOpenAddProperty={() => {
+              resetPropertyForm();
+              setShowPropModal(true);
+            }}
+          />
         )}
 
-        {/* Properties Management Tab */}
+        {/* Tab 2: Properties Management */}
         {activeTab === 'properties' && (
-          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-            <div className="flex-between" style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '20px' }}>Properti Saya ({properties.length})</h3>
-              <button className="btn btn-primary" onClick={() => { resetPropertyForm(); setShowPropModal(true); }}>
-                <Plus size={16} />
-                Tambah Properti
-              </button>
-            </div>
-
-            {tabLoading.properties && !loadedTabs.current.has('properties') ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} style={{ height: '72px', ...shimmerStyle }} />
-                ))}
-              </div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                      <th style={{ padding: '12px 16px' }}>Properti</th>
-                      <th style={{ padding: '12px 16px' }}>Wilayah</th>
-                      <th style={{ padding: '12px 16px' }}>Harga / Bln</th>
-                      <th style={{ padding: '12px 16px' }}>Okupansi Kamar</th>
-                      <th style={{ padding: '12px 16px' }}>Rating</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {properties.map((p) => (
-                      <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                        <td style={{ padding: '16px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <img src={p.image} alt={p.name} style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px' }} />
-                            <div>
-                              <strong style={{ fontSize: '15px', color: 'var(--dark)' }}>{p.name}</strong>
-                              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{p.address}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td style={{ padding: '16px' }}>{p.district}</td>
-                        <td style={{ padding: '16px', fontWeight: 600, color: 'var(--primary)' }}>{formatRupiah(p.price)}</td>
-                        <td style={{ padding: '16px' }}>
-                          <strong>{p.occupiedRooms}</strong> / {p.totalRooms} Kamar
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
-                            ({p.totalRooms - p.occupiedRooms} Kamar Kosong)
-                          </span>
-                        </td>
-                        <td style={{ padding: '16px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <Star size={14} style={{ fill: '#f59e0b', color: '#f59e0b' }} />
-                            <span>{p.rating > 0 ? p.rating : 'N/A'}</span>
-                          </div>
-                        </td>
-                        <td style={{ padding: '16px', textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', gap: '8px' }}>
-                            <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => handleEditProperty(p)}>
-                              <Edit size={14} />
-                            </button>
-                            <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => handleDeleteProperty(p.id)}>
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          <PropertiesTab
+            properties={properties}
+            loading={tabLoading.properties && !loadedTabs.current.has('properties')}
+            onAddProperty={() => {
+              resetPropertyForm();
+              setShowPropModal(true);
+            }}
+            onEditProperty={handleEditProperty}
+            onDeleteProperty={handleDeleteProperty}
+          />
         )}
 
-        {/* Reviews Management Tab */}
+        {/* Tab 3: Reviews Management */}
         {activeTab === 'reviews' && (
-          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-            <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Properti Saya ({reviews.length})</h3>
-
-            {tabLoading.reviews && !loadedTabs.current.has('reviews') ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {[1, 2, 3].map((i) => (
-                  <div key={i} style={{ height: '96px', ...shimmerStyle }} />
-                ))}
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {reviews.map((r) => (
-                  <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1, marginRight: '24px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                        <strong style={{ fontSize: '15px' }}>{r.userName}</strong>
-                        <span className="badge badge-primary" style={{ fontSize: '10px' }}>
-                          {r.propertyName}
-                        </span>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.date}</span>
-                      </div>
-                      
-                      <div style={{ display: 'flex', gap: '2px', marginBottom: '8px' }}>
-                        {[...Array(5)].map((_, i) => (
-                          <Star 
-                            key={i} 
-                            size={12} 
-                            style={{ 
-                              fill: i < r.rating ? '#f59e0b' : 'transparent', 
-                              color: i < r.rating ? '#f59e0b' : '#cbd5e1' 
-                            }} 
-                          />
-                        ))}
-                      </div>
-
-                      <p style={{ fontSize: '14px', color: 'var(--text-main)', fontStyle: 'italic' }}>
-                        "{r.comment}"
-                      </p>
-                    </div>
-
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <ReviewsTab
+            reviews={reviews}
+            loading={tabLoading.reviews && !loadedTabs.current.has('reviews')}
+          />
         )}
 
-        {/* Tenants / Rentals Management Tab */}
+        {/* Tab 4: Active Rentals / Tenants */}
         {activeTab === 'tenants' && (
-          <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-            <div className="flex-between" style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '20px' }}>Sesi Kontrak Penyewa Aktif ({rentals.length})</h3>
-            </div>
-
-            {tabLoading.tenants && !loadedTabs.current.has('tenants') ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} style={{ height: '68px', ...shimmerStyle }} />
-                ))}
-              </div>
-            ) : rentals.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
-                <p style={{ fontStyle: 'italic', fontSize: '14px' }}>Belum ada sesi penyewaan aktif pada properti Anda.</p>
-              </div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                      <th style={{ padding: '12px 16px' }}>Properti Kos</th>
-                      <th style={{ padding: '12px 16px' }}>ID Penyewa</th>
-                      <th style={{ padding: '12px 16px' }}>Mulai Sewa</th>
-                      <th style={{ padding: '12px 16px' }}>Biaya / Bln</th>
-                      <th style={{ padding: '12px 16px' }}>Status</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Dokumen Kontrak</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rentals.map((r) => (
-                      <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                        <td style={{ padding: '16px' }}>
-                          <strong style={{ fontSize: '15px', color: 'var(--dark)' }}>{r.propertyName}</strong>
-                          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>ID Sewa: {r.id}</p>
-                        </td>
-                        <td style={{ padding: '16px' }}>
-                          <span style={{ fontSize: '13px', fontFamily: 'monospace', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
-                            {r.tenantId}
-                          </span>
-                        </td>
-                        <td style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                          {r.startDate}
-                        </td>
-                        <td style={{ padding: '16px', fontWeight: 600, color: 'var(--primary)' }}>
-                          {formatRupiah(r.price)}
-                        </td>
-                        <td style={{ padding: '16px' }}>
-                          <span className={`badge ${r.status === 'active' ? 'badge-success' : 'badge-secondary'}`} style={{ fontSize: '10px' }}>
-                            {r.status === 'active' ? 'Sewa Aktif' : r.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '16px', textAlign: 'right' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleLandlordContractDownload(r.id)}
-                            disabled={contractDownloading[r.id]}
-                            className="btn btn-outline"
-                            style={{ padding: '4px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            title={r.contract_hash ? `SHA-256: ${r.contract_hash}` : undefined}
-                          >
-                            <FileText size={13} />
-                            {contractDownloading[r.id] ? 'Mengunduh...' : t('landlord.viewContract')}
-                          </button>
-                        </td>
-
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          <TenantsTab
+            rentals={rentals}
+            loading={tabLoading.tenants && !loadedTabs.current.has('tenants')}
+            contractDownloading={contractDownloading}
+            onDownloadContract={handleLandlordContractDownload}
+          />
         )}
       </main>
 
       {/* Withdraw Modal */}
       {showWithdrawModal && (
-        <div className="modal-overlay">
-          <div className="modal-container" style={{ maxWidth: '450px' }}>
-            <button className="modal-close" onClick={() => setShowWithdrawModal(false)}>
-              <X size={18} />
-            </button>
-            <div style={{ padding: '32px' }}>
-              <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>Formulir Penarikan Dana</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-                Maksimal penarikan: <strong>{formatRupiah(stats.balance)}</strong>
-              </p>
-
-              <form onSubmit={handleWithdrawSubmit}>
-                <div className="form-group">
-                  <label className="form-label">Pilih Bank Tujuan</label>
-                  <select 
-                    className="form-select" 
-                    value={withdrawForm.bankName}
-                    onChange={(e) => setWithdrawForm({ ...withdrawForm, bankName: e.target.value })}
-                  >
-                    <option value="BCA">BCA (Bank Central Asia)</option>
-                    <option value="Mandiri">Bank Mandiri</option>
-                    <option value="BNI">BNI (Bank Negara Indonesia)</option>
-                    <option value="BRI">BRI (Bank Rakyat Indonesia)</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Nomor Rekening Penerima</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="Contoh: 1234567890"
-                    value={withdrawForm.accountNumber}
-                    onChange={(e) => setWithdrawForm({ ...withdrawForm, accountNumber: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '24px' }}>
-                  <label className="form-label">Jumlah Penarikan (Rupiah)</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    placeholder="Contoh: 100000"
-                    max={stats.balance}
-                    value={withdrawForm.amount}
-                    onChange={(e) => setWithdrawForm({ ...withdrawForm, amount: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="flex-between">
-                  <button type="button" className="btn btn-outline" onClick={() => setShowWithdrawModal(false)}>
-                    Batal
-                  </button>
-                  <button type="submit" className="btn btn-primary">
-                    Proses Penarikan
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
+        <WithdrawModal
+          balance={stats.balance}
+          withdrawForm={withdrawForm}
+          setWithdrawForm={setWithdrawForm}
+          onClose={() => setShowWithdrawModal(false)}
+          onSubmit={handleWithdrawSubmit}
+        />
       )}
 
-      {/* Property Modal (Add / Edit) */}
+      {/* Property Form Modal (Add / Edit) */}
       {showPropModal && (
-        <div className="modal-overlay">
-          <div className="modal-container" style={{ maxWidth: '650px' }}>
-            <button className="modal-close" onClick={() => { setShowPropModal(false); resetPropertyForm(); }}>
-              <X size={18} />
-            </button>
-            <div style={{ padding: '32px' }}>
-              <h3 style={{ fontSize: '22px', marginBottom: '20px' }}>
-                {editingProperty ? 'Edit Properti KOSMO' : 'Formulir Pendaftaran Kos Baru'}
-              </h3>
-
-              <form onSubmit={handlePropertySubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                
-                <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                  <label className="form-label">Nama Properti / Kos</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="Contoh: KOSMO Hub Seminyak"
-                    value={propertyForm.name}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, name: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Kabupaten / Kota</label>
-                  <select 
-                    className="form-select"
-                    value={propertyForm.district}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, district: e.target.value })}
-                  >
-                    <option value="Denpasar">Denpasar</option>
-                    <option value="Badung">Badung (Seminyak/Kuta)</option>
-                    <option value="Gianyar">Gianyar (Ubud)</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Harga Sewa per Bulan (Rp)</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    placeholder="Contoh: 3000000"
-                    value={propertyForm.price}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, price: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                  <label className="form-label">Alamat Lengkap</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="Alamat jalan lengkap di Bali"
-                    value={propertyForm.address}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, address: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                  <label className="form-label">Deskripsi Properti</label>
-                  <textarea 
-                    className="form-textarea" 
-                    rows={3}
-                    placeholder="Jelaskan fasilitas, konsep, dan lingkungan kos..."
-                    value={propertyForm.description}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, description: e.target.value })}
-                  ></textarea>
-                </div>
-
-                <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                  <label className="form-label">Pilih Lokasi Properti di Peta</label>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                    Koordinat terpilih: <strong>{propertyForm.latitude || '-8.6500'}</strong>, <strong>{propertyForm.longitude || '115.2166'}</strong> (Geser penanda / klik peta untuk memindahkan)
-                  </div>
-                  <div id="map-picker" style={{ height: '240px', width: '100%', borderRadius: '12px', border: '1px solid var(--border-color)', position: 'relative', zIndex: 10 }}></div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Total Unit Kamar</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={propertyForm.totalRooms}
-                    onChange={(e) => setPropertyForm({ ...propertyForm, totalRooms: e.target.value })}
-                    required
-                  />
-                </div>
-
-                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                  <label className="form-label">Cover Image Properti</label>
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                    <input 
-                      type="file" 
-                      accept="image/*"
-                      className="form-input"
-                      onChange={handleImageUpload}
-                      style={{ padding: '8px' }}
-                    />
-                    {uploadingImage && <span style={{ fontSize: '12px', color: 'var(--primary)' }}>Mengunggah...</span>}
-                  </div>
-                  {propertyForm.image && (
-                    <div style={{ marginTop: '12px', position: 'relative', display: 'inline-block' }}>
-                      <img 
-                        src={propertyForm.image} 
-                        alt="Preview" 
-                        style={{ width: '120px', height: '80px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border-color)' }} 
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setPropertyForm((prev) => ({ ...prev, image: '' }))}
-                        style={{
-                          position: 'absolute', top: '-6px', right: '-6px', 
-                          background: 'red', color: 'white', border: 'none', 
-                          borderRadius: '50%', width: '20px', height: '20px', 
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          cursor: 'pointer', fontSize: '10px', fontWeight: 'bold'
-                        }}
-                      >
-                        X
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                  <label className="form-label">Fasilitas Termasuk (All-Inclusive)</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '6px' }}>
-                    {(Object.keys(propertyForm.facilities) as (keyof FacilityFilterState)[]).map((fac) => (
-                      <label key={String(fac)} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-                        <input 
-                          type="checkbox" 
-                          style={{ width: '16px', height: '16px' }}
-                          checked={propertyForm.facilities[fac]}
-                          onChange={() => setPropertyForm({
-                            ...propertyForm,
-                            facilities: {
-                              ...propertyForm.facilities,
-                              [fac]: !propertyForm.facilities[fac]
-                            }
-                          })}
-                        />
-                        {String(fac)}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
-                  <button type="button" className="btn btn-outline" onClick={() => { setShowPropModal(false); resetPropertyForm(); }}>
-                    Batal
-                  </button>
-                  <button type="submit" className="btn btn-primary">
-                    {editingProperty ? 'Simpan Perubahan' : 'Daftarkan Properti'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
+        <PropertyFormModal
+          editingProperty={editingProperty}
+          propertyForm={propertyForm}
+          setPropertyForm={setPropertyForm}
+          uploadingImage={uploadingImage}
+          onImageUpload={handleImageUpload}
+          onClose={() => {
+            setShowPropModal(false);
+            resetPropertyForm();
+          }}
+          onSubmit={handlePropertySubmit}
+        />
       )}
 
-      {/* Delete Property Password Modal */}
-      {showDeleteModal && deletingPropertyId && (
-        <div className="modal-overlay">
-          <div className="modal-container" style={{ maxWidth: '400px' }}>
-            <button className="modal-close" onClick={() => { setShowDeleteModal(false); setDeletePassword(''); }}>
-              <X size={18} />
-            </button>
-            <div style={{ padding: '32px' }}>
-              <h3 style={{ fontSize: '18px', marginBottom: '12px' }}>Hapus Properti Kos</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-                Apakah Anda yakin ingin menghapus properti ini? Semua review terkait juga akan dihapus. Harap masukkan password akun Anda untuk konfirmasi keamanan.
-              </p>
-              
-              <form onSubmit={async (e) => {
-                e.preventDefault();
-                if (!landlordUser) return;
-                setDeleteProcessing(true);
-                try {
-                  const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
-                  const res = await fetch(`${API_BASE}/properties/${deletingPropertyId}`, {
-                    method: 'DELETE',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                    },
-                    body: JSON.stringify({ password: deletePassword, landlordId: landlordUser.id })
-                  });
-                  const data = (await res.json()) as { message: string };
-                  if (!res.ok) throw new Error(data.message);
-
-                  alert(data.message);
-                  setShowDeleteModal(false);
-                  setDeletePassword('');
-                  setDeletingPropertyId(null);
-                  loadedTabs.current.delete('overview');
-                  loadedTabs.current.delete('reviews');
-                  await fetchLandlordProperties(landlordUser.id);
-                } catch (err: unknown) {
-                  const errorMsg = err instanceof Error ? err.message : String(err);
-                  alert(errorMsg);
-                } finally {
-                  setDeleteProcessing(false);
-                }
-              }}>
-                <div className="form-group" style={{ marginBottom: '20px' }}>
-                  <label className="form-label" style={{ display: 'block', marginBottom: '8px' }}>Password Anda</label>
-                  <input 
-                    type="password" 
-                    className="form-input" 
-                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
-                    placeholder="Masukkan password"
-                    value={deletePassword}
-                    onChange={(e) => setDeletePassword(e.target.value)}
-                    required 
-                  />
-                </div>
-
-                <div className="flex-between">
-                  <button type="button" className="btn btn-outline" onClick={() => { setShowDeleteModal(false); setDeletePassword(''); }}>
-                    Batal
-                  </button>
-                  <button type="submit" className="btn btn-danger" disabled={deleteProcessing}>
-                    {deleteProcessing ? 'Memproses...' : 'Hapus Sekarang'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
+      {/* Delete Property Security Password Modal */}
+      {showDeleteModal && (
+        <DeletePropertyModal
+          deletePassword={deletePassword}
+          setDeletePassword={setDeletePassword}
+          deleteProcessing={deleteProcessing}
+          onClose={() => {
+            setShowDeleteModal(false);
+            setDeletePassword('');
+          }}
+          onSubmit={handleDeleteSubmit}
+        />
       )}
     </div>
   );

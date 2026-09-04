@@ -1,174 +1,171 @@
-# Project: KOSMO Digital Rental Agreement Pipeline
+# Project: KOSMO Full-Stack Architecture Refactoring & Modularization
 
 ## Architecture
-The KOSMO Digital Rental Agreement Pipeline provides an end-to-end legally binding, audit-trailed electronic contract system for Bali co-living rentals, fully compliant with Indonesian Civil Code (KUHPerdata Art. 1320) and UU ITE No. 11/2008 jo. UU No. 1/2024.
+Comprehensive architectural decomposition and modularization of the KOSMO full-stack platform, separating concerns between routing, controller business logic, presentational UI, and state management hooks while strictly preserving all existing API contracts, database transaction concurrency invariants, and automated test gates.
 
-### System Architecture Overview
-- **Database (MySQL / TiDB)**: `rentals` table extended with 8 non-destructive audit and cryptographic columns (`contract_url`, `contract_hash`, `contract_signed_at`, `signer_ip`, `signer_user_agent`, `tenant_nik_passport`, `tenant_signature_data`, `admin_fee_amount`).
-- **In-Memory PDF Generation**: PDFKit streams PDF binary buffers entirely in memory (RAM). Computes SHA-256 cryptographic digest over the buffer.
-- **Cloud Storage Streaming**: In-memory PDF buffer is piped directly to Cloudinary (`uploadContractStream` to `kosmo_contracts/` folder with `resource_type: 'raw'` / `auto`) with zero local disk file writes (`backend/uploads/` untouched).
-- **Backend API & Concurrency Guards**: 
-  - `POST /api/rentals/contract/preview`: Generates draft contract metadata and in-memory PDF preview without creating tenancy.
-  - `POST /api/rentals/contract/sign`: Atomic transactional signing using `SELECT ... FOR UPDATE` row locks, recording signed contract metadata as `status: 'pending'`, without premature room decrement or landlord revenue credit.
-  - `POST /api/payment/webhook` (and alias `/payment/notification`): Webhook handling payment settlement/capture, atomically transitioning rental from `pending` to `active`, incrementing `occupiedRooms`, and crediting landlord revenue with transactional row locks (`SELECT ... FOR UPDATE`).
-  - `GET /api/rentals/:id/contract`: Role-based access control (RBAC) permitting only the tenant, property landlord, or admin.
-  - `computePaymentSchedule(startDate, status, durationMonths, referenceDate)`: Polymorphic payment schedule and lease boundary calculator accurately tracking multi-month lease terms.
-- **Frontend Evidentiary UI**:
-  - `BookingModal.tsx`: Scroll-to-read clickwrap container, HTML5 Canvas digital signature pad, 16-digit NIK / Passport input validation, visible inline validation error states (for scroll, consent, signature, and NIK/Passport), and Pengadilan Negeri Denpasar / Badung jurisdiction.
-  - `LandingPage.tsx`: Midtrans Snap payment token generation gated strictly behind signed contract state.
-  - `TenantDashboard.tsx` & `LandlordDashboard.tsx`: Throttled profile submissions with spinner feedback, and authenticated contract downloads with explicit `application/pdf` MIME type and `kontrak_sewa_{id}.pdf` filenames.
+### 1. Backend Modular Router Architecture
+- **Central Router Facade (`backend/router.ts`)**: Streamlined root router (~70 lines) mounting domain routes and re-exporting all public contracts, rate limiters, auth utilities, and payment helpers.
+- **Route Registration Pattern**: Domain modules export `register<Domain>Routes(router: Router): void` ensuring flat registration on `router.stack` to preserve exact reflection compatibility with `tests/router.test.ts`.
+- **Domain Route Modules (`backend/routes/*.routes.ts`)**:
+  - `system.routes.ts`: `/health`, `/upload` (~120 lines)
+  - `auth.routes.ts`: `/auth/login`, `/auth/register`, `/auth/me`, `/users/profile/:id`, `/auth/profile`, `/auth/verify-password`, `formatSafeUser` (~320 lines)
+  - `users.routes.ts`: `/users`, `/admin/users`, `/users/:id` CRUD (~150 lines)
+  - `properties.routes.ts`: `/properties`, `/properties/:id` CRUD with TTL caching and transaction locks (~320 lines)
+  - `reviews.routes.ts`: `/reviews`, `/reviews/:id` CRUD with rating recalculation transactions (~210 lines)
+  - `landlord.routes.ts`: `/stats`, `/landlord/stats`, `/landlord/financials`, `/withdrawals`, `/withdraw`, `/admin/withdrawals/*` (~380 lines)
+  - `tracking.routes.ts`: `/tracking/visit`, `/admin/stats`, `/admin/tracking-history`, Excel report generators (~310 lines)
+  - `contracts.routes.ts`: `/rentals/contract/preview`, `/rentals/contract/sign`, `/rentals/:id/contract` (~440 lines)
+  - `rentals.routes.ts`: `/rentals`, `/tenant/rentals`, `/rentals/:id/terminate`, `computePaymentSchedule` (~390 lines)
+  - `payment.routes.ts`: `/payment/token`, `/payment/webhook`, `/payment/notification`, `/payment/finish`, `settleRentalPayment` (~390 lines)
+- **Shared Utilities (`backend/utils/id.ts`)**: Cryptographically secure ID generator (`generateId(prefix)`).
+- **Concurrency & Transaction Invariants**: 13 transactional blocks with `SELECT ... FOR UPDATE` row locks preserved identically.
+
+### 2. Frontend Modular Component Architecture
+- **Facade Orchestrators**: Root files remain as clean coordinators (<250 lines each), preserving public export contracts (including `export interface Props` in `BookingModal.tsx`):
+  - `LandlordDashboard.tsx` (~180 lines facade)
+  - `AdminDashboard.tsx` (~220 lines facade)
+  - `TenantDashboard.tsx` (~250 lines facade)
+  - `BookingModal.tsx` (~200 lines facade)
+- **Subcomponent & Hook Modularization**:
+  - `LandlordDashboard/components/` (9 subcomponents) & `hooks/` (5 custom hooks)
+  - `AdminDashboard/components/` (11 subcomponents, including SVG `VisitorChart`) & `hooks/` (5 custom hooks)
+  - `TenantDashboard/components/` (13 subcomponents) & `hooks/` (6 custom hooks)
+  - `BookingModal/components/` (5 subcomponents) & `hooks/` (4 custom hooks)
 
 ---
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Non-Destructive Database Schema | Idempotent `ALTER TABLE rentals ADD COLUMN IF NOT EXISTS ...` adding 8 audit/contract columns | M1 | ORIGINAL_REQUEST §R1 |
-| 2 | Migration Auto-Execution Fix | Fix `initDb()` in `backend/db.ts` to ensure table migrations always run on existing tables | M1 | survey |
-| 3 | In-Memory PDF Generator | High-fidelity bilingual (ID/EN) lease agreement via PDFKit streamed in-memory (`Buffer`) | M2 | ORIGINAL_REQUEST §R2 |
-| 4 | SHA-256 Checksum Calculation | Cryptographic SHA-256 digest computed on generated PDF buffer and embedded in DB | M2 | ORIGINAL_REQUEST §R2 |
-| 5 | Cloudinary Direct Buffer Streaming | Direct buffer stream upload to Cloudinary `kosmo_contracts/` without writing to local disk | M2 | ORIGINAL_REQUEST §R2 |
-| 6 | Statutory Contract Clauses | Statutory terms: party IDs, Bali address, utility quotas, Rp 5.000 fee, single tenancy, Denpasar/Badung jurisdiction | M2 | ORIGINAL_REQUEST §R2 |
-| 7 | Contract Preview Endpoint | `POST /api/rentals/contract/preview` generates preview data without persisting tenancy | M3 | ORIGINAL_REQUEST §R3 |
-| 8 | Transactional Signing Endpoint | `POST /api/rentals/contract/sign` with `SELECT ... FOR UPDATE` and HTTP 409 Single Tenancy guard | M3 | ORIGINAL_REQUEST §R3 |
-| 9 | Audit Trail Capture | Records remote IP (`req.ip`/`x-forwarded-for`), User-Agent, UTC & WITA timestamps, user claims | M3 | ORIGINAL_REQUEST §R3 |
-| 10 | Contract Access RBAC | `GET /api/rentals/:id/contract` strictly allowing tenant, landlord, or admin access | M3 | ORIGINAL_REQUEST §R3 |
-| 11 | Strict Zod & Type Validation | Zod request schemas and TypeScript interfaces with zero `any` | M3 | ORIGINAL_REQUEST §R3 |
-| 12 | Scroll-to-Read Clickwrap | Affirmative consent checkbox disabled until user scrolls contract terms container to bottom | M4 | ORIGINAL_REQUEST §R4 |
-| 13 | HTML5 Canvas Signature Pad | Interactive canvas drawing with clear and confirm capabilities, exporting PNG Base64 | M4 | ORIGINAL_REQUEST §R4 |
-| 14 | NIK / Passport Input Validation | Real-time validation for 16-digit numeric NIK or valid international passport format | M4 | ORIGINAL_REQUEST §R4 |
-| 15 | Gated Checkout Flow | Midtrans Snap payment token generation in `LandingPage.tsx` gated behind signed contract | M4 | ORIGINAL_REQUEST §R4 |
-| 16 | Dashboard FileText Actions | `TenantDashboard.tsx` & `LandlordDashboard.tsx` authenticated contract view/download with `FileText` icons | M4 | ORIGINAL_REQUEST §R4 |
-| 17 | E2E & Automated Test Suite | Unit tests (`tests/contract.test.ts`), DB tests (`tests/db_integration.test.ts`), Vitest (`BookingModal.test.tsx`), E2E Playwright (`rental_flow.spec.ts`), all 5 gates in `scripts/verify.ps1` passing | M5 | ORIGINAL_REQUEST §Acceptance |
-| 18 | Profile Submission Throttling | `isSubmittingProfile` state, button disabling, loading spinner, and feedback text in `TenantDashboard.tsx` | M6 | ORIGINAL_REQUEST Follow-up §R1 |
-| 19 | Visible Inline Contract Validation | Immediate inline validation alerts for NIK/Passport, unscrolled terms, unchecked consent, and signature states in `BookingModal.tsx` | M6 | ORIGINAL_REQUEST Follow-up §R2 |
-| 20 | PDF MIME & Download Trigger | Explicit `application/pdf` Blob and `kontrak_sewa_{id}.pdf` download filename in `TenantDashboard.tsx` and `LandlordDashboard.tsx` | M6 | ORIGINAL_REQUEST Follow-up §R3 |
-| 21 | Decoupled Contract Tenancy State | `POST /api/rentals/contract/sign` sets `status: 'pending'`, does not increment room occupancy or credit balance | M6 | ORIGINAL_REQUEST Follow-up §R4 |
-| 22 | Payment Tenancy Activation & Sync | `POST /api/payment/webhook` atomically transitions status to `'active'`, increments `occupiedRooms`, credits landlord balance | M6 | ORIGINAL_REQUEST Follow-up §R5 |
-| 23 | Multi-Month Lease Schedule Calculation | Polymorphic `computePaymentSchedule` calculating lease start/end boundaries and payment status for multi-month leases | M6 | ORIGINAL_REQUEST Follow-up §R6 |
+| 1 | Central Router Re-Export Facade | Streamlined `backend/router.ts` maintaining all 19 public exports and type contracts | M1 | Survey Backend |
+| 2 | System & Upload Domain Router | `backend/routes/system.routes.ts` handling health checks and Cloudinary image upload streaming | M1 | Survey Backend |
+| 3 | Auth & Profile Domain Router | `backend/routes/auth.routes.ts` handling auth, KYC completeness checks, and password verification | M1 | Survey Backend |
+| 4 | Admin User Management Router | `backend/routes/users.routes.ts` handling user CRUD, password confirmation, role enforcement | M1 | Survey Backend |
+| 5 | Property CRUD & Caching Router | `backend/routes/properties.routes.ts` handling property listings, caching, and transactional edits | M1 | Survey Backend |
+| 6 | Review CRUD & Rating Recalculation Router | `backend/routes/reviews.routes.ts` handling review lifecycle and atomic rating updates | M1 | Survey Backend |
+| 7 | Landlord Financials & Withdrawal Router | `backend/routes/landlord.routes.ts` handling revenue aggregation and balance row-locks | M1 | Survey Backend |
+| 8 | Visitor Tracking & Excel Reporting Router | `backend/routes/tracking.routes.ts` handling visitor metrics, admin stats, and multi-sheet Excel reports | M1 | Survey Backend |
+| 9 | Legal Contract & E-Signing Router | `backend/routes/contracts.routes.ts` handling digital contract preview, signing, and PDF streaming | M1 | Survey Backend |
+| 10 | Tenancy Lifecycle & Schedule Router | `backend/routes/rentals.routes.ts` handling rental queries, termination, and payment schedules | M1 | Survey Backend |
+| 11 | Payment Settlement & Webhook Router | `backend/routes/payment.routes.ts` handling Midtrans Snap tokens, signature verification, settlement | M1 | Survey Backend |
+| 12 | Cryptographic ID Generator Utility | `backend/utils/id.ts` providing secure random ID generation across domains | M1 | Survey Backend |
+| 13 | Landlord Dashboard Modularization | Decompose `LandlordDashboard.tsx` into 9 subcomponents, 5 hooks, and clean facade | M2 | Survey Frontend |
+| 14 | Admin Dashboard Modularization | Decompose `AdminDashboard.tsx` into 11 subcomponents (including SVG chart), 5 hooks, and clean facade | M2 | Survey Frontend |
+| 15 | Tenant Dashboard Modularization | Decompose `TenantDashboard.tsx` into 13 subcomponents, 6 hooks, and clean facade | M2 | Survey Frontend |
+| 16 | Booking Modal Modularization | Decompose `BookingModal.tsx` into 5 subcomponents, 4 hooks, and clean facade (preserving `Props` export) | M2 | Survey Frontend |
+| 17 | Strict TypeScript Zero-Any Audit | Eliminate any implicit/explicit `any`, remove dead imports, enforce zero compiler suppressions | M3 | ORIGINAL_REQUEST §R3 |
+| 18 | Verification Pipeline Execution | Verify all 7 gates: tsc, frontend type-check, builds, backend tests (204), vitest (65), playwright (11), verify.ps1 | M4 | ORIGINAL_REQUEST §Acceptance |
+| 19 | Challenger Adversarial Hardening | Concurrency stress testing, RBAC boundary validation, and router reflection audit | M4 | Verification Survey |
+| 20 | Forensic Integrity Audit | Systematic check for authentic implementations without mock shortcuts or bypasses | M4 | Verification Survey |
 
 ---
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | R1: Database Schema & Migrations | `backend/db.ts`, `backend/types/index.ts` | None | DONE |
-| M2 | R2: In-Memory PDF & Cloudinary Streaming | `backend/services/contract.ts`, `backend/services/cloudinary.ts` | M1 | DONE |
-| M3 | R3: Backend Endpoints, Audit & Concurrency | `backend/router.ts`, `backend/types/index.ts`, `backend/middleware/validation.ts` | M1, M2 | DONE |
-| M4 | R4: Frontend Evidentiary UI & Dashboards | `frontend/src/components/BookingModal.tsx`, `frontend/src/pages/LandingPage.tsx`, `frontend/src/pages/TenantDashboard.tsx`, `frontend/src/pages/LandlordDashboard.tsx`, `frontend/src/types/index.ts`, `frontend/src/contexts/LanguageContext.tsx` | M2, M3 | DONE |
-| M5 | E2E Testing & Verification Gates | `tests/contract.test.ts`, `tests/db_integration.test.ts`, `tests/router.test.ts`, `frontend/src/components/__tests__/BookingModal.test.tsx`, `tests/e2e/rental_flow.spec.ts`, `scripts/verify.ps1` | M1, M2, M3, M4 | DONE |
-| M6 | Comprehensive Fixes R1-R6 | `frontend/src/pages/TenantDashboard.tsx`, `frontend/src/components/BookingModal.tsx`, `frontend/src/pages/LandlordDashboard.tsx`, `backend/router.ts`, `tests/rentals.test.ts`, `tests/challenger_m3.test.ts`, `tests/challenger_m3_rbac.test.ts`, `tests/contract_concurrency_stress.test.ts`, `frontend/src/components/__tests__/BookingModal.test.tsx` | M1, M2, M3, M4, M5 | IN_PROGRESS |
+| M0 | Survey & Architectural Mapping | Codebase survey, endpoint mapping, component sizing, test cataloging | none | DONE |
+| M1 | Backend Router Domain Modularization | `backend/routes/*.routes.ts`, `backend/utils/id.ts`, `backend/router.ts` | M0 | DONE |
+| M2 | Frontend Mega-Component Modularization | `LandlordDashboard/`, `AdminDashboard/`, `TenantDashboard/`, `BookingModal/` | M0 | DONE |
+| M3 | Type Safety, Clean Interfaces & Dead Code Removal | Zero-any enforcement, type unification, dead code cleanup across stack | M1, M2 | DONE |
+| M4 | Full-Stack Verification & Adversarial Gating | 7 verification gates, Challenger stress tests, Forensic Auditor verdict | M1, M2, M3 | DONE |
 
 ---
 
 ## Interface Contracts
 
-### 1. Database Schema (`rentals` table columns)
-```sql
-ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_url VARCHAR(500);
-ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_hash VARCHAR(64);
-ALTER TABLE rentals ADD COLUMN IF NOT EXISTS contract_signed_at DATETIME;
-ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_ip VARCHAR(50);
-ALTER TABLE rentals ADD COLUMN IF NOT EXISTS signer_user_agent VARCHAR(255);
-ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50);
-ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT;
-ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00;
+### 1. Route Registration Contract
+```typescript
+import type { Router } from 'express';
+
+export function registerSystemRoutes(router: Router): void;
+export function registerAuthRoutes(router: Router): void;
+export function registerUserRoutes(router: Router): void;
+export function registerPropertyRoutes(router: Router): void;
+export function registerReviewRoutes(router: Router): void;
+export function registerLandlordRoutes(router: Router): void;
+export function registerTrackingRoutes(router: Router): void;
+export function registerContractRoutes(router: Router): void;
+export function registerRentalRoutes(router: Router): void;
+export function registerPaymentRoutes(router: Router): void;
 ```
 
-### 2. Contract Service Interface (`backend/services/contract.ts`)
-```ts
-export interface RentalContractData {
-  rentalId?: string;
-  propertyName: string;
-  propertyAddress: string;
-  landlordName: string;
-  landlordEmail?: string;
-  landlordPhone?: string;
-  tenantName: string;
-  tenantEmail: string;
-  tenantPhone: string;
-  tenantNikPassport: string;
-  startDate: string;
-  durationMonths: number;
-  monthlyPrice: number;
-  totalPrice: number;
-  adminFee: number; // Flat 5000
-  signatureBase64?: string;
-  signerIp?: string;
-  signerUserAgent?: string;
-  signedAt?: string;
-  utilityQuotas?: {
-    electricityKwh?: number | string;
-    water?: string;
-    wifiMbps?: number | string;
-    security?: string;
-    waste?: string;
-  };
-}
+### 2. Central Router Public Re-Exports (`backend/router.ts`)
+```typescript
+export {
+  generateJwtToken,
+  verifyJwtToken,
+  authenticateToken,
+  requireRole
+} from './middleware/auth';
+export type { JWTPayload, AuthenticatedRequest } from './middleware/auth';
 
-export interface GeneratedContractResult {
-  pdfBuffer: Buffer;
-  contractHash: string; // SHA-256
-  cloudinaryUrl?: string;
-}
-
-export function generateRentalContractBuffer(data: RentalContractData): Promise<Buffer>;
-export function computeContractHash(buffer: Buffer): string;
-export function generateAndUploadContract(data: RentalContractData): Promise<GeneratedContractResult>;
+export {
+  authLimiter,
+  uploadLimiter,
+  trackingLimiter,
+  ALLOWED_IMAGE_MIMETYPES,
+  validateImageMimeType,
+  formatSafeUser,
+  PaymentSchedule,
+  computePaymentSchedule,
+  isMidtransConfigured,
+  snap,
+  verifyMidtransSignature,
+  settleRentalPayment
+};
 ```
 
-### 3. Payment Schedule Calculation Interface (`backend/router.ts`)
-```ts
-export interface PaymentSchedule {
-  nextPaymentDate: string;
-  nextPaymentDateISO: string;
-  daysRemaining: number;
-  paymentStatus: 'Lunas (Periode Berjalan)' | 'Menjelang Jatuh Tempo' | 'Menunggu Pembayaran' | 'Penyewaan Selesai';
-  leaseStartDate?: string;
-  leaseEndDate?: string;
-  leaseEndDateISO?: string;
-  totalDurationMonths?: number;
+### 3. Frontend BookingModal Contract (`frontend/src/components/BookingModal.tsx`)
+```typescript
+export interface Props {
+  property: Property | null;
+  showContract: boolean;
+  setShowContract: (show: boolean) => void;
+  contractSigned: boolean;
+  handleSignContract?: () => void;
+  onSignContract?: (payload: ContractSignPayload) => Promise<boolean>;
+  signedContractData?: SignedContractData | null;
+  isSigning?: boolean;
+  showPayment: boolean;
+  setShowPayment: (show: boolean) => void;
+  paymentProcessing: boolean;
+  handleProcessPayment: () => void;
+  showMap: boolean;
+  setShowMap: (show: boolean) => void;
+  onClose: () => void;
+  currentUser: User | null;
+  onNavigateToLogin: () => void;
+  renderFacilityIcon: (fac: string) => React.ReactNode;
+  hasActiveRental?: boolean;
+  activeRentalError?: string | null;
 }
-
-export function computePaymentSchedule(
-  startDateStr: string,
-  status: string,
-  durationMonthsOrRef?: number | Date,
-  referenceDate?: Date
-): PaymentSchedule;
+export default function BookingModal(props: Props): React.ReactElement | null;
 ```
-
-### 4. REST Endpoints (`backend/router.ts`)
-- **`POST /api/rentals/contract/preview`**
-  - Input: `{ propertyId: string, durationMonths: number, startDate?: string, tenantNikPassport?: string, signatureBase64?: string }` (Auth required)
-  - Output: `{ success: true, contractData: RentalContractData, contractHash: string, previewUrl?: string }`
-- **`POST /api/rentals/contract/sign`**
-  - Input: `{ propertyId: string, durationMonths: number, startDate: string, tenantNikPassport: string, signatureBase64: string, affirmativeConsent: boolean }` (Auth required)
-  - Output: `{ success: true, rentalId: string, contractUrl: string, contractHash: string, adminFee: number, totalAmount: number }`
-  - Action: Inserts rental with `status = 'pending'`. Does NOT increment `occupiedRooms` or credit landlord balance.
-- **`POST /api/payment/webhook` & `POST /api/payment/notification`**
-  - Midtrans webhook: On `settlement`/`capture`, atomically updates rental to `status = 'active'`, increments `occupiedRooms`, and credits landlord revenue using `SELECT ... FOR UPDATE`. On `cancel`/`expire`/`deny`, marks `status = 'cancelled'`.
-- **`GET /api/rentals/:id/contract`**
-  - Auth required. RBAC: Caller must be rental tenant, property landlord/owner, or admin.
-  - Output: Streams PDF buffer with headers (`Content-Type: application/pdf`, `Content-Disposition: inline; filename="kontrak_sewa_<id>.pdf"`, `X-Contract-Hash: <hash>`).
 
 ---
 
 ## Code Layout
-- `backend/db.ts`: Database pool, schema definition, and `applyTableMigrations()`
-- `backend/services/contract.ts`: In-memory PDF generator, bilingual statutory clauses, SHA-256 hash
-- `backend/services/cloudinary.ts`: Direct buffer upload stream for raw PDF contracts
-- `backend/router.ts`: Express router with `/contract/preview`, `/contract/sign`, `/contract`, `/payment/webhook`, `computePaymentSchedule`
-- `backend/types/index.ts`: Strict TypeScript interfaces
-- `backend/middleware/validation.ts`: Zod validation middleware
-- `frontend/src/components/BookingModal.tsx`: Clickwrap scroll-to-read, canvas signature pad, NIK validation, inline feedback alerts
-- `frontend/src/pages/LandingPage.tsx`: Midtrans Snap gated booking payment flow
-- `frontend/src/pages/TenantDashboard.tsx`: Authenticated contract download (`application/pdf`) and throttled profile updates with loading spinner
-- `frontend/src/pages/LandlordDashboard.tsx`: Authenticated contract download (`application/pdf`)
-- `frontend/src/types/index.ts`: Frontend TypeScript interfaces
-- `tests/contract.test.ts`: PDF generation & hash unit tests
-- `tests/db_integration.test.ts`: DB transactional signing & concurrency tests
-- `tests/rentals.test.ts`: Payment schedule calculation tests
-- `frontend/src/components/__tests__/BookingModal.test.tsx`: Vitest component tests
-- `tests/e2e/rental_flow.spec.ts`: Playwright E2E full agreement flow tests
-- `scripts/verify.ps1`: 5-gate project verification script
+- `backend/router.ts`: Root Express router (<70 lines) mounting domain registration functions and re-exporting public contracts
+- `backend/utils/id.ts`: `generateId(prefix)`
+- `backend/routes/system.routes.ts`: Health and upload routes
+- `backend/routes/auth.routes.ts`: Authentication and user profile routes
+- `backend/routes/users.routes.ts`: Admin user management routes
+- `backend/routes/properties.routes.ts`: Property listings, detail, CRUD, and caching
+- `backend/routes/reviews.routes.ts`: Review CRUD and average rating recalculations
+- `backend/routes/landlord.routes.ts`: Landlord stats, revenue, bank accounts, and withdrawals
+- `backend/routes/tracking.routes.ts`: Visitor tracking, admin dashboard metrics, and Excel generators
+- `backend/routes/contracts.routes.ts`: In-memory PDF preview, signing, and contract download streaming
+- `backend/routes/rentals.routes.ts`: Rental lifecycle, payment schedule calculation, and lease termination
+- `backend/routes/payment.routes.ts`: Midtrans Snap tokens, signature verification, webhooks, settlement
+- `frontend/src/pages/LandlordDashboard.tsx`: Landlord dashboard facade (<200 lines)
+- `frontend/src/pages/LandlordDashboard/components/`: Subcomponents (9 files)
+- `frontend/src/pages/LandlordDashboard/hooks/`: Custom hooks (5 files)
+- `frontend/src/pages/AdminDashboard.tsx`: Admin dashboard facade (<250 lines)
+- `frontend/src/pages/AdminDashboard/components/`: Subcomponents (11 files, including VisitorChart)
+- `frontend/src/pages/AdminDashboard/hooks/`: Custom hooks (5 files)
+- `frontend/src/pages/TenantDashboard.tsx`: Tenant dashboard facade (<250 lines)
+- `frontend/src/pages/TenantDashboard/components/`: Subcomponents (13 files)
+- `frontend/src/pages/TenantDashboard/hooks/`: Custom hooks (6 files)
+- `frontend/src/components/BookingModal.tsx`: Booking modal facade (<250 lines, exports Props)
+- `frontend/src/components/BookingModal/components/`: Subcomponents (5 files)
+- `frontend/src/components/BookingModal/hooks/`: Custom hooks (4 files)
