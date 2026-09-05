@@ -164,7 +164,7 @@ export function registerPropertyRoutes(router: Router): void {
         );
 
         if (facilities && facilities.length > 0) {
-          const facilityValues = facilities.map(fac => [propId, fac]);
+          const facilityValues = (facilities as string[]).map((fac: string) => [propId, fac]);
           await connection.query(
             'INSERT INTO property_facilities (propertyId, facility) VALUES ?', 
             [facilityValues]
@@ -229,7 +229,7 @@ export function registerPropertyRoutes(router: Router): void {
       if (facilities !== undefined) {
         await connection.query('DELETE FROM property_facilities WHERE propertyId = ?', [id]);
         if (facilities.length > 0) {
-          const facilityValues = facilities.map(fac => [id, fac]);
+          const facilityValues = (facilities as string[]).map((fac: string) => [id, fac]);
           await connection.query(
             'INSERT INTO property_facilities (propertyId, facility) VALUES ?', 
             [facilityValues]
