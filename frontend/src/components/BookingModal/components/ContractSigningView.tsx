@@ -35,7 +35,7 @@ export interface ContractSigningViewProps {
   calculatedTotalAmount: number;
   previewLoading: boolean;
   handleFetchPreview: () => void;
-  termsContainerRef: React.RefObject<HTMLDivElement | null>;
+  termsContainerRef?: React.RefObject<HTMLDivElement>;
   handleTermsScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   scrollError: string | null;
   hasScrolledToBottom: boolean;
@@ -43,7 +43,7 @@ export interface ContractSigningViewProps {
   setAffirmativeConsent: (consent: boolean) => void;
   consentError: string | null;
   setConsentError: (err: string | null) => void;
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  canvasRef?: React.RefObject<HTMLCanvasElement>;
   hasDrawnSignature: boolean;
   signatureConfirmed: boolean;
   signatureError: string | null;
