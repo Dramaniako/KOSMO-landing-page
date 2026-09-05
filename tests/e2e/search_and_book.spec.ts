@@ -37,12 +37,33 @@ test.describe('Search, Filter, and Rental Booking Flow', () => {
   ];
 
   test.beforeEach(async ({ page }) => {
-    // Mock properties endpoint
-    await page.route('**/api/properties*', async (route) => {
+    // Mock properties list endpoint
+    await page.route(/\/api\/properties(\?.*)?$/, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify(mockProperties)
+      });
+    });
+
+    // Mock property discrete rooms endpoint
+    await page.route('**/api/properties/*/rooms*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { id: 'room-101', propertyId: 'prop-101', roomNumber: '101', floor: 1, type: 'standard', status: 'available', price: 3500000 },
+          { id: 'room-102', propertyId: 'prop-101', roomNumber: '102', floor: 1, type: 'standard', status: 'available', price: 3500000 }
+        ])
+      });
+    });
+
+    // Mock property photos endpoint
+    await page.route('**/api/properties/*/photos*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
       });
     });
 

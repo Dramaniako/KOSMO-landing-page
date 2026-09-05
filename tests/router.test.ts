@@ -67,7 +67,16 @@ test('Express router endpoints registration', async (t) => {
       { path: '/rentals/:id/terminate', method: 'post' },
       { path: '/rentals/:id/contract', method: 'get' },
       { path: '/payment/token', method: 'post' },
-      { path: '/payment/webhook', method: 'post' }
+      { path: '/payment/webhook', method: 'post' },
+      { path: '/properties/:id/rooms', method: 'get' },
+      { path: '/properties/:id/rooms', method: 'post' },
+      { path: '/properties/:id/rooms/:roomId', method: 'put' },
+      { path: '/properties/:id/rooms/:roomId/status', method: 'patch' },
+      { path: '/properties/:id/rooms/:roomId', method: 'delete' },
+      { path: '/rooms/:roomId', method: 'get' },
+      { path: '/rooms/:roomId', method: 'put' },
+      { path: '/rooms/:roomId/status', method: 'patch' },
+      { path: '/rooms/:roomId', method: 'delete' }
     ];
 
     for (const expected of expectedEndpoints) {
@@ -160,4 +169,47 @@ test('Express router endpoints registration', async (t) => {
     assert.ok(signRoute, 'POST /rentals/contract/sign must be registered');
     assert.ok(getContractRoute, 'GET /rentals/:id/contract must be registered');
   });
+
+  await t.test('verifies discrete rooms CRUD endpoints are mounted on router stack', () => {
+    const routePaths = (router.stack as unknown as RouterLayer[])
+      .filter((layer): layer is RouterLayer & { route: { path: string; methods: Record<string, boolean> } } => Boolean(layer.route))
+      .map((layer) => ({
+        path: layer.route.path,
+        methods: Object.keys(layer.route.methods)
+      }));
+
+    const getRooms = routePaths.find((r) => r.path === '/properties/:id/rooms' && r.methods.includes('get'));
+    const postRoom = routePaths.find((r) => r.path === '/properties/:id/rooms' && r.methods.includes('post'));
+    const putRoom = routePaths.find((r) => r.path === '/properties/:id/rooms/:roomId' && r.methods.includes('put'));
+    const patchStatus = routePaths.find((r) => r.path === '/properties/:id/rooms/:roomId/status' && r.methods.includes('patch'));
+    const deleteRoom = routePaths.find((r) => r.path === '/properties/:id/rooms/:roomId' && r.methods.includes('delete'));
+
+    assert.ok(getRooms, 'GET /properties/:id/rooms must be registered');
+    assert.ok(postRoom, 'POST /properties/:id/rooms must be registered');
+    assert.ok(putRoom, 'PUT /properties/:id/rooms/:roomId must be registered');
+    assert.ok(patchStatus, 'PATCH /properties/:id/rooms/:roomId/status must be registered');
+    assert.ok(deleteRoom, 'DELETE /properties/:id/rooms/:roomId must be registered');
+
+    assert.ok(routePaths.find((r) => r.path === '/rooms/:roomId' && r.methods.includes('get')));
+    assert.ok(routePaths.find((r) => r.path === '/rooms/:roomId' && r.methods.includes('put')));
+    assert.ok(routePaths.find((r) => r.path === '/rooms/:roomId/status' && r.methods.includes('patch')));
+    assert.ok(routePaths.find((r) => r.path === '/rooms/:roomId' && r.methods.includes('delete')));
+  });
+
+  await t.test('verifies multi-photo gallery endpoints are mounted on router stack', () => {
+    const routePaths = (router.stack as unknown as RouterLayer[])
+      .filter((layer): layer is RouterLayer & { route: { path: string; methods: Record<string, boolean> } } => Boolean(layer.route))
+      .map((layer) => ({
+        path: layer.route.path,
+        methods: Object.keys(layer.route.methods)
+      }));
+
+    assert.ok(routePaths.find((r) => r.path === '/properties/:id/photos' && r.methods.includes('get')), 'GET /properties/:id/photos must be registered');
+    assert.ok(routePaths.find((r) => r.path === '/properties/:id/photos' && r.methods.includes('post')), 'POST /properties/:id/photos must be registered');
+    assert.ok(routePaths.find((r) => r.path === '/properties/:id/photos/reorder' && r.methods.includes('put')), 'PUT /properties/:id/photos/reorder must be registered');
+    assert.ok(routePaths.find((r) => r.path === '/properties/:id/photos/:photoId' && r.methods.includes('delete')), 'DELETE /properties/:id/photos/:photoId must be registered');
+    assert.ok(routePaths.find((r) => r.path === '/photos/:photoId' && r.methods.includes('delete')), 'DELETE /photos/:photoId must be registered');
+  });
 });
+
+

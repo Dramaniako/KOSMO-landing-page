@@ -1,14 +1,15 @@
 import React from 'react';
-import { Home, Calendar, FileText, Compass } from 'lucide-react';
+import { Home, Calendar, FileText, Compass, DoorOpen } from 'lucide-react';
 import { Rental } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
 
-interface ActiveRentalSectionProps {
+export interface ActiveRentalSectionProps {
   activeRental?: Rental;
   isLoading: boolean;
   isLoaded: boolean;
   contractDownloading: Record<string, boolean>;
   onOpenContract: (rentalId: string) => Promise<void>;
+  onViewContractDetails?: (rental: Rental) => void;
   onOpenTerminate: (rental: Rental) => void;
   onExplore: () => void;
 }
@@ -19,6 +20,7 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
   isLoaded,
   contractDownloading,
   onOpenContract,
+  onViewContractDetails,
   onOpenTerminate,
   onExplore
 }) => {
@@ -65,6 +67,28 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
               )}
             </div>
             <h4 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--dark)' }}>{activeRental.propertyName}</h4>
+            {/* Assigned Discrete Room Badge & Details */}
+            {(activeRental.roomNumber || activeRental.roomId) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                <span
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/80"
+                  data-testid="active-rental-room-badge"
+                >
+                  <DoorOpen size={13} className="text-indigo-600 dark:text-indigo-400" />
+                  {activeRental.roomNumber ? `Kamar ${activeRental.roomNumber}` : `Unit ID: ${activeRental.roomId?.slice(0, 8)}`}
+                  {activeRental.roomFloor && (
+                    <span className="text-indigo-400 dark:text-indigo-500 font-normal">
+                      &bull; Lantai {activeRental.roomFloor}
+                    </span>
+                  )}
+                  {activeRental.roomType && (
+                    <span className="text-indigo-400 dark:text-indigo-500 font-normal">
+                      &bull; {activeRental.roomType}
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>
               {t('tenant.startDate')}: <strong>{activeRental.startDate}</strong> &bull; All-Inclusive
             </p>
@@ -109,6 +133,18 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
               Rp {activeRental.price ? activeRental.price.toLocaleString('id-ID') : '0'}/bln
             </strong>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px', flexWrap: 'wrap' }}>
+              {onViewContractDetails && (
+                <button
+                  type="button"
+                  onClick={() => onViewContractDetails(activeRental)}
+                  className="btn btn-outline"
+                  style={{ padding: '6px 14px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  data-testid="view-contract-details-btn"
+                >
+                  <FileText size={14} />
+                  Detail Perjanjian
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onOpenContract(activeRental.id)}
@@ -148,3 +184,5 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
     </div>
   );
 };
+
+export default ActiveRentalSection;

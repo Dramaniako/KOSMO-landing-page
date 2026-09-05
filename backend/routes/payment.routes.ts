@@ -1,11 +1,13 @@
 import type { Request, Response, Router } from 'express';
 import crypto from 'crypto';
 import midtransClient from 'midtrans-client';
-import { pool } from '../db';
+import type { RowDataPacket } from 'mysql2/promise';
+import { pool, syncPropertyRoomCounts } from '../db';
 import { apiCache } from '../services/cache';
 import { authenticateToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { PropertyRow } from '../services/transformers';
+import type { RoomRow } from '../types/index';
 import { generateId } from '../utils/id';
 import type { UserRow } from './auth.routes';
 import type { RentalRow } from './rentals.routes';
@@ -96,6 +98,30 @@ export async function settleRentalPayment(
   try {
     await connection.beginTransaction();
 
+    // Early lookup to discover propertyId for lock hierarchy compliance
+    const [earlyRentalRows] = await connection.query<RentalRow[]>(
+      'SELECT id, propertyId, status FROM rentals WHERE id = ? OR id = ?',
+      [targetRentalId, orderIdOrRentalId.trim()]
+    );
+    const earlyRental = earlyRentalRows[0];
+
+    if (!earlyRental) {
+      await connection.rollback();
+      return { success: false, statusCode: 404, message: "Data sewa tidak ditemukan." };
+    }
+
+    // Strict Lock Hierarchy: users -> properties -> rentals -> rooms
+    // 1. Properties row lock
+    let property: PropertyRow | undefined;
+    if (earlyRental.propertyId) {
+      const [propRows] = await connection.query<PropertyRow[]>(
+        'SELECT id, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE',
+        [earlyRental.propertyId]
+      );
+      property = propRows[0];
+    }
+
+    // 2. Rentals row lock
     const [rentalRows] = await connection.query<RentalRow[]>(
       'SELECT * FROM rentals WHERE id = ? OR id = ? FOR UPDATE',
       [targetRentalId, orderIdOrRentalId.trim()]
@@ -133,24 +159,61 @@ export async function settleRentalPayment(
 
     // Check if already processed to prevent duplicate room increments or balance credits
     if (rental.status !== 'active') {
-      const [propRows] = await connection.query<PropertyRow[]>(
-        'SELECT totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE',
-        [rental.propertyId]
-      );
-      const property = propRows[0];
+      // 🛡️ Concurrency Guard: Discrete Room Row Lock & Availability Check
+      let lockedRoom: RoomRow | undefined;
+      let targetRoomId = rental.roomId;
 
-      if (property && property.occupiedRooms >= property.totalRooms) {
-        await connection.rollback();
-        console.error(`Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`);
-        return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
+      if (targetRoomId) {
+        const [roomRows] = await connection.query<RoomRow[]>(
+          'SELECT id, propertyId, roomNumber, status FROM rooms WHERE id = ? FOR UPDATE',
+          [targetRoomId]
+        );
+        lockedRoom = roomRows[0];
+        if (!lockedRoom || lockedRoom.status !== 'available') {
+          await connection.rollback();
+          console.error(`Overbooking conflict detected for room ${targetRoomId}, status: ${lockedRoom?.status}`);
+          return { success: false, statusCode: 409, message: "Kamar sudah terisi atau tidak tersedia." };
+        }
+      } else {
+        // Auto-assign lowest available room if property has discrete inventory
+        const [availableRooms] = await connection.query<RoomRow[]>(
+          "SELECT id, propertyId, roomNumber, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
+          [rental.propertyId]
+        );
+        if (availableRooms.length > 0) {
+          lockedRoom = availableRooms[0];
+          targetRoomId = lockedRoom.id;
+        } else {
+          const [discreteCountRows] = await connection.query<RowDataPacket[]>(
+            'SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?',
+            [rental.propertyId]
+          );
+          if (Number(discreteCountRows[0]?.count || 0) > 0) {
+            await connection.rollback();
+            return { success: false, statusCode: 409, message: "Kamar sudah terisi atau tidak tersedia." };
+          }
+          if (property && property.occupiedRooms >= property.totalRooms) {
+            await connection.rollback();
+            console.error(`Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`);
+            return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
+          }
+        }
       }
 
-      await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [resolvedRentalId]);
-
       await connection.query(
-        'UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?',
-        [rental.propertyId]
+        "UPDATE rentals SET status = 'active', roomId = COALESCE(roomId, ?) WHERE id = ?",
+        [targetRoomId || null, resolvedRentalId]
       );
+
+      if (lockedRoom) {
+        await connection.query("UPDATE rooms SET status = 'occupied' WHERE id = ?", [lockedRoom.id]);
+        await syncPropertyRoomCounts(connection, rental.propertyId);
+      } else {
+        await connection.query(
+          'UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?',
+          [rental.propertyId]
+        );
+      }
 
       if (property && property.ownerId) {
         const totalRentalRevenue = monthlyPrice * durationMonths;
@@ -248,7 +311,7 @@ const handlePaymentNotification = async (req: Request<Record<string, never>, unk
 
 export function registerPaymentRoutes(router: Router): void {
   router.post('/payment/token', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
-    const { propertyId, tenantId, durationMonths } = req.body;
+    const { propertyId, tenantId, durationMonths, roomId } = req.body;
     const authUser = req.user;
     if (!propertyId || !tenantId) {
       return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
@@ -301,17 +364,20 @@ export function registerPaymentRoutes(router: Router): void {
       const startDate = (req.body.startDate && typeof req.body.startDate === 'string' && req.body.startDate.trim() !== '')
         ? req.body.startDate.trim()
         : new Date().toISOString().split('T')[0];
-      const monthlyRent = Number(property.price);
-      const adminFee = 5000.0;
-      const totalAmount = (monthlyRent * duration) + adminFee;
+      // If rental record was pre-created via /rentals/contract/sign, load existing rental to honor room price override
+      const [existingRental] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE id = ?', [rentalId]);
+      const monthlyRent = Number(existingRental[0]?.price || property.price);
+      const adminFee = Number(existingRental[0]?.admin_fee_amount || 5000.0);
+      const resolvedDuration = (existingRental.length > 0 && existingRental[0]?.duration_months)
+        ? Number(existingRental[0].duration_months)
+        : duration;
+      const totalAmount = (monthlyRent * resolvedDuration) + adminFee;
 
-      // If rental record was not pre-created via /rentals/contract/sign, insert pending rental record
-      const [existingRental] = await pool.query<RentalRow[]>('SELECT id FROM rentals WHERE id = ?', [rentalId]);
       if (existingRental.length === 0) {
         await pool.query(
-          `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
-           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-          [rentalId, tenantId, propertyId, property.name, monthlyRent, startDate, adminFee, duration]
+          `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+          [rentalId, tenantId, propertyId, roomId || null, property.name, monthlyRent, startDate, adminFee, resolvedDuration]
         );
       }
 
@@ -333,7 +399,7 @@ export function registerPaymentRoutes(router: Router): void {
           {
             id: property.id,
             price: monthlyRent,
-            quantity: duration,
+            quantity: resolvedDuration,
             name: property.name.substring(0, 50)
           },
           {

@@ -464,6 +464,7 @@ export interface Rental {
   id: string;
   tenantId: string;
   propertyId: string;
+  roomId?: string | null;
   propertyName: string;
   price: number;
   startDate: string;
@@ -488,6 +489,10 @@ export interface RentalRow extends RowDataPacket {
   id: string;
   tenantId: string;
   propertyId: string;
+  roomId?: string | null;
+  roomNumber?: string | null;
+  roomFloor?: number | null;
+  roomType?: string | null;
   propertyName: string;
   price: number;
   startDate: string;
@@ -514,6 +519,10 @@ export interface UtilityQuotas {
 
 export interface RentalContractData {
   rentalId?: string;
+  roomId?: string;
+  roomNumber?: string;
+  roomFloor?: number;
+  roomType?: string;
   propertyName: string;
   propertyAddress?: string;
   landlordName?: string;
@@ -566,6 +575,11 @@ export function validateRental(data: unknown): { valid: boolean; errors: string[
   }
   if (typeof rental.propertyId !== 'string' || !rental.propertyId.trim()) {
     errors.push('propertyId must be a non-empty string');
+  }
+  if (rental.roomId !== undefined && rental.roomId !== null) {
+    if (typeof rental.roomId !== 'string' || !rental.roomId.trim()) {
+      errors.push('roomId must be a non-empty string if provided');
+    }
   }
   if (typeof rental.propertyName !== 'string' || !rental.propertyName.trim()) {
     errors.push('propertyName must be a non-empty string');
@@ -638,6 +652,8 @@ export interface RentalContractJoinedRow extends RowDataPacket {
   rental_id: string;
   rental_tenant_id: string;
   rental_property_id: string;
+  rental_room_id?: string | null;
+  room_number?: string | null;
   rental_property_name: string;
   rental_price: number;
   rental_start_date: string;
@@ -669,5 +685,161 @@ export interface RentalContractJoinedRow extends RowDataPacket {
   landlord_name?: string;
   landlord_email?: string;
   landlord_phone?: string;
+}
+
+/**
+ * ============================================================
+ * Discrete Room Inventory & Multi-Photo Gallery Domain Types
+ * ============================================================
+ */
+
+export type DiscreteRoomStatus = 'available' | 'occupied' | 'maintenance';
+export const VALID_DISCRETE_ROOM_STATUSES: readonly DiscreteRoomStatus[] = [
+  'available',
+  'occupied',
+  'maintenance'
+] as const;
+
+export type PhotoCategory =
+  | 'thumbnail'
+  | 'bedroom'
+  | 'bathroom'
+  | 'kitchen'
+  | 'pool'
+  | 'living_room'
+  | 'wifi_speedtest'
+  | 'exterior'
+  | 'other';
+
+export const VALID_PHOTO_CATEGORIES: readonly PhotoCategory[] = [
+  'thumbnail',
+  'bedroom',
+  'bathroom',
+  'kitchen',
+  'pool',
+  'living_room',
+  'wifi_speedtest',
+  'exterior',
+  'other'
+] as const;
+
+export interface PropertyPhoto {
+  id: string;
+  propertyId: string;
+  roomId?: string | null;
+  url: string;
+  publicId?: string | null;
+  category: PhotoCategory;
+  caption?: string | null;
+  orderIndex: number;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+}
+
+export interface PropertyPhotoRow extends RowDataPacket {
+  id: string;
+  propertyId: string;
+  roomId: string | null;
+  url: string;
+  publicId: string | null;
+  category: PhotoCategory;
+  caption: string | null;
+  orderIndex: number;
+  createdAt: Date | string;
+  updatedAt?: Date | string;
+}
+
+export interface Room {
+  id: string;
+  propertyId: string;
+  roomNumber: string;
+  floor: number;
+  type: string;
+  price?: number | null;
+  effectivePrice?: number;
+  status: DiscreteRoomStatus;
+  photos?: PropertyPhoto[];
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+}
+
+export interface RoomRow extends RowDataPacket {
+  id: string;
+  propertyId: string;
+  roomNumber: string;
+  floor: number;
+  type: string;
+  price: number | null;
+  status: DiscreteRoomStatus;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+/**
+ * Validation helper for Room schema
+ */
+export function validateRoom(data: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Room must be a non-null object'] };
+  }
+
+  const room = data as Record<string, unknown>;
+
+  if (typeof room.id !== 'string' || !room.id.trim()) {
+    errors.push('id must be a non-empty string');
+  }
+  if (typeof room.propertyId !== 'string' || !room.propertyId.trim()) {
+    errors.push('propertyId must be a non-empty string');
+  }
+  if (typeof room.roomNumber !== 'string' || !room.roomNumber.trim()) {
+    errors.push('roomNumber must be a non-empty string');
+  }
+  if (typeof room.floor !== 'number' || !Number.isInteger(room.floor) || room.floor < 0) {
+    errors.push('floor must be a non-negative integer');
+  }
+  if (typeof room.type !== 'string' || !room.type.trim()) {
+    errors.push('type must be a non-empty string');
+  }
+  if (room.price !== undefined && room.price !== null) {
+    if (typeof room.price !== 'number' || Number.isNaN(room.price) || room.price < 0) {
+      errors.push('price must be a non-negative number if provided');
+    }
+  }
+  if (typeof room.status !== 'string' || !VALID_DISCRETE_ROOM_STATUSES.includes(room.status as DiscreteRoomStatus)) {
+    errors.push(`status must be one of: ${VALID_DISCRETE_ROOM_STATUSES.join(', ')}`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validation helper for PropertyPhoto schema
+ */
+export function validatePropertyPhoto(data: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['PropertyPhoto must be a non-null object'] };
+  }
+
+  const photo = data as Record<string, unknown>;
+
+  if (typeof photo.id !== 'string' || !photo.id.trim()) {
+    errors.push('id must be a non-empty string');
+  }
+  if (typeof photo.propertyId !== 'string' || !photo.propertyId.trim()) {
+    errors.push('propertyId must be a non-empty string');
+  }
+  if (typeof photo.url !== 'string' || !photo.url.trim()) {
+    errors.push('url must be a non-empty string');
+  }
+  if (typeof photo.category !== 'string' || !VALID_PHOTO_CATEGORIES.includes(photo.category as PhotoCategory)) {
+    errors.push(`category must be one of: ${VALID_PHOTO_CATEGORIES.join(', ')}`);
+  }
+  if (typeof photo.orderIndex !== 'number' || !Number.isInteger(photo.orderIndex) || photo.orderIndex < 0) {
+    errors.push('orderIndex must be a non-negative integer');
+  }
+
+  return { valid: errors.length === 0, errors };
 }
 

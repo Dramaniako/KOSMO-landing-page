@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { initDb, pool } from '../backend/db';
+import { initDb, pool, backfillDiscreteRooms } from '../backend/db';
 import type { RowDataPacket } from 'mysql2/promise';
 
 interface SeedProperty {
@@ -227,12 +227,15 @@ export async function seedDatabase(): Promise<void> {
     console.log('🧹 Clearing transactional data while preserving user accounts...');
     await connection.query('SET FOREIGN_KEY_CHECKS = 0');
 
+    await connection.query('DELETE FROM property_photos');
+    await connection.query('DELETE FROM rooms');
     await connection.query('DELETE FROM rentals');
     await connection.query('DELETE FROM withdrawals');
     await connection.query('DELETE FROM reviews');
     await connection.query('DELETE FROM visitor_tracking');
     await connection.query('DELETE FROM property_facilities');
     await connection.query('DELETE FROM properties');
+    await connection.query("DELETE FROM users WHERE id NOT IN ('user-admin', 'user-landlord', 'user-tenant')");
 
     // Reset user financial balances to 0.00 while preserving credentials & profile info
     await connection.query(`
@@ -306,6 +309,9 @@ export async function seedDatabase(): Promise<void> {
         rev.date
       ]);
     }
+
+    console.log('🚪 Backfilling discrete rooms and initial thumbnails...');
+    await backfillDiscreteRooms(connection);
 
     await connection.query('SET FOREIGN_KEY_CHECKS = 1');
     console.log('✅ Database reset & reseeding completed successfully!');

@@ -35,6 +35,9 @@ import {
 } from './routes/tracking.routes';
 
 import { registerContractRoutes } from './routes/contracts.routes';
+import { registerRoomRoutes } from './routes/rooms.routes';
+import { registerPhotoRoutes } from './routes/photos.routes';
+
 
 import {
   registerRentalRoutes,
@@ -74,6 +77,8 @@ registerPropertyRoutes(router);
 registerReviewRoutes(router);
 registerLandlordRoutes(router);
 registerTrackingRoutes(router);
+registerRoomRoutes(router);
+registerPhotoRoutes(router);
 registerContractRoutes(router);
 registerRentalRoutes(router);
 registerPaymentRoutes(router);

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { Property, User, ContractSignPayload, SignedContractData, isUserProfileComplete } from '../types/index';
+import { Property, User, ContractSignPayload, SignedContractData, isUserProfileComplete, PropertyPhoto, Room } from '../types/index';
 import { useTranslation } from '../context/LanguageContext';
 import { useIdentityValidation } from './BookingModal/hooks/useIdentityValidation';
 import { useScrollClickwrap } from './BookingModal/hooks/useScrollClickwrap';
@@ -63,6 +63,65 @@ export default function BookingModal({
   // 1. Duration & Start Date
   const [durationMonths, setDurationMonths] = useState<number>(1);
   const [startDate, setStartDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+
+  // Discrete Rooms & Photos State
+  const [photos, setPhotos] = useState<PropertyPhoto[]>([]);
+  const [photosLoading, setPhotosLoading] = useState<boolean>(false);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState<boolean>(false);
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+
+  useEffect(() => {
+    if (!property?.id) {
+      setPhotos([]);
+      setRooms([]);
+      setSelectedRoom(null);
+      return;
+    }
+
+    setSelectedRoom(null);
+    let isCancelled = false;
+
+    const fetchDetails = async () => {
+      setPhotosLoading(true);
+      setRoomsLoading(true);
+      try {
+        const [photosRes, roomsRes] = await Promise.all([
+          fetch(`${API_BASE}/properties/${property.id}/photos`).catch(() => null),
+          fetch(`${API_BASE}/properties/${property.id}/rooms`).catch(() => null)
+        ]);
+
+        if (!isCancelled) {
+          if (photosRes && photosRes.ok) {
+            const photosData = await photosRes.json().catch(() => []);
+            setPhotos(Array.isArray(photosData) ? photosData : []);
+          } else {
+            setPhotos(property.photos || []);
+          }
+
+          if (roomsRes && roomsRes.ok) {
+            const roomsData = await roomsRes.json().catch(() => []);
+            setRooms(Array.isArray(roomsData) ? roomsData : []);
+          } else {
+            setRooms(property.rooms || []);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch property details:', err);
+      } finally {
+        if (!isCancelled) {
+          setPhotosLoading(false);
+          setRoomsLoading(false);
+        }
+      }
+    };
+
+    fetchDetails();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [property?.id]);
 
   // Profile completeness check
   const profileStatus = isUserProfileComplete(currentUser);
@@ -191,6 +250,7 @@ export default function BookingModal({
     if (onSignContract) {
       await onSignContract({
         propertyId: property.id,
+        roomId: selectedRoom ? selectedRoom.id : undefined,
         durationMonths,
         startDate,
         tenantNikPassport: idNumber.trim(),
@@ -215,8 +275,13 @@ export default function BookingModal({
   const isFull = totalRooms > 0 && occupiedRooms >= totalRooms;
   const availableRooms = Math.max(0, totalRooms - occupiedRooms);
 
+  const effectiveMonthlyPrice =
+    (selectedRoom && typeof (selectedRoom.effectivePrice ?? selectedRoom.price) === 'number' && Number(selectedRoom.effectivePrice ?? selectedRoom.price) > 0)
+      ? Number(selectedRoom.effectivePrice ?? selectedRoom.price)
+      : price;
+
   const flatAdminFee = 5000;
-  const calculatedTotalRent = price * durationMonths;
+  const calculatedTotalRent = effectiveMonthlyPrice * durationMonths;
   const calculatedTotalAmount = calculatedTotalRent + flatAdminFee;
 
   return (
@@ -237,6 +302,7 @@ export default function BookingModal({
         {showContract ? (
           <ContractSigningView
             property={property}
+            selectedRoom={selectedRoom}
             currentUser={currentUser}
             activeRentalError={activeRentalError}
             hasActiveRental={hasActiveRental}
@@ -262,7 +328,8 @@ export default function BookingModal({
                 durationMonths,
                 startDate,
                 idNumber.trim() || (currentUser?.email || 'TEST-TENANT'),
-                signatureBase64 || undefined
+                signatureBase64 || undefined,
+                selectedRoom ? selectedRoom.id : undefined
               )
             }
             termsContainerRef={termsContainerRef}
@@ -321,6 +388,12 @@ export default function BookingModal({
             activeRentalError={activeRentalError}
             currentUser={currentUser}
             profileStatus={profileStatus}
+            photos={photos}
+            photosLoading={photosLoading}
+            rooms={rooms}
+            roomsLoading={roomsLoading}
+            selectedRoom={selectedRoom}
+            onSelectRoom={setSelectedRoom}
             onClose={onClose}
             onBookNow={() => setShowContract(true)}
             onNavigateToLogin={onNavigateToLogin}

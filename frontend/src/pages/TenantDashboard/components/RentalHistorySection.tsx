@@ -7,6 +7,7 @@ interface RentalHistorySectionProps {
   otherRentals: Rental[];
   contractDownloading: Record<string, boolean>;
   onOpenContract: (rentalId: string) => Promise<void>;
+  onViewContractDetails?: (rental: Rental) => void;
   onOpenPendingPayment: (rental: Rental) => void;
 }
 
@@ -14,6 +15,7 @@ export const RentalHistorySection: React.FC<RentalHistorySectionProps> = ({
   otherRentals,
   contractDownloading,
   onOpenContract,
+  onViewContractDetails,
   onOpenPendingPayment
 }) => {
   const { t } = useTranslation();
@@ -84,6 +86,20 @@ export const RentalHistorySection: React.FC<RentalHistorySectionProps> = ({
                 )}
                 <h4 style={{ fontSize: '15px', fontWeight: 600, color: isPending ? '#92400e' : '#334155' }}>
                   {rent.propertyName}
+                  {rent.roomNumber && (
+                    <span
+                      className="badge"
+                      style={{
+                        marginLeft: '6px',
+                        fontSize: '10px',
+                        backgroundColor: '#e0e7ff',
+                        color: '#3730a3',
+                        border: '1px solid #c7d2fe'
+                      }}
+                    >
+                      Kamar {rent.roomNumber}
+                    </span>
+                  )}
                 </h4>
                 <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
                   {t('tenant.startDate')}: {rent.startDate}
@@ -99,6 +115,18 @@ export const RentalHistorySection: React.FC<RentalHistorySectionProps> = ({
                   Rp {rent.price ? rent.price.toLocaleString('id-ID') : '0'}/bln
                 </strong>
                 <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '6px', flexWrap: 'wrap' }}>
+                  {onViewContractDetails && (
+                    <button
+                      type="button"
+                      onClick={() => onViewContractDetails(rent)}
+                      className="btn btn-outline"
+                      style={{ padding: '4px 12px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      data-testid={`view-contract-details-${rent.id}`}
+                    >
+                      <FileText size={12} />
+                      Detail Perjanjian
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => onOpenContract(rent.id)}

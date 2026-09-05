@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { isUserProfileComplete } from '../types/index';
+import { isUserProfileComplete, Rental } from '../types/index';
 import { useTenantData } from './TenantDashboard/hooks/useTenantData';
 import { useTenantProfile } from './TenantDashboard/hooks/useTenantProfile';
 import { useRentalContractDownload } from './TenantDashboard/hooks/useRentalContractDownload';
@@ -21,6 +21,7 @@ import { TenantReviewsList } from './TenantDashboard/components/TenantReviewsLis
 import { ReviewModal } from './TenantDashboard/components/ReviewModal';
 import { TerminateRentalModal } from './TenantDashboard/components/TerminateRentalModal';
 import { PendingPaymentModal } from './TenantDashboard/components/PendingPaymentModal';
+import { ContractViewerModal } from './TenantDashboard/components/ContractViewerModal';
 
 export default function TenantDashboard() {
   const navigate = useNavigate();
@@ -59,6 +60,8 @@ export default function TenantDashboard() {
     contractDownloading,
     handleOpenContract
   } = useRentalContractDownload();
+
+  const [viewingContractRental, setViewingContractRental] = React.useState<Rental | null>(null);
 
   const {
     showPendingPaymentModal,
@@ -175,6 +178,7 @@ export default function TenantDashboard() {
               isLoaded={loadedTabs.current.has('rentals')}
               contractDownloading={contractDownloading}
               onOpenContract={handleOpenContract}
+              onViewContractDetails={setViewingContractRental}
               onOpenTerminate={openTerminateModal}
               onExplore={() => navigate('/')}
             />
@@ -183,6 +187,7 @@ export default function TenantDashboard() {
               otherRentals={otherRentals}
               contractDownloading={contractDownloading}
               onOpenContract={handleOpenContract}
+              onViewContractDetails={setViewingContractRental}
               onOpenPendingPayment={handleOpenPendingPayment}
             />
           </div>
@@ -247,6 +252,15 @@ export default function TenantDashboard() {
         }}
         onProcessPayment={handleProcessPendingPayment}
       />
+
+      {viewingContractRental && (
+        <ContractViewerModal
+          rental={viewingContractRental}
+          onClose={() => setViewingContractRental(null)}
+          onDownloadPdf={handleOpenContract}
+          isDownloading={!!contractDownloading[viewingContractRental.id]}
+        />
+      )}
     </div>
   );
 }

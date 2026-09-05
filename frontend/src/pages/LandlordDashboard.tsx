@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Property } from '../types/index';
 import { useLandlordData } from './LandlordDashboard/hooks/useLandlordData';
 import { useLandlordWithdraw } from './LandlordDashboard/hooks/useLandlordWithdraw';
 import { useLandlordPropertyForm } from './LandlordDashboard/hooks/useLandlordPropertyForm';
@@ -13,6 +14,8 @@ import TenantsTab from './LandlordDashboard/components/TenantsTab';
 import WithdrawModal from './LandlordDashboard/components/WithdrawModal';
 import PropertyFormModal from './LandlordDashboard/components/PropertyFormModal';
 import DeletePropertyModal from './LandlordDashboard/components/DeletePropertyModal';
+import RoomInventoryModal from './LandlordDashboard/components/RoomInventoryModal';
+import PhotoGalleryManager from './LandlordDashboard/components/PhotoGalleryManager';
 
 export default function LandlordDashboard() {
   const {
@@ -63,6 +66,9 @@ export default function LandlordDashboard() {
   } = useDeleteProperty(landlordUser, loadedTabs, fetchLandlordProperties);
 
   const { contractDownloading, handleLandlordContractDownload } = useContractDownload();
+
+  const [roomModalProperty, setRoomModalProperty] = useState<Property | null>(null);
+  const [photoModalProperty, setPhotoModalProperty] = useState<Property | null>(null);
 
   const handleLogout = (): void => {
     localStorage.removeItem('user');
@@ -119,6 +125,8 @@ export default function LandlordDashboard() {
             }}
             onEditProperty={handleEditProperty}
             onDeleteProperty={handleDeleteProperty}
+            onManageRooms={(p) => setRoomModalProperty(p)}
+            onManagePhotos={(p) => setPhotoModalProperty(p)}
           />
         )}
 
@@ -179,6 +187,33 @@ export default function LandlordDashboard() {
             setDeletePassword('');
           }}
           onSubmit={handleDeleteSubmit}
+        />
+      )}
+
+      {/* Room Inventory Modal */}
+      {roomModalProperty && (
+        <RoomInventoryModal
+          property={roomModalProperty}
+          onClose={() => setRoomModalProperty(null)}
+          onRoomUpdated={() => {
+            if (landlordUser) {
+              fetchLandlordProperties(landlordUser.id);
+              fetchOverviewStats(landlordUser.id);
+            }
+          }}
+        />
+      )}
+
+      {/* Photo Gallery Manager Modal */}
+      {photoModalProperty && (
+        <PhotoGalleryManager
+          property={photoModalProperty}
+          onClose={() => setPhotoModalProperty(null)}
+          onPhotosUpdated={() => {
+            if (landlordUser) {
+              fetchLandlordProperties(landlordUser.id);
+            }
+          }}
         />
       )}
     </div>

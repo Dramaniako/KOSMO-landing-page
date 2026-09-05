@@ -3,13 +3,14 @@ import {
   ShieldCheck, ShieldAlert, AlertCircle, Lock, CheckCircle2, Eye,
   AlertTriangle, ChevronDown, RefreshCw, Check
 } from 'lucide-react';
-import { Property, User } from '../../../types/index';
+import { Property, User, Room } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
 import { formatRupiah } from '../../../utils/format';
 import SignaturePad from './SignaturePad';
 
 export interface ContractSigningViewProps {
   property: Property;
+  selectedRoom?: Room | null;
   currentUser: User | null;
   activeRentalError: string | null;
   hasActiveRental: boolean;
@@ -59,6 +60,7 @@ export interface ContractSigningViewProps {
 
 export default function ContractSigningView({
   property,
+  selectedRoom = null,
   currentUser,
   activeRentalError,
   hasActiveRental,
@@ -103,6 +105,10 @@ export default function ContractSigningView({
 }: ContractSigningViewProps) {
   const { t } = useTranslation();
   const price = Number(property.price) || 0;
+  const effectiveMonthlyPrice =
+    selectedRoom && typeof (selectedRoom.effectivePrice ?? selectedRoom.price) === 'number' && Number(selectedRoom.effectivePrice ?? selectedRoom.price) > 0
+      ? Number(selectedRoom.effectivePrice ?? selectedRoom.price)
+      : price;
 
   return (
     <div style={{ padding: '28px' }}>
@@ -202,6 +208,31 @@ export default function ContractSigningView({
           {t('contract.partiesTitle')}
         </h4>
 
+        {/* Selected Discrete Room Unit Identifier */}
+        {selectedRoom && (
+          <div
+            data-testid="selected-room-banner"
+            style={{
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              marginBottom: '12px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '12px'
+            }}
+          >
+            <span style={{ fontWeight: 700, color: '#1e40af' }}>
+              Unit Kamar: {selectedRoom.roomNumber} (Lantai {selectedRoom.floor} - {selectedRoom.type})
+            </span>
+            <span style={{ fontWeight: 800, color: 'var(--primary)' }}>
+              {formatRupiah(effectiveMonthlyPrice)}/bln
+            </span>
+          </div>
+        )}
+
         {/* ID Type Selector */}
         <div style={{ marginBottom: '10px' }}>
           <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
@@ -287,11 +318,13 @@ export default function ContractSigningView({
             />
           </div>
           <div>
-            <label htmlFor="lease-duration-select" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+            <label htmlFor="duration-select" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
               {t('contract.leaseDuration')}
             </label>
             <select
-              id="lease-duration-select"
+              id="duration-select"
+              name="duration"
+              data-testid="duration-select"
               value={durationMonths}
               onChange={(e) => setDurationMonths(Number(e.target.value) || 1)}
               style={{
@@ -305,7 +338,7 @@ export default function ContractSigningView({
             >
               {[1, 2, 3, 6, 12].map((m) => (
                 <option key={m} value={m}>
-                  {m} Bulan ({formatRupiah(price * m)})
+                  {m} Bulan ({formatRupiah(effectiveMonthlyPrice * m)})
                 </option>
               ))}
             </select>

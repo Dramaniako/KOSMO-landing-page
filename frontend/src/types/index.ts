@@ -140,6 +140,8 @@ export interface Property {
   occupiedRooms: number;
   ownerId: string | null;
   document?: string;
+  rooms?: Room[];
+  photos?: PropertyPhoto[];
 }
 
 export interface Review {
@@ -159,6 +161,11 @@ export interface Rental {
   id: string;
   tenantId: string;
   propertyId: string;
+  roomId?: string | null;
+  roomNumber?: string | null;
+  roomFloor?: number | null;
+  roomType?: string | null;
+  room?: Room | null;
   propertyName: string;
   price: number;
   startDate: string;
@@ -177,6 +184,10 @@ export interface Rental {
   nextPaymentDateISO?: string;
   daysRemaining?: number;
   paymentStatus?: string;
+  leaseStartDate?: string;
+  leaseEndDate?: string;
+  leaseEndDateISO?: string;
+  totalDurationMonths?: number;
 }
 
 export interface UtilityQuotas {
@@ -189,6 +200,10 @@ export interface UtilityQuotas {
 
 export interface RentalContractData {
   rentalId?: string;
+  roomId?: string;
+  roomNumber?: string;
+  roomFloor?: number;
+  roomType?: string;
   propertyName: string;
   propertyAddress?: string;
   landlordName?: string;
@@ -219,6 +234,7 @@ export interface RentalContractData {
 export interface ContractPreviewRequest {
   propertyId: string;
   durationMonths?: number;
+  roomId?: string;
   startDate?: string;
   tenantNikPassport?: string;
   signatureBase64?: string;
@@ -239,6 +255,7 @@ export interface ContractPreviewResponse {
 export interface ContractSignRequest {
   propertyId: string;
   durationMonths: number;
+  roomId?: string;
   startDate: string;
   tenantNikPassport: string;
   signatureBase64: string;
@@ -282,6 +299,7 @@ export interface SignedContractData {
 
 export interface ContractSignPayload {
   propertyId: string;
+  roomId?: string;
   durationMonths: number;
   startDate: string;
   tenantNikPassport: string;
@@ -358,3 +376,40 @@ export interface FacilityFilterState {
   Parkir: boolean;
   [key: string]: boolean;
 }
+
+export type DiscreteRoomStatus = 'available' | 'occupied' | 'maintenance';
+
+export type PhotoCategory =
+  | 'thumbnail'
+  | 'bedroom'
+  | 'bathroom'
+  | 'kitchen'
+  | 'pool'
+  | 'living_room'
+  | 'wifi_speedtest'
+  | 'exterior'
+  | 'other';
+
+export interface PropertyPhoto {
+  id: string;
+  propertyId: string;
+  roomId?: string | null;
+  url: string;
+  publicId?: string | null;
+  category: PhotoCategory;
+  caption?: string | null;
+  orderIndex: number;
+}
+
+export interface Room {
+  id: string;
+  propertyId: string;
+  roomNumber: string;
+  floor: number;
+  type: string;
+  price?: number | null;
+  effectivePrice?: number;
+  status: DiscreteRoomStatus;
+  photos?: PropertyPhoto[];
+}
+

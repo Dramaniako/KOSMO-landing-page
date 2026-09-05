@@ -1,4 +1,5 @@
 import type { Request, Response, Router } from 'express';
+import type { RowDataPacket } from 'mysql2/promise';
 import { pool } from '../db';
 import { apiCache } from '../services/cache';
 import { authenticateToken } from '../middleware/auth';
@@ -15,7 +16,7 @@ import {
   generateAndUploadContract,
   sanitizeRentalId
 } from '../services/contract';
-import type { RentalContractData, RentalContractJoinedRow } from '../types/index';
+import type { RentalContractData, RentalContractJoinedRow, RoomRow } from '../types/index';
 import { isUserProfileComplete } from '../types/index';
 import { generateId } from '../utils/id';
 import type { UserRow } from './auth.routes';
@@ -37,6 +38,7 @@ export function registerContractRoutes(router: Router): void {
         propertyId,
         durationMonths,
         startDate,
+        roomId,
         tenantNikPassport,
         signatureBase64,
         rentalId: customRentalId
@@ -50,6 +52,18 @@ export function registerContractRoutes(router: Router): void {
         const property = propRows[0];
         if (!property) {
           return res.status(404).json({ success: false, message: 'Properti tidak ditemukan.' });
+        }
+
+        let room: RoomRow | undefined;
+        if (roomId && typeof roomId === 'string' && roomId.trim() !== '') {
+          const [roomRows] = await pool.query<RoomRow[]>(
+            'SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ?',
+            [roomId.trim(), propertyId]
+          );
+          room = roomRows[0];
+          if (!room) {
+            return res.status(404).json({ success: false, message: 'Kamar tidak ditemukan pada properti ini.' });
+          }
         }
 
         const [userRows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [authUser.id]);
@@ -70,7 +84,9 @@ export function registerContractRoutes(router: Router): void {
         const signedAtDate = new Date();
         const signedAtIso = signedAtDate.toISOString();
         const duration = Number(durationMonths) || 1;
-        const monthlyPrice = Number(property.price) || 0;
+        const monthlyPrice = (room && typeof room.price === 'number' && room.price > 0)
+          ? Number(room.price)
+          : (Number(property.price) || 0);
         const adminFee = 5000;
         const totalPrice = (monthlyPrice * duration) + adminFee;
         const startDateStr =
@@ -83,6 +99,8 @@ export function registerContractRoutes(router: Router): void {
 
         const contractData: RentalContractData = {
           rentalId,
+          roomId: room ? room.id : undefined,
+          roomNumber: room ? room.roomNumber : undefined,
           propertyName: property.name,
           propertyAddress: property.address || 'Kabupaten Badung / Kota Denpasar, Bali, Indonesia',
           landlordName: landlord ? landlord.name : 'PT KOSMO Bali Hospitality / Pengelola Properti',
@@ -128,6 +146,15 @@ export function registerContractRoutes(router: Router): void {
           adminFee,
           totalPrice,
           totalAmount: totalPrice,
+          room: room ? {
+            id: room.id,
+            roomNumber: room.roomNumber,
+            floor: room.floor,
+            type: room.type,
+            price: room.price,
+            effectivePrice: monthlyPrice,
+            status: room.status
+          } : null,
           isProfileComplete: profileStatus.complete,
           missingProfileFields: profileStatus.missingFields,
           missingProfileFieldLabels: profileStatus.missingFieldLabels
@@ -154,6 +181,7 @@ export function registerContractRoutes(router: Router): void {
         propertyId,
         durationMonths,
         startDate,
+        roomId,
         tenantNikPassport,
         signatureBase64,
         rentalId: customRentalId
@@ -213,6 +241,48 @@ export function registerContractRoutes(router: Router): void {
           return res.status(400).json({ success: false, message: 'Kamar kos sudah penuh.' });
         }
 
+        // 🛡️ Concurrency Guard 3: Discrete Room Selection & Row Lock
+        let selectedRoom: RoomRow | undefined;
+        if (roomId && typeof roomId === 'string' && roomId.trim() !== '') {
+          const [roomRows] = await connection.query<RoomRow[]>(
+            'SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE',
+            [roomId.trim(), propertyId]
+          );
+          selectedRoom = roomRows[0];
+          if (!selectedRoom) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: 'Kamar tidak ditemukan pada properti ini.' });
+          }
+          if (selectedRoom.status !== 'available') {
+            await connection.rollback();
+            return res.status(409).json({
+              success: false,
+              message: 'Kamar yang Anda pilih sudah tidak tersedia.'
+            });
+          }
+        } else {
+          // Auto-select lowest available room under lock if discrete inventory exists
+          const [availableRoomRows] = await connection.query<RoomRow[]>(
+            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
+            [propertyId]
+          );
+          if (availableRoomRows.length > 0) {
+            selectedRoom = availableRoomRows[0];
+          } else {
+            const [discreteCountRows] = await connection.query<RowDataPacket[]>(
+              'SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?',
+              [propertyId]
+            );
+            if (Number(discreteCountRows[0]?.count || 0) > 0) {
+              await connection.rollback();
+              return res.status(409).json({
+                success: false,
+                message: 'Kamar yang Anda pilih sudah tidak tersedia.'
+              });
+            }
+          }
+        }
+
         let landlord: UserRow | undefined;
         if (property.ownerId) {
           const [landlordRows] = await connection.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [property.ownerId]);
@@ -230,7 +300,9 @@ export function registerContractRoutes(router: Router): void {
         const signedAtIso = signedAtDate.toISOString();
         const duration = Number(durationMonths) || 1;
         const adminFee = 5000.0;
-        const rentalPrice = Number(property.price) || 0;
+        const rentalPrice = (selectedRoom && typeof selectedRoom.price === 'number' && selectedRoom.price > 0)
+          ? Number(selectedRoom.price)
+          : (Number(property.price) || 0);
         const totalAmount = (rentalPrice * duration) + adminFee;
         const rentalId =
           customRentalId && typeof customRentalId === 'string' && customRentalId.trim() !== ''
@@ -243,6 +315,8 @@ export function registerContractRoutes(router: Router): void {
         // Generate in-memory PDF and stream directly to Cloudinary
         const contractData: RentalContractData = {
           rentalId,
+          roomId: selectedRoom ? selectedRoom.id : undefined,
+          roomNumber: selectedRoom ? selectedRoom.roomNumber : undefined,
           propertyName: property.name,
           propertyAddress: property.address || 'Kabupaten Badung / Kota Denpasar, Bali, Indonesia',
           landlordName: landlord ? landlord.name : 'PT KOSMO Bali Hospitality / Pengelola Properti',
@@ -280,17 +354,18 @@ export function registerContractRoutes(router: Router): void {
         const contractUrl = uploadResult.cloudinaryUrl || `/uploads/contract_${sanitizeRentalId(rentalId)}.pdf`;
         const contractHash = uploadResult.contractHash;
 
-        // Atomic Insert with 8 Audit Columns and duration_months (status: pending until payment settlement)
+        // Atomic Insert with 8 Audit Columns, duration_months, and roomId (status: pending until payment settlement)
         await connection.query(
           `INSERT INTO rentals (
-            id, tenantId, propertyId, propertyName, price, startDate, status,
+            id, tenantId, propertyId, roomId, propertyName, price, startDate, status,
             document, contract_url, contract_hash, contract_signed_at,
             signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount, duration_months
-          ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             rentalId,
             authUser.id,
             propertyId,
+            selectedRoom ? selectedRoom.id : null,
             property.name,
             rentalPrice,
             startDateStr,
@@ -315,6 +390,8 @@ export function registerContractRoutes(router: Router): void {
           success: true,
           message: 'Kontrak digital berhasil ditandatangani. Silakan selesaikan pembayaran.',
           rentalId,
+          roomId: selectedRoom ? selectedRoom.id : null,
+          roomNumber: selectedRoom ? selectedRoom.roomNumber : null,
           contractUrl,
           contractHash,
           adminFee,
@@ -348,6 +425,8 @@ export function registerContractRoutes(router: Router): void {
             r.id AS rental_id,
             r.tenantId AS rental_tenant_id,
             r.propertyId AS rental_property_id,
+            r.roomId AS rental_room_id,
+            rm.roomNumber AS room_number,
             r.propertyName AS rental_property_name,
             r.price AS rental_price,
             r.startDate AS rental_start_date,
@@ -379,6 +458,7 @@ export function registerContractRoutes(router: Router): void {
             l.phone AS landlord_phone
           FROM rentals r
           LEFT JOIN properties p ON r.propertyId = p.id
+          LEFT JOIN rooms rm ON r.roomId = rm.id
           LEFT JOIN users u ON r.tenantId = u.id
           LEFT JOIN users l ON p.ownerId = l.id
           WHERE r.id = ?`,
@@ -410,6 +490,8 @@ export function registerContractRoutes(router: Router): void {
         // Prepare contract data model with complete audit trail
         const contractData: RentalContractData = {
           rentalId: rental.rental_id,
+          roomId: rental.rental_room_id || undefined,
+          roomNumber: rental.room_number || undefined,
           propertyName: rental.rental_property_name || rental.property_name || 'Unit KOSMO Bali',
           propertyAddress: rental.property_address || 'Kabupaten Badung / Kota Denpasar, Bali, Indonesia',
           landlordName: rental.landlord_name || 'PT KOSMO Bali Hospitality / Pengelola Properti',

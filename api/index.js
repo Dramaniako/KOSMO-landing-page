@@ -8,6 +8,7 @@ import morgan from "morgan";
 
 // backend/db.ts
 import mysql from "mysql2/promise";
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import bcrypt from "bcryptjs";
@@ -110,8 +111,14 @@ async function ensureIndexes(executor = pool) {
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_room (roomId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_contract_hash (contract_hash)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_signed_at (contract_signed_at)",
+    "ALTER TABLE rooms ADD INDEX idx_rooms_property_status (propertyId, status)",
+    "ALTER TABLE rooms ADD INDEX idx_rooms_status (status)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_property (propertyId, orderIndex)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_room (roomId, orderIndex)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_category (category)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
@@ -211,6 +218,23 @@ async function createTables(executor = pool) {
   ]);
   await Promise.all([
     executor.query(`
+      CREATE TABLE IF NOT EXISTS rooms (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        roomNumber VARCHAR(20) NOT NULL,
+        floor INT NOT NULL DEFAULT 1,
+        type VARCHAR(50) NOT NULL DEFAULT 'Standard',
+        price INT NULL,
+        status ENUM('available', 'occupied', 'maintenance') NOT NULL DEFAULT 'available',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_property_room_number (propertyId, roomNumber),
+        INDEX idx_rooms_property_status (propertyId, status),
+        INDEX idx_rooms_status (status),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
       CREATE TABLE IF NOT EXISTS property_facilities (
         propertyId VARCHAR(50),
         facility VARCHAR(50),
@@ -240,6 +264,7 @@ async function createTables(executor = pool) {
         tenantId VARCHAR(50) NOT NULL,
         propertyId VARCHAR(50) NOT NULL,
         propertyName VARCHAR(100) NOT NULL,
+        roomId VARCHAR(50),
         price INT NOT NULL,
         startDate VARCHAR(50) NOT NULL,
         status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending',
@@ -255,6 +280,7 @@ async function createTables(executor = pool) {
         duration_months INT DEFAULT 1,
         INDEX idx_rentals_tenant_status (tenantId, status),
         INDEX idx_rentals_property_status (propertyId, status),
+        INDEX idx_rentals_room (roomId),
         INDEX idx_rentals_contract_hash (contract_hash),
         INDEX idx_rentals_signed_at (contract_signed_at),
         FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
@@ -262,6 +288,145 @@ async function createTables(executor = pool) {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
   ]);
+  await Promise.all([
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS property_photos (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        roomId VARCHAR(50) NULL,
+        url VARCHAR(500) NOT NULL,
+        publicId VARCHAR(255) NULL,
+        category VARCHAR(50) NOT NULL DEFAULT 'other',
+        caption VARCHAR(255) DEFAULT '',
+        orderIndex INT NOT NULL DEFAULT 0,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_photos_property (propertyId, orderIndex),
+        INDEX idx_photos_room (roomId, orderIndex),
+        INDEX idx_photos_category (category),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
+        FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `)
+  ]);
+}
+async function syncPropertyRoomCounts(executor, propertyId) {
+  const [rows] = await executor.query(
+    `SELECT 
+       COUNT(*) as total,
+       COALESCE(SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END), 0) as occupied
+     FROM rooms 
+     WHERE propertyId = ?`,
+    [propertyId]
+  );
+  const totalRooms = Number(rows[0]?.total || 0);
+  const occupiedRooms = Number(rows[0]?.occupied || 0);
+  await executor.query(
+    "UPDATE properties SET totalRooms = ?, occupiedRooms = ? WHERE id = ?",
+    [totalRooms, occupiedRooms, propertyId]
+  );
+  return { totalRooms, occupiedRooms };
+}
+async function backfillDiscreteRooms(executor = pool) {
+  const [properties] = await executor.query(
+    "SELECT id, name, totalRooms, occupiedRooms, price, image FROM properties ORDER BY id ASC"
+  );
+  for (const prop of properties) {
+    const propId = String(prop.id);
+    const total = Number(prop.totalRooms || 0);
+    const occupied = Math.max(0, Math.min(total, Number(prop.occupiedRooms || 0)));
+    if (total <= 0) continue;
+    const [existingRooms] = await executor.query(
+      "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+      [propId]
+    );
+    const roomCount = Number(existingRooms[0]?.count || 0);
+    if (roomCount === 0) {
+      for (let i = 1; i <= total; i++) {
+        const floor = Math.floor((i - 1) / 10) + 1;
+        const roomIndex = (i - 1) % 10 + 1;
+        const roomNumber = `${floor}${String(roomIndex).padStart(2, "0")}`;
+        const rawId = `room-${propId}-${roomNumber}`;
+        const roomId = rawId.length <= 50 ? rawId : `rm-${crypto.createHash("md5").update(`${propId}-${roomNumber}`).digest("hex").slice(0, 24)}`;
+        const status = i <= occupied ? "occupied" : "available";
+        const type = i % 2 === 0 ? "Deluxe" : "Standard";
+        await executor.query(
+          `INSERT INTO rooms (id, propertyId, roomNumber, floor, type, price, status)
+           VALUES (?, ?, ?, ?, ?, NULL, ?)
+           ON DUPLICATE KEY UPDATE id = id`,
+          [roomId, propId, roomNumber, floor, type, status]
+        );
+      }
+    }
+    const imageUrl = typeof prop.image === "string" ? prop.image.trim() : "";
+    if (imageUrl.length > 0) {
+      const [existingPhotos] = await executor.query(
+        "SELECT COUNT(*) as count FROM property_photos WHERE propertyId = ?",
+        [propId]
+      );
+      const photoCount = Number(existingPhotos[0]?.count || 0);
+      if (photoCount === 0) {
+        const rawPhotoId = `photo-${propId}-thumb`;
+        const photoId = rawPhotoId.length <= 50 ? rawPhotoId : `ph-${crypto.createHash("md5").update(`${propId}-thumb`).digest("hex").slice(0, 24)}`;
+        const safeUrl = imageUrl.slice(0, 500);
+        await executor.query(
+          `INSERT INTO property_photos (id, propertyId, roomId, url, category, caption, orderIndex)
+           VALUES (?, ?, NULL, ?, 'thumbnail', 'Foto Utama Properti', 0)
+           ON DUPLICATE KEY UPDATE url = VALUES(url)`,
+          [photoId, propId, safeUrl]
+        );
+      }
+    }
+  }
+  const [unlinkedRentals] = await executor.query(
+    `SELECT id, propertyId FROM rentals 
+     WHERE (roomId IS NULL OR roomId = '') AND status = 'active'
+     ORDER BY id ASC`
+  );
+  for (const rental of unlinkedRentals) {
+    const rentalId = String(rental.id);
+    const propertyId = String(rental.propertyId);
+    const [candidateRooms] = await executor.query(
+      `SELECT r.id FROM rooms r
+       LEFT JOIN rentals ren ON r.id = ren.roomId AND ren.status = 'active'
+       WHERE r.propertyId = ? AND r.status = 'occupied' AND ren.id IS NULL
+       ORDER BY r.floor ASC, r.roomNumber ASC
+       LIMIT 1`,
+      [propertyId]
+    );
+    let targetRoomId = candidateRooms[0]?.id ? String(candidateRooms[0].id) : null;
+    if (!targetRoomId) {
+      const [fallbackRooms] = await executor.query(
+        `SELECT r.id FROM rooms r
+         LEFT JOIN rentals ren ON r.id = ren.roomId AND ren.status = 'active'
+         WHERE r.propertyId = ? AND r.status = 'available' AND ren.id IS NULL
+         ORDER BY r.floor ASC, r.roomNumber ASC
+         LIMIT 1`,
+        [propertyId]
+      );
+      if (fallbackRooms.length > 0 && fallbackRooms[0]?.id) {
+        targetRoomId = String(fallbackRooms[0].id);
+        await executor.query(
+          "UPDATE rooms SET status = 'occupied' WHERE id = ?",
+          [targetRoomId]
+        );
+      }
+    }
+    if (targetRoomId) {
+      await executor.query(
+        "UPDATE rentals SET roomId = ? WHERE id = ?",
+        [targetRoomId, rentalId]
+      );
+    }
+  }
+  await executor.query(
+    `UPDATE rooms r
+     JOIN rentals ren ON r.id = ren.roomId
+     SET r.status = 'occupied'
+     WHERE ren.status = 'active' AND r.status != 'occupied'`
+  );
+  for (const prop of properties) {
+    await syncPropertyRoomCounts(executor, String(prop.id));
+  }
 }
 async function applyMigrations(executor = pool) {
   const runTableQueries = async (queries) => {
@@ -272,6 +437,44 @@ async function applyMigrations(executor = pool) {
       }
     }
   };
+  try {
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS rooms (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        roomNumber VARCHAR(20) NOT NULL,
+        floor INT NOT NULL DEFAULT 1,
+        type VARCHAR(50) NOT NULL DEFAULT 'Standard',
+        price INT NULL,
+        status ENUM('available', 'occupied', 'maintenance') NOT NULL DEFAULT 'available',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_property_room_number (propertyId, roomNumber),
+        INDEX idx_rooms_property_status (propertyId, status),
+        INDEX idx_rooms_status (status),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS property_photos (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        roomId VARCHAR(50) NULL,
+        url VARCHAR(500) NOT NULL,
+        publicId VARCHAR(255) NULL,
+        category VARCHAR(50) NOT NULL DEFAULT 'other',
+        caption VARCHAR(255) DEFAULT '',
+        orderIndex INT NOT NULL DEFAULT 0,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_photos_property (propertyId, orderIndex),
+        INDEX idx_photos_room (roomId, orderIndex),
+        INDEX idx_photos_category (category),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
+        FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+  } catch {
+  }
   const propertiesQueries = [
     "ALTER TABLE properties MODIFY image LONGTEXT",
     "ALTER TABLE properties MODIFY description LONGTEXT"
@@ -308,7 +511,8 @@ async function applyMigrations(executor = pool) {
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS roomId VARCHAR(50)"
   ];
   await Promise.all([
     runTableQueries(propertiesQueries),
@@ -318,6 +522,11 @@ async function applyMigrations(executor = pool) {
     runTableQueries(rentalsQueries)
   ]);
   await ensureIndexes(executor);
+  try {
+    await backfillDiscreteRooms(executor);
+  } catch (err) {
+    console.warn("Initial backfillDiscreteRooms skipped or deferred:", err);
+  }
 }
 async function seedUsers(executor = pool) {
   const [userRows] = await executor.query("SELECT COUNT(*) as count FROM users");
@@ -391,6 +600,7 @@ async function seedDatabase(executor = pool) {
   await seedUsers(executor);
   await seedPropertiesAndFacilities(executor);
   await seedReviews(executor);
+  await backfillDiscreteRooms(executor);
 }
 async function initDb() {
   if (isInitialized) return;
@@ -420,7 +630,9 @@ async function initDb() {
         "reviews",
         "withdrawals",
         "visitor_tracking",
-        "rentals"
+        "rentals",
+        "rooms",
+        "property_photos"
       ];
       const missingTables = requiredTables.filter((t) => !existingTables.includes(t));
       if (missingTables.length === 0) {
@@ -524,7 +736,7 @@ import rateLimit from "express-rate-limit";
 import multer from "multer";
 
 // backend/services/cloudinary.ts
-import crypto from "crypto";
+import crypto2 from "crypto";
 import path2 from "path";
 import { v2 as cloudinary } from "cloudinary";
 import { Readable } from "stream";
@@ -570,7 +782,7 @@ function uploadImageStream(buffer, folder = "kosmo_properties") {
       if (isProduction) {
         return reject(new Error("Cloudinary credentials (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are missing or set to placeholder values in production."));
       }
-      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto2.randomBytes(3).toString("hex")}`;
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
       return resolve({
         secure_url: mockUrl,
@@ -578,7 +790,7 @@ function uploadImageStream(buffer, folder = "kosmo_properties") {
       });
     }
     if (isTest && process.env.ALLOW_LIVE_CLOUDINARY !== "true") {
-      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+      const mockPublicId = `${folder}/prop_${Date.now()}_${crypto2.randomBytes(3).toString("hex")}`;
       const mockUrl = `https://res.cloudinary.com/kosmo-bali/image/upload/v1/${mockPublicId}.webp`;
       return resolve({
         secure_url: mockUrl,
@@ -667,6 +879,29 @@ function uploadContractStream(buffer, filename, folder = "kosmo_contracts") {
     });
     readableStream.on("error", reject);
     readableStream.pipe(uploadStream);
+  });
+}
+function deleteCloudinaryImage(publicId) {
+  return new Promise((resolve) => {
+    if (!publicId || typeof publicId !== "string" || publicId.trim() === "") {
+      return resolve({ result: "not_found" });
+    }
+    const isConfigured = isCloudinaryConfigured();
+    const isTest = process.env.NODE_ENV === "test";
+    if (!isConfigured || isTest && process.env.ALLOW_LIVE_CLOUDINARY !== "true") {
+      return resolve({ result: "ok" });
+    }
+    cloudinary.uploader.destroy(
+      publicId.trim(),
+      { resource_type: "image", invalidate: true },
+      (error, result) => {
+        if (error) {
+          console.warn(`[Cloudinary] Failed to delete image ${publicId}:`, error);
+          return resolve({ result: "error" });
+        }
+        resolve(result || { result: "ok" });
+      }
+    );
   });
 }
 
@@ -836,6 +1071,7 @@ var reviewSchema = z.object({
 var previewContractSchema = z.object({
   propertyId: z.string().min(1, "ID properti wajib diisi"),
   durationMonths: z.number().int("Durasi sewa harus berupa bilangan bulat").min(1, "Durasi sewa minimal 1 bulan").max(120, "Durasi sewa maksimal 120 bulan").optional().default(1),
+  roomId: z.string().optional(),
   startDate: z.string().optional(),
   tenantNikPassport: z.string().trim().regex(
     /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
@@ -847,6 +1083,7 @@ var previewContractSchema = z.object({
 var signContractSchema = z.object({
   propertyId: z.string().min(1, "ID properti wajib diisi"),
   durationMonths: z.number().int("Durasi sewa harus berupa bilangan bulat").min(1, "Durasi sewa minimal 1 bulan").max(120, "Durasi sewa maksimal 120 bulan"),
+  roomId: z.string().optional(),
   startDate: z.string().min(1, "Tanggal mulai sewa wajib diisi"),
   tenantNikPassport: z.string().trim().min(1, "NIK / Nomor Paspor wajib diisi").regex(
     /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
@@ -874,6 +1111,48 @@ function validateBody(schema) {
     next();
   };
 }
+var createRoomSchema = z.object({
+  roomNumber: z.string().trim().min(1, "Nomor kamar wajib diisi"),
+  floor: z.preprocess(
+    (val) => val !== void 0 && val !== null ? Number(val) : 1,
+    z.number().int("Nomor lantai harus berupa bilangan bulat").min(0, "Nomor lantai minimal 0")
+  ).default(1),
+  type: z.string().trim().min(1, "Tipe kamar wajib diisi").default("Standard"),
+  price: z.preprocess(
+    (val) => val === "" || val === null || val === void 0 ? null : Number(val),
+    z.number().positive("Harga kamar harus lebih besar dari 0").nullable().optional()
+  ),
+  status: z.enum(["available", "occupied", "maintenance"]).default("available")
+});
+var updateRoomSchema = z.object({
+  roomNumber: z.string().trim().min(1, "Nomor kamar tidak boleh kosong").optional(),
+  floor: z.preprocess(
+    (val) => val !== void 0 && val !== null ? Number(val) : void 0,
+    z.number().int("Nomor lantai harus berupa bilangan bulat").min(0, "Nomor lantai minimal 0").optional()
+  ),
+  type: z.string().trim().min(1, "Tipe kamar tidak boleh kosong").optional(),
+  price: z.preprocess(
+    (val) => val === "" || val === null || val === void 0 ? null : Number(val),
+    z.number().positive("Harga kamar harus lebih besar dari 0").nullable().optional()
+  ),
+  status: z.enum(["available", "occupied", "maintenance"]).optional()
+});
+var updateRoomStatusSchema = z.object({
+  status: z.enum(["available", "maintenance"], {
+    message: "Status kamar hanya dapat diubah antara 'available' atau 'maintenance'"
+  })
+});
+var deleteRoomSchema = z.object({
+  password: z.string().min(1, "Password konfirmasi diperlukan")
+});
+var reorderPhotosSchema = z.object({
+  photoIds: z.array(z.string().trim().min(1, "ID foto tidak boleh kosong"), {
+    message: "photoIds harus berupa array string ID foto"
+  }).min(1, "Daftar ID foto wajib memiliki minimal 1 item").refine(
+    (ids) => new Set(ids).size === ids.length,
+    "Daftar ID foto tidak boleh mengandung duplikasi"
+  )
+});
 
 // backend/types/index.ts
 function isUserProfileComplete(user) {
@@ -935,11 +1214,22 @@ function isUserProfileComplete(user) {
     missingFieldLabels
   };
 }
+var VALID_PHOTO_CATEGORIES = [
+  "thumbnail",
+  "bedroom",
+  "bathroom",
+  "kitchen",
+  "pool",
+  "living_room",
+  "wifi_speedtest",
+  "exterior",
+  "other"
+];
 
 // backend/utils/id.ts
-import crypto2 from "crypto";
+import crypto3 from "crypto";
 var generateId = (prefix) => {
-  return `${prefix}-${crypto2.randomBytes(4).toString("hex")}`;
+  return `${prefix}-${crypto3.randomBytes(4).toString("hex")}`;
 };
 
 // backend/routes/auth.routes.ts
@@ -2487,7 +2777,7 @@ function registerTrackingRoutes(router2) {
 
 // backend/services/contract.ts
 import PDFDocument from "pdfkit";
-import crypto3 from "crypto";
+import crypto4 from "crypto";
 import fs2 from "fs";
 import path3 from "path";
 function sanitizeRentalId(id) {
@@ -2503,7 +2793,7 @@ function computeContractHash(buffer) {
   if (!Buffer.isBuffer(buffer)) {
     throw new TypeError("Invalid input: buffer must be an instance of Buffer");
   }
-  return crypto3.createHash("sha256").update(buffer).digest("hex");
+  return crypto4.createHash("sha256").update(buffer).digest("hex");
 }
 function generateRentalContractBuffer(data) {
   return new Promise((resolve, reject) => {
@@ -2576,7 +2866,7 @@ function generateRentalContractBuffer(data) {
       doc.rect(36, gridY, colWidth, 76).fillAndStroke("#ffffff", "#e2e8f0");
       doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PASAL 2: OBJEK & LOKASI HUNIAN", 42, gridY + 5);
       doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("ARTICLE 2: PREMISES & BALI LOCATION", 42, gridY + 14);
-      doc.font("Helvetica").fontSize(7).fillColor("#334155").text(`\u2022 Unit / Room    : ${data.propertyName}`, 42, gridY + 26).text(`\u2022 Alamat / Addr  : ${propertyAddress}`, 42, gridY + 38, { width: colWidth - 12 }).text(`\u2022 Mulai / Start  : ${data.startDate} \u2022 Durasi: ${duration} Bulan / Month(s)`, 42, gridY + 60);
+      doc.font("Helvetica").fontSize(7).fillColor("#334155").text(`\u2022 Unit / Room    : ${data.propertyName}${data.roomNumber ? ` (Kamar ${data.roomNumber})` : ""}`, 42, gridY + 26).text(`\u2022 Alamat / Addr  : ${propertyAddress}`, 42, gridY + 38, { width: colWidth - 12 }).text(`\u2022 Mulai / Start  : ${data.startDate} \u2022 Durasi: ${duration} Bulan / Month(s)`, 42, gridY + 60);
       doc.rect(36 + colWidth + 10, gridY, colWidth, 76).fillAndStroke("#ffffff", "#e2e8f0");
       doc.fillColor("#0f172a").fontSize(7.5).font("Helvetica-Bold").text("PASAL 3: BIAYA SEWA & ADMINISTRASI", 42 + colWidth + 10, gridY + 5);
       doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#64748b").text("ARTICLE 3: RENTAL FEES & PLATFORM FEE", 42 + colWidth + 10, gridY + 14);
@@ -2717,6 +3007,7 @@ function registerContractRoutes(router2) {
         propertyId,
         durationMonths,
         startDate,
+        roomId,
         tenantNikPassport,
         signatureBase64,
         rentalId: customRentalId
@@ -2730,6 +3021,17 @@ function registerContractRoutes(router2) {
         if (!property) {
           return res.status(404).json({ success: false, message: "Properti tidak ditemukan." });
         }
+        let room;
+        if (roomId && typeof roomId === "string" && roomId.trim() !== "") {
+          const [roomRows] = await pool.query(
+            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ?",
+            [roomId.trim(), propertyId]
+          );
+          room = roomRows[0];
+          if (!room) {
+            return res.status(404).json({ success: false, message: "Kamar tidak ditemukan pada properti ini." });
+          }
+        }
         const [userRows] = await pool.query("SELECT * FROM users WHERE id = ?", [authUser.id]);
         const tenant = userRows[0];
         let landlord;
@@ -2742,13 +3044,15 @@ function registerContractRoutes(router2) {
         const signedAtDate = /* @__PURE__ */ new Date();
         const signedAtIso = signedAtDate.toISOString();
         const duration = Number(durationMonths) || 1;
-        const monthlyPrice = Number(property.price) || 0;
+        const monthlyPrice = room && typeof room.price === "number" && room.price > 0 ? Number(room.price) : Number(property.price) || 0;
         const adminFee = 5e3;
         const totalPrice = monthlyPrice * duration + adminFee;
         const startDateStr = startDate || signedAtIso.split("T")[0];
         const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : "preview-draft";
         const contractData = {
           rentalId,
+          roomId: room ? room.id : void 0,
+          roomNumber: room ? room.roomNumber : void 0,
           propertyName: property.name,
           propertyAddress: property.address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
           landlordName: landlord ? landlord.name : "PT KOSMO Bali Hospitality / Pengelola Properti",
@@ -2792,6 +3096,15 @@ function registerContractRoutes(router2) {
           adminFee,
           totalPrice,
           totalAmount: totalPrice,
+          room: room ? {
+            id: room.id,
+            roomNumber: room.roomNumber,
+            floor: room.floor,
+            type: room.type,
+            price: room.price,
+            effectivePrice: monthlyPrice,
+            status: room.status
+          } : null,
           isProfileComplete: profileStatus.complete,
           missingProfileFields: profileStatus.missingFields,
           missingProfileFieldLabels: profileStatus.missingFieldLabels
@@ -2815,6 +3128,7 @@ function registerContractRoutes(router2) {
         propertyId,
         durationMonths,
         startDate,
+        roomId,
         tenantNikPassport,
         signatureBase64,
         rentalId: customRentalId
@@ -2862,6 +3176,45 @@ function registerContractRoutes(router2) {
           await connection.rollback();
           return res.status(400).json({ success: false, message: "Kamar kos sudah penuh." });
         }
+        let selectedRoom;
+        if (roomId && typeof roomId === "string" && roomId.trim() !== "") {
+          const [roomRows] = await connection.query(
+            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE",
+            [roomId.trim(), propertyId]
+          );
+          selectedRoom = roomRows[0];
+          if (!selectedRoom) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: "Kamar tidak ditemukan pada properti ini." });
+          }
+          if (selectedRoom.status !== "available") {
+            await connection.rollback();
+            return res.status(409).json({
+              success: false,
+              message: "Kamar yang Anda pilih sudah tidak tersedia."
+            });
+          }
+        } else {
+          const [availableRoomRows] = await connection.query(
+            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
+            [propertyId]
+          );
+          if (availableRoomRows.length > 0) {
+            selectedRoom = availableRoomRows[0];
+          } else {
+            const [discreteCountRows] = await connection.query(
+              "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+              [propertyId]
+            );
+            if (Number(discreteCountRows[0]?.count || 0) > 0) {
+              await connection.rollback();
+              return res.status(409).json({
+                success: false,
+                message: "Kamar yang Anda pilih sudah tidak tersedia."
+              });
+            }
+          }
+        }
         let landlord;
         if (property.ownerId) {
           const [landlordRows] = await connection.query("SELECT * FROM users WHERE id = ?", [property.ownerId]);
@@ -2873,12 +3226,14 @@ function registerContractRoutes(router2) {
         const signedAtIso = signedAtDate.toISOString();
         const duration = Number(durationMonths) || 1;
         const adminFee = 5e3;
-        const rentalPrice = Number(property.price) || 0;
+        const rentalPrice = selectedRoom && typeof selectedRoom.price === "number" && selectedRoom.price > 0 ? Number(selectedRoom.price) : Number(property.price) || 0;
         const totalAmount = rentalPrice * duration + adminFee;
         const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
         const startDateStr = startDate || signedAtIso.split("T")[0];
         const contractData = {
           rentalId,
+          roomId: selectedRoom ? selectedRoom.id : void 0,
+          roomNumber: selectedRoom ? selectedRoom.roomNumber : void 0,
           propertyName: property.name,
           propertyAddress: property.address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
           landlordName: landlord ? landlord.name : "PT KOSMO Bali Hospitality / Pengelola Properti",
@@ -2916,14 +3271,15 @@ function registerContractRoutes(router2) {
         const contractHash = uploadResult.contractHash;
         await connection.query(
           `INSERT INTO rentals (
-            id, tenantId, propertyId, propertyName, price, startDate, status,
+            id, tenantId, propertyId, roomId, propertyName, price, startDate, status,
             document, contract_url, contract_hash, contract_signed_at,
             signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount, duration_months
-          ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             rentalId,
             authUser.id,
             propertyId,
+            selectedRoom ? selectedRoom.id : null,
             property.name,
             rentalPrice,
             startDateStr,
@@ -2946,6 +3302,8 @@ function registerContractRoutes(router2) {
           success: true,
           message: "Kontrak digital berhasil ditandatangani. Silakan selesaikan pembayaran.",
           rentalId,
+          roomId: selectedRoom ? selectedRoom.id : null,
+          roomNumber: selectedRoom ? selectedRoom.roomNumber : null,
           contractUrl,
           contractHash,
           adminFee,
@@ -2976,6 +3334,8 @@ function registerContractRoutes(router2) {
             r.id AS rental_id,
             r.tenantId AS rental_tenant_id,
             r.propertyId AS rental_property_id,
+            r.roomId AS rental_room_id,
+            rm.roomNumber AS room_number,
             r.propertyName AS rental_property_name,
             r.price AS rental_price,
             r.startDate AS rental_start_date,
@@ -3007,6 +3367,7 @@ function registerContractRoutes(router2) {
             l.phone AS landlord_phone
           FROM rentals r
           LEFT JOIN properties p ON r.propertyId = p.id
+          LEFT JOIN rooms rm ON r.roomId = rm.id
           LEFT JOIN users u ON r.tenantId = u.id
           LEFT JOIN users l ON p.ownerId = l.id
           WHERE r.id = ?`,
@@ -3028,6 +3389,8 @@ function registerContractRoutes(router2) {
         const contractTotalPrice = contractMonthlyPrice * contractDuration + contractAdminFee;
         const contractData = {
           rentalId: rental.rental_id,
+          roomId: rental.rental_room_id || void 0,
+          roomNumber: rental.room_number || void 0,
           propertyName: rental.rental_property_name || rental.property_name || "Unit KOSMO Bali",
           propertyAddress: rental.property_address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
           landlordName: rental.landlord_name || "PT KOSMO Bali Hospitality / Pengelola Properti",
@@ -3081,11 +3444,901 @@ function registerContractRoutes(router2) {
   );
 }
 
-// backend/routes/rentals.routes.ts
+// backend/routes/rooms.routes.ts
 import bcrypt5 from "bcryptjs";
+function formatRoomResponse(room, basePropertyPrice, photos = []) {
+  const numPrice = room.price !== null && room.price !== void 0 ? Number(room.price) : null;
+  const effectivePrice = numPrice !== null && numPrice > 0 ? numPrice : Number(basePropertyPrice || 0);
+  return {
+    id: String(room.id),
+    propertyId: String(room.propertyId),
+    roomNumber: String(room.roomNumber),
+    floor: Number(room.floor),
+    type: String(room.type),
+    price: numPrice,
+    effectivePrice,
+    status: room.status,
+    photos,
+    createdAt: room.createdAt,
+    updatedAt: room.updatedAt
+  };
+}
+function registerRoomRoutes(router2) {
+  router2.get("/properties/:id/rooms", async (req, res) => {
+    const { id } = req.params;
+    const statusQuery = typeof req.query.status === "string" ? req.query.status.toLowerCase().trim() : "all";
+    if (statusQuery !== "all" && !["available", "occupied", "maintenance"].includes(statusQuery)) {
+      return res.status(400).json({
+        message: "Parameter status tidak valid. Gunakan 'all', 'available', 'occupied', atau 'maintenance'."
+      });
+    }
+    const cacheKey = `properties:${id}:rooms:${statusQuery}`;
+    const cached = apiCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+      return res.json(cached);
+    }
+    try {
+      const [propRows] = await pool.query(
+        "SELECT id, price FROM properties WHERE id = ?",
+        [id]
+      );
+      if (propRows.length === 0) {
+        return res.status(404).json({ message: "Properti tidak ditemukan." });
+      }
+      const basePropertyPrice = Number(propRows[0].price || 0);
+      let sql = `
+        SELECT id, propertyId, roomNumber, floor, type, price, status, createdAt, updatedAt
+        FROM rooms
+        WHERE propertyId = ?
+      `;
+      const params = [id];
+      if (statusQuery !== "all") {
+        sql += " AND status = ?";
+        params.push(statusQuery);
+      }
+      sql += " ORDER BY floor ASC, CAST(roomNumber AS UNSIGNED) ASC, roomNumber ASC";
+      const [roomRows] = await pool.query(sql, params);
+      const [photoRows] = await pool.query(
+        `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt
+         FROM property_photos
+         WHERE propertyId = ? AND roomId IS NOT NULL
+         ORDER BY orderIndex ASC`,
+        [id]
+      );
+      const photosByRoomId = /* @__PURE__ */ new Map();
+      for (const p of photoRows) {
+        if (p.roomId) {
+          const list = photosByRoomId.get(p.roomId) || [];
+          list.push({
+            id: p.id,
+            propertyId: p.propertyId,
+            roomId: p.roomId,
+            url: p.url,
+            publicId: p.publicId,
+            category: p.category,
+            caption: p.caption,
+            orderIndex: Number(p.orderIndex),
+            createdAt: p.createdAt,
+            updatedAt: p.updatedAt || p.createdAt
+          });
+          photosByRoomId.set(p.roomId, list);
+        }
+      }
+      const formattedRooms = roomRows.map(
+        (r) => formatRoomResponse(r, basePropertyPrice, photosByRoomId.get(r.id) || [])
+      );
+      apiCache.set(cacheKey, formattedRooms, 30);
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+      return res.json(formattedRooms);
+    } catch (err) {
+      console.error("GET /api/properties/:id/rooms error:", err);
+      return res.status(500).json({ message: "Gagal mengambil daftar kamar properti." });
+    }
+  });
+  router2.get("/rooms/:roomId", async (req, res) => {
+    const { roomId } = req.params;
+    try {
+      const [rows] = await pool.query(
+        `SELECT r.*, p.ownerId, p.price as propertyPrice
+         FROM rooms r
+         JOIN properties p ON r.propertyId = p.id
+         WHERE r.id = ?`,
+        [roomId]
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ message: "Kamar tidak ditemukan." });
+      }
+      const room = rows[0];
+      const [photos] = await pool.query(
+        "SELECT * FROM property_photos WHERE roomId = ? ORDER BY orderIndex ASC",
+        [roomId]
+      );
+      return res.json(
+        formatRoomResponse(
+          room,
+          room.propertyPrice,
+          photos.map((p) => ({
+            id: p.id,
+            propertyId: p.propertyId,
+            roomId: p.roomId,
+            url: p.url,
+            publicId: p.publicId,
+            category: p.category,
+            caption: p.caption,
+            orderIndex: Number(p.orderIndex),
+            createdAt: p.createdAt,
+            updatedAt: p.updatedAt
+          }))
+        )
+      );
+    } catch (err) {
+      console.error("GET /api/rooms/:roomId error:", err);
+      return res.status(500).json({ message: "Gagal mengambil detail kamar." });
+    }
+  });
+  router2.post(
+    "/properties/:id/rooms",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(createRoomSchema),
+    async (req, res) => {
+      const propertyId = String(req.params.id);
+      const { roomNumber, floor, type, price, status } = req.body;
+      const authUser = req.user;
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [propRows] = await connection.query(
+          "SELECT id, ownerId, price FROM properties WHERE id = ? FOR UPDATE",
+          [propertyId]
+        );
+        if (propRows.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Properti tidak ditemukan." });
+        }
+        const property = propRows[0];
+        if (authUser?.role !== "admin" && property.ownerId !== authUser?.id) {
+          await connection.rollback();
+          return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+        }
+        const [existing] = await connection.query(
+          "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ? AND roomNumber = ? FOR UPDATE",
+          [propertyId, roomNumber]
+        );
+        if (Number(existing[0]?.count || 0) > 0) {
+          await connection.rollback();
+          return res.status(409).json({ message: "Nomor kamar sudah terdaftar pada properti ini." });
+        }
+        const roomId = generateId("room");
+        const numPrice = price !== void 0 && price !== null ? Number(price) : null;
+        const roomStatus = status || "available";
+        await connection.query(
+          `INSERT INTO rooms (id, propertyId, roomNumber, floor, type, price, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [roomId, propertyId, roomNumber, Number(floor), type || "Standard", numPrice, roomStatus]
+        );
+        const counts = await syncPropertyRoomCounts(connection, propertyId);
+        await connection.commit();
+        apiCache.invalidatePattern("properties");
+        const createdRoom = formatRoomResponse(
+          {
+            id: roomId,
+            propertyId,
+            roomNumber,
+            floor: Number(floor),
+            type: type || "Standard",
+            price: numPrice,
+            status: roomStatus
+          },
+          property.price,
+          []
+        );
+        return res.status(201).json({
+          message: "Kamar berhasil ditambahkan!",
+          room: createdRoom,
+          counts
+        });
+      } catch (err) {
+        await connection.rollback();
+        console.error("POST /api/properties/:id/rooms error:", err);
+        return res.status(500).json({ message: "Gagal menambahkan kamar baru." });
+      } finally {
+        connection.release();
+      }
+    }
+  );
+  const handleUpdateRoom = async (req, res) => {
+    const targetRoomId = String(req.params.roomId || req.params.id);
+    const targetPropertyId = req.params.id ? String(req.params.id) : null;
+    const { roomNumber, floor, type, price, status } = req.body;
+    const authUser = req.user;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      let querySql = `
+        SELECT r.*, p.ownerId, p.price as propertyPrice
+        FROM rooms r
+        JOIN properties p ON r.propertyId = p.id
+        WHERE r.id = ?
+      `;
+      const queryParams = [targetRoomId];
+      if (targetPropertyId) {
+        querySql += " AND r.propertyId = ?";
+        queryParams.push(targetPropertyId);
+      }
+      querySql += " FOR UPDATE";
+      const [rows] = await connection.query(querySql, queryParams);
+      if (rows.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Kamar tidak ditemukan." });
+      }
+      const existing = rows[0];
+      if (authUser?.role !== "admin" && existing.ownerId !== authUser?.id) {
+        await connection.rollback();
+        return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+      }
+      if (roomNumber && roomNumber !== existing.roomNumber) {
+        const [conflictRows] = await connection.query(
+          "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ? AND roomNumber = ? AND id != ? FOR UPDATE",
+          [existing.propertyId, roomNumber, targetRoomId]
+        );
+        if (Number(conflictRows[0]?.count || 0) > 0) {
+          await connection.rollback();
+          return res.status(409).json({ message: "Nomor kamar sudah digunakan oleh kamar lain." });
+        }
+      }
+      if (status && status !== existing.status && existing.status === "occupied") {
+        const [activeRentals] = await connection.query(
+          "SELECT COUNT(*) as activeCount FROM rentals WHERE roomId = ? AND status IN ('active', 'pending') FOR UPDATE",
+          [targetRoomId]
+        );
+        if (Number(activeRentals[0]?.activeCount || 0) > 0) {
+          await connection.rollback();
+          return res.status(409).json({
+            message: "Status kamar tidak dapat diubah karena masih memiliki sewa aktif berjalan."
+          });
+        }
+      }
+      const updatedRoomNumber = roomNumber !== void 0 ? roomNumber : existing.roomNumber;
+      const updatedFloor = floor !== void 0 ? Number(floor) : existing.floor;
+      const updatedType = type !== void 0 ? type : existing.type;
+      const updatedPrice = price !== void 0 ? price !== null ? Number(price) : null : existing.price;
+      const updatedStatus = status !== void 0 ? status : existing.status;
+      await connection.query(
+        `UPDATE rooms SET
+           roomNumber = ?,
+           floor = ?,
+           type = ?,
+           price = ?,
+           status = ?
+         WHERE id = ?`,
+        [updatedRoomNumber, updatedFloor, updatedType, updatedPrice, updatedStatus, targetRoomId]
+      );
+      const counts = await syncPropertyRoomCounts(connection, existing.propertyId);
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      const [photos] = await pool.query(
+        "SELECT * FROM property_photos WHERE roomId = ? ORDER BY orderIndex ASC",
+        [targetRoomId]
+      );
+      return res.json({
+        message: "Kamar berhasil diperbarui!",
+        room: formatRoomResponse(
+          {
+            id: targetRoomId,
+            propertyId: existing.propertyId,
+            roomNumber: updatedRoomNumber,
+            floor: updatedFloor,
+            type: updatedType,
+            price: updatedPrice,
+            status: updatedStatus
+          },
+          existing.propertyPrice,
+          photos.map((p) => ({
+            id: p.id,
+            propertyId: p.propertyId,
+            roomId: p.roomId,
+            url: p.url,
+            publicId: p.publicId,
+            category: p.category,
+            caption: p.caption,
+            orderIndex: Number(p.orderIndex),
+            createdAt: p.createdAt,
+            updatedAt: p.updatedAt
+          }))
+        ),
+        counts
+      });
+    } catch (err) {
+      await connection.rollback();
+      console.error("PUT room error:", err);
+      return res.status(500).json({ message: "Gagal memperbarui data kamar." });
+    } finally {
+      connection.release();
+    }
+  };
+  router2.put(
+    "/properties/:id/rooms/:roomId",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(updateRoomSchema),
+    handleUpdateRoom
+  );
+  router2.put(
+    "/rooms/:roomId",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(updateRoomSchema),
+    handleUpdateRoom
+  );
+  const handleToggleRoomStatus = async (req, res) => {
+    const targetRoomId = String(req.params.roomId || req.params.id);
+    const targetPropertyId = req.params.id ? String(req.params.id) : null;
+    const { status } = req.body;
+    const authUser = req.user;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      let querySql = `
+        SELECT r.id, r.propertyId, r.roomNumber, r.floor, r.type, r.price, r.status, p.ownerId, p.price as propertyPrice
+        FROM rooms r
+        JOIN properties p ON r.propertyId = p.id
+        WHERE r.id = ?
+      `;
+      const queryParams = [targetRoomId];
+      if (targetPropertyId) {
+        querySql += " AND r.propertyId = ?";
+        queryParams.push(targetPropertyId);
+      }
+      querySql += " FOR UPDATE";
+      const [rows] = await connection.query(querySql, queryParams);
+      if (rows.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Kamar tidak ditemukan." });
+      }
+      const existing = rows[0];
+      if (authUser?.role !== "admin" && existing.ownerId !== authUser?.id) {
+        await connection.rollback();
+        return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+      }
+      if (existing.status === "occupied") {
+        const [activeRentals] = await connection.query(
+          "SELECT COUNT(*) as activeCount FROM rentals WHERE roomId = ? AND status IN ('active', 'pending') FOR UPDATE",
+          [targetRoomId]
+        );
+        if (Number(activeRentals[0]?.activeCount || 0) > 0) {
+          await connection.rollback();
+          return res.status(409).json({
+            message: "Kamar sedang memiliki sewa aktif berjalan dan tidak dapat diubah statusnya."
+          });
+        }
+      }
+      await connection.query("UPDATE rooms SET status = ? WHERE id = ?", [status, targetRoomId]);
+      const counts = await syncPropertyRoomCounts(connection, existing.propertyId);
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      return res.json({
+        message: "Status kamar berhasil diperbarui",
+        room: formatRoomResponse(
+          {
+            id: targetRoomId,
+            propertyId: existing.propertyId,
+            roomNumber: existing.roomNumber,
+            floor: existing.floor,
+            type: existing.type,
+            price: existing.price,
+            status
+          },
+          existing.propertyPrice,
+          []
+        ),
+        counts
+      });
+    } catch (err) {
+      await connection.rollback();
+      console.error("PATCH room status error:", err);
+      return res.status(500).json({ message: "Gagal memperbarui status kamar." });
+    } finally {
+      connection.release();
+    }
+  };
+  router2.patch(
+    "/properties/:id/rooms/:roomId/status",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(updateRoomStatusSchema),
+    handleToggleRoomStatus
+  );
+  router2.patch(
+    "/rooms/:roomId/status",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(updateRoomStatusSchema),
+    handleToggleRoomStatus
+  );
+  const handleDeleteRoom = async (req, res) => {
+    const targetRoomId = String(req.params.roomId || req.params.id);
+    const targetPropertyId = req.params.id ? String(req.params.id) : null;
+    const { password } = req.body;
+    const authUser = req.user;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      let querySql = `
+        SELECT r.id, r.propertyId, r.roomNumber, r.status, p.ownerId
+        FROM rooms r
+        JOIN properties p ON r.propertyId = p.id
+        WHERE r.id = ?
+      `;
+      const queryParams = [targetRoomId];
+      if (targetPropertyId) {
+        querySql += " AND r.propertyId = ?";
+        queryParams.push(targetPropertyId);
+      }
+      querySql += " FOR UPDATE";
+      const [rows] = await connection.query(querySql, queryParams);
+      if (rows.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Kamar tidak ditemukan." });
+      }
+      const room = rows[0];
+      if (authUser?.role !== "admin" && room.ownerId !== authUser?.id) {
+        await connection.rollback();
+        return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+      }
+      const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
+      const caller = userRows[0];
+      if (!caller || !caller.password || !bcrypt5.compareSync(password, caller.password)) {
+        await connection.rollback();
+        return res.status(401).json({ message: "Password salah." });
+      }
+      if (room.status === "occupied") {
+        await connection.rollback();
+        return res.status(400).json({
+          message: "Kamar tidak dapat dihapus karena saat ini sedang terisi (occupied)."
+        });
+      }
+      const [activeRentals] = await connection.query(
+        "SELECT COUNT(*) as activeCount FROM rentals WHERE roomId = ? AND status IN ('active', 'pending') FOR UPDATE",
+        [targetRoomId]
+      );
+      if (Number(activeRentals[0]?.activeCount || 0) > 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: "Kamar tidak dapat dihapus karena masih memiliki sewa aktif berjalan."
+        });
+      }
+      await connection.query("DELETE FROM rooms WHERE id = ?", [targetRoomId]);
+      const counts = await syncPropertyRoomCounts(connection, room.propertyId);
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      return res.json({
+        message: "Kamar berhasil dihapus!",
+        counts
+      });
+    } catch (err) {
+      await connection.rollback();
+      console.error("DELETE room error:", err);
+      return res.status(500).json({ message: "Gagal menghapus kamar." });
+    } finally {
+      connection.release();
+    }
+  };
+  router2.delete(
+    "/properties/:id/rooms/:roomId",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(deleteRoomSchema),
+    handleDeleteRoom
+  );
+  router2.delete(
+    "/rooms/:roomId",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(deleteRoomSchema),
+    handleDeleteRoom
+  );
+}
+
+// backend/middleware/upload.ts
+import multer2 from "multer";
+var ALLOWED_IMAGE_MIMETYPES2 = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/jpg",
+  "image/gif"
+];
+function validateImageMimeType2(mimetype) {
+  if (!mimetype) return false;
+  return ALLOWED_IMAGE_MIMETYPES2.includes(
+    mimetype.toLowerCase()
+  );
+}
+var memoryUpload = multer2({
+  storage: multer2.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    // 5MB per file
+    files: 10
+  },
+  fileFilter: (_req, file, cb) => {
+    if (!validateImageMimeType2(file.mimetype)) {
+      return cb(
+        new Error("Format file tidak didukung. Harap unggah gambar (JPEG, PNG, WebP, GIF).")
+      );
+    }
+    cb(null, true);
+  }
+});
+var multiPhotoUpload = memoryUpload.fields([
+  { name: "images", maxCount: 10 },
+  { name: "image", maxCount: 10 }
+]);
+function handleMultiPhotoUpload(req, res, next) {
+  multiPhotoUpload(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer2.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).json({
+            message: "Ukuran file melebihi batas maksimum 5MB per file."
+          });
+        }
+        if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+          return res.status(400).json({
+            message: 'Jumlah file melebihi batas maksimum atau field tidak valid (maksimal 10 foto pada field "images").'
+          });
+        }
+        return res.status(400).json({
+          message: `Gagal memproses file upload: ${err.message}`
+        });
+      }
+      if (err instanceof Error) {
+        return res.status(400).json({ message: err.message });
+      }
+      return res.status(400).json({ message: "Gagal memproses unggahan berkas." });
+    }
+    next();
+  });
+}
+function extractUploadedFiles(req) {
+  const result = [];
+  if (Array.isArray(req.files)) {
+    result.push(...req.files);
+  } else if (req.files && typeof req.files === "object") {
+    const fieldObj = req.files;
+    if (Array.isArray(fieldObj.images)) result.push(...fieldObj.images);
+    if (Array.isArray(fieldObj.image)) result.push(...fieldObj.image);
+  } else if (req.file) {
+    result.push(req.file);
+  }
+  return result;
+}
+
+// backend/routes/photos.routes.ts
+function formatPhotoResponse(row) {
+  return {
+    id: String(row.id),
+    propertyId: String(row.propertyId),
+    roomId: row.roomId ? String(row.roomId) : null,
+    url: String(row.url),
+    publicId: row.publicId ? String(row.publicId) : null,
+    category: row.category,
+    caption: row.caption ? String(row.caption) : "",
+    orderIndex: Number(row.orderIndex),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+function registerPhotoRoutes(router2) {
+  router2.get("/properties/:id/photos", async (req, res) => {
+    const { id } = req.params;
+    const categoryQuery = typeof req.query.category === "string" ? req.query.category.trim() : void 0;
+    const roomIdQuery = typeof req.query.roomId === "string" ? req.query.roomId.trim() : void 0;
+    if (categoryQuery && !VALID_PHOTO_CATEGORIES.includes(categoryQuery)) {
+      return res.status(400).json({
+        message: `Kategori foto '${categoryQuery}' tidak valid. Pilihan: ${VALID_PHOTO_CATEGORIES.join(", ")}`
+      });
+    }
+    const cacheKey = `properties:${id}:photos:${categoryQuery || "all"}:${roomIdQuery || "all"}`;
+    const cached = apiCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+      return res.json(cached);
+    }
+    try {
+      const [propRows] = await pool.query(
+        "SELECT id FROM properties WHERE id = ?",
+        [id]
+      );
+      if (propRows.length === 0) {
+        return res.status(404).json({ message: "Properti tidak ditemukan." });
+      }
+      let sql = "SELECT * FROM property_photos WHERE propertyId = ?";
+      const params = [id];
+      if (categoryQuery) {
+        sql += " AND category = ?";
+        params.push(categoryQuery);
+      }
+      if (roomIdQuery !== void 0) {
+        if (roomIdQuery.toLowerCase() === "null" || roomIdQuery.toLowerCase() === "property") {
+          sql += ' AND (roomId IS NULL OR roomId = "")';
+        } else {
+          sql += " AND roomId = ?";
+          params.push(roomIdQuery);
+        }
+      }
+      sql += " ORDER BY orderIndex ASC, createdAt ASC";
+      const [rows] = await pool.query(sql, params);
+      const photos = rows.map(formatPhotoResponse);
+      apiCache.set(cacheKey, photos, 30);
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+      return res.json(photos);
+    } catch (err) {
+      console.error("GET /api/properties/:id/photos error:", err);
+      return res.status(500).json({ message: "Gagal mengambil galeri foto properti." });
+    }
+  });
+  router2.post(
+    "/properties/:id/photos",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    uploadLimiter,
+    handleMultiPhotoUpload,
+    async (req, res) => {
+      const propertyId = String(req.params.id);
+      const authUser = req.user;
+      const files = extractUploadedFiles(req);
+      if (files.length === 0) {
+        return res.status(400).json({ message: 'Minimal 1 file foto wajib diunggah dalam field "images".' });
+      }
+      if (files.length > 10) {
+        return res.status(400).json({ message: "Maksimal 10 file foto dapat diunggah sekaligus." });
+      }
+      for (const file of files) {
+        if (!validateImageMimeType2(file.mimetype)) {
+          return res.status(400).json({
+            message: `Format file '${file.originalname}' tidak didukung. Harap unggah gambar (JPEG, PNG, WebP, GIF).`
+          });
+        }
+      }
+      const rawCategory = typeof req.body.category === "string" ? req.body.category.trim() : void 0;
+      if (rawCategory !== void 0 && (!rawCategory || !VALID_PHOTO_CATEGORIES.includes(rawCategory))) {
+        return res.status(400).json({
+          message: `Kategori '${req.body.category}' tidak valid. Pilihan: ${VALID_PHOTO_CATEGORIES.join(", ")}`
+        });
+      }
+      const targetCategory = rawCategory || "other";
+      const rawRoomId = typeof req.body.roomId === "string" && req.body.roomId.trim() ? req.body.roomId.trim() : null;
+      const caption = typeof req.body.caption === "string" ? req.body.caption.trim().slice(0, 255) : "";
+      const [propRows] = await pool.query(
+        "SELECT id, ownerId, image FROM properties WHERE id = ?",
+        [propertyId]
+      );
+      if (propRows.length === 0) {
+        return res.status(404).json({ message: "Properti tidak ditemukan." });
+      }
+      const property = propRows[0];
+      if (authUser?.role !== "admin" && property.ownerId !== authUser?.id) {
+        return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+      }
+      if (rawRoomId) {
+        const [roomRows] = await pool.query(
+          "SELECT id FROM rooms WHERE id = ? AND propertyId = ?",
+          [rawRoomId, propertyId]
+        );
+        if (roomRows.length === 0) {
+          return res.status(400).json({ message: "Kamar tidak ditemukan pada properti ini." });
+        }
+      }
+      let uploadResults;
+      try {
+        uploadResults = await Promise.all(
+          files.map((file) => uploadImageStream(file.buffer, "kosmo_properties"))
+        );
+      } catch (cloudErr) {
+        console.error("Cloudinary multi-photo upload error:", cloudErr);
+        return res.status(500).json({ message: "Gagal mengunggah foto ke Cloudinary." });
+      }
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [maxRows] = await connection.query(
+          "SELECT COALESCE(MAX(orderIndex), -1) AS maxOrder FROM property_photos WHERE propertyId = ? FOR UPDATE",
+          [propertyId]
+        );
+        let nextOrder = Number(maxRows[0]?.maxOrder ?? -1) + 1;
+        const createdPhotos = [];
+        for (let i = 0; i < uploadResults.length; i++) {
+          const uploadRes = uploadResults[i];
+          const photoId = generateId("photo");
+          await connection.query(
+            `INSERT INTO property_photos (
+              id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [photoId, propertyId, rawRoomId, uploadRes.secure_url, uploadRes.public_id, targetCategory, caption, nextOrder]
+          );
+          createdPhotos.push(
+            formatPhotoResponse({
+              id: photoId,
+              propertyId,
+              roomId: rawRoomId,
+              url: uploadRes.secure_url,
+              publicId: uploadRes.public_id,
+              category: targetCategory,
+              caption,
+              orderIndex: nextOrder,
+              createdAt: /* @__PURE__ */ new Date()
+            })
+          );
+          nextOrder++;
+        }
+        if ((!property.image || property.image.trim() === "" || targetCategory === "thumbnail") && createdPhotos.length > 0) {
+          await connection.query(
+            "UPDATE properties SET image = ? WHERE id = ?",
+            [createdPhotos[0].url, propertyId]
+          );
+        }
+        await connection.commit();
+        apiCache.invalidatePattern("properties");
+        return res.status(201).json({
+          message: `${createdPhotos.length} foto berhasil diunggah`,
+          photos: createdPhotos
+        });
+      } catch (dbErr) {
+        await connection.rollback();
+        console.error("Database insertion error for property photos:", dbErr);
+        return res.status(500).json({ message: "Gagal menyimpan data foto properti." });
+      } finally {
+        connection.release();
+      }
+    }
+  );
+  router2.put(
+    "/properties/:id/photos/reorder",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(reorderPhotosSchema),
+    async (req, res) => {
+      const propertyId = String(req.params.id);
+      const authUser = req.user;
+      const { photoIds } = req.body;
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [propRows] = await connection.query(
+          "SELECT id, ownerId FROM properties WHERE id = ? FOR UPDATE",
+          [propertyId]
+        );
+        if (propRows.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Properti tidak ditemukan." });
+        }
+        const property = propRows[0];
+        if (authUser?.role !== "admin" && property.ownerId !== authUser?.id) {
+          await connection.rollback();
+          return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+        }
+        const [existingPhotos] = await connection.query(
+          "SELECT id, orderIndex FROM property_photos WHERE propertyId = ? FOR UPDATE",
+          [propertyId]
+        );
+        const existingMap = new Set(existingPhotos.map((p) => p.id));
+        const invalidIds = photoIds.filter((id) => !existingMap.has(id));
+        if (invalidIds.length > 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: `Satu atau lebih foto tidak ditemukan pada properti ini: ${invalidIds.join(", ")}`
+          });
+        }
+        for (let i = 0; i < photoIds.length; i++) {
+          await connection.query(
+            "UPDATE property_photos SET orderIndex = ? WHERE id = ? AND propertyId = ?",
+            [i, photoIds[i], propertyId]
+          );
+        }
+        const reorderedSet = new Set(photoIds);
+        const remaining = existingPhotos.filter((p) => !reorderedSet.has(p.id)).sort((a, b) => Number(a.orderIndex) - Number(b.orderIndex));
+        for (let j = 0; j < remaining.length; j++) {
+          await connection.query(
+            "UPDATE property_photos SET orderIndex = ? WHERE id = ? AND propertyId = ?",
+            [photoIds.length + j, remaining[j].id, propertyId]
+          );
+        }
+        const [updatedRows] = await connection.query(
+          "SELECT * FROM property_photos WHERE propertyId = ? ORDER BY orderIndex ASC, createdAt ASC",
+          [propertyId]
+        );
+        await connection.commit();
+        apiCache.invalidatePattern("properties");
+        return res.json({
+          message: "Urutan foto berhasil diperbarui",
+          photos: updatedRows.map(formatPhotoResponse)
+        });
+      } catch (err) {
+        await connection.rollback();
+        console.error("PUT /api/properties/:id/photos/reorder error:", err);
+        return res.status(500).json({ message: "Gagal memperbarui urutan foto." });
+      } finally {
+        connection.release();
+      }
+    }
+  );
+  const handleDeletePhoto = async (req, res) => {
+    const targetPhotoId = String(req.params.photoId || req.params.id);
+    const targetPropertyId = req.params.id ? String(req.params.id) : null;
+    const authUser = req.user;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      let querySql = `
+        SELECT ph.id, ph.propertyId, ph.publicId, ph.url, ph.orderIndex, p.ownerId, p.image AS propertyImage
+        FROM property_photos ph
+        JOIN properties p ON ph.propertyId = p.id
+        WHERE ph.id = ?
+      `;
+      const queryParams = [targetPhotoId];
+      if (targetPropertyId) {
+        querySql += " AND ph.propertyId = ?";
+        queryParams.push(targetPropertyId);
+      }
+      querySql += " FOR UPDATE";
+      const [rows] = await connection.query(querySql, queryParams);
+      if (rows.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Foto tidak ditemukan." });
+      }
+      const photo = rows[0];
+      if (authUser?.role !== "admin" && photo.ownerId !== authUser?.id) {
+        await connection.rollback();
+        return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+      }
+      await connection.query("DELETE FROM property_photos WHERE id = ?", [targetPhotoId]);
+      if (photo.propertyImage === photo.url) {
+        const [nextPhotos] = await connection.query(
+          "SELECT url FROM property_photos WHERE propertyId = ? ORDER BY orderIndex ASC LIMIT 1",
+          [photo.propertyId]
+        );
+        if (nextPhotos.length > 0) {
+          await connection.query("UPDATE properties SET image = ? WHERE id = ?", [nextPhotos[0].url, photo.propertyId]);
+        }
+      }
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      if (photo.publicId) {
+        deleteCloudinaryImage(photo.publicId).catch((delErr) => {
+          console.warn(`[Cloudinary] Non-fatal deletion error for ${photo.publicId}:`, delErr);
+        });
+      }
+      return res.json({ message: "Foto berhasil dihapus" });
+    } catch (err) {
+      await connection.rollback();
+      console.error("DELETE photo error:", err);
+      return res.status(500).json({ message: "Gagal menghapus foto." });
+    } finally {
+      connection.release();
+    }
+  };
+  router2.delete(
+    "/properties/:id/photos/:photoId",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    handleDeletePhoto
+  );
+  router2.delete(
+    "/photos/:photoId",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    handleDeletePhoto
+  );
+}
+
+// backend/routes/rentals.routes.ts
+import bcrypt6 from "bcryptjs";
 
 // backend/routes/payment.routes.ts
-import crypto4 from "crypto";
+import crypto5 from "crypto";
 import midtransClient from "midtrans-client";
 var MIDTRANS_PLACEHOLDERS = [
   "placeholder",
@@ -3120,14 +4373,14 @@ function verifyMidtransSignature(orderId, statusCode, grossAmount, serverKey, si
   }
   const normalizedAmount = grossAmount.includes(".") ? parseFloat(grossAmount).toFixed(2) : grossAmount;
   const payload = `${orderId}${statusCode}${normalizedAmount}${serverKey}`;
-  const calculatedHash = crypto4.createHash("sha512").update(payload).digest("hex").toLowerCase();
+  const calculatedHash = crypto5.createHash("sha512").update(payload).digest("hex").toLowerCase();
   const targetSig = signatureKey.toLowerCase();
   const calculatedBuffer = Buffer.from(calculatedHash, "utf8");
   const targetBuffer = Buffer.from(targetSig, "utf8");
   if (calculatedBuffer.length !== targetBuffer.length) {
     return false;
   }
-  return crypto4.timingSafeEqual(calculatedBuffer, targetBuffer);
+  return crypto5.timingSafeEqual(calculatedBuffer, targetBuffer);
 }
 async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
   let targetRentalId = orderIdOrRentalId.trim();
@@ -3138,6 +4391,23 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+    const [earlyRentalRows] = await connection.query(
+      "SELECT id, propertyId, status FROM rentals WHERE id = ? OR id = ?",
+      [targetRentalId, orderIdOrRentalId.trim()]
+    );
+    const earlyRental = earlyRentalRows[0];
+    if (!earlyRental) {
+      await connection.rollback();
+      return { success: false, statusCode: 404, message: "Data sewa tidak ditemukan." };
+    }
+    let property;
+    if (earlyRental.propertyId) {
+      const [propRows] = await connection.query(
+        "SELECT id, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
+        [earlyRental.propertyId]
+      );
+      property = propRows[0];
+    }
     const [rentalRows] = await connection.query(
       "SELECT * FROM rentals WHERE id = ? OR id = ? FOR UPDATE",
       [targetRentalId, orderIdOrRentalId.trim()]
@@ -3164,21 +4434,56 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
       }
     }
     if (rental.status !== "active") {
-      const [propRows] = await connection.query(
-        "SELECT totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
-        [rental.propertyId]
-      );
-      const property = propRows[0];
-      if (property && property.occupiedRooms >= property.totalRooms) {
-        await connection.rollback();
-        console.error(`Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`);
-        return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
+      let lockedRoom;
+      let targetRoomId = rental.roomId;
+      if (targetRoomId) {
+        const [roomRows] = await connection.query(
+          "SELECT id, propertyId, roomNumber, status FROM rooms WHERE id = ? FOR UPDATE",
+          [targetRoomId]
+        );
+        lockedRoom = roomRows[0];
+        if (!lockedRoom || lockedRoom.status !== "available") {
+          await connection.rollback();
+          console.error(`Overbooking conflict detected for room ${targetRoomId}, status: ${lockedRoom?.status}`);
+          return { success: false, statusCode: 409, message: "Kamar sudah terisi atau tidak tersedia." };
+        }
+      } else {
+        const [availableRooms] = await connection.query(
+          "SELECT id, propertyId, roomNumber, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
+          [rental.propertyId]
+        );
+        if (availableRooms.length > 0) {
+          lockedRoom = availableRooms[0];
+          targetRoomId = lockedRoom.id;
+        } else {
+          const [discreteCountRows] = await connection.query(
+            "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+            [rental.propertyId]
+          );
+          if (Number(discreteCountRows[0]?.count || 0) > 0) {
+            await connection.rollback();
+            return { success: false, statusCode: 409, message: "Kamar sudah terisi atau tidak tersedia." };
+          }
+          if (property && property.occupiedRooms >= property.totalRooms) {
+            await connection.rollback();
+            console.error(`Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`);
+            return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
+          }
+        }
       }
-      await connection.query("UPDATE rentals SET status = 'active' WHERE id = ?", [resolvedRentalId]);
       await connection.query(
-        "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
-        [rental.propertyId]
+        "UPDATE rentals SET status = 'active', roomId = COALESCE(roomId, ?) WHERE id = ?",
+        [targetRoomId || null, resolvedRentalId]
       );
+      if (lockedRoom) {
+        await connection.query("UPDATE rooms SET status = 'occupied' WHERE id = ?", [lockedRoom.id]);
+        await syncPropertyRoomCounts(connection, rental.propertyId);
+      } else {
+        await connection.query(
+          "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
+          [rental.propertyId]
+        );
+      }
       if (property && property.ownerId) {
         const totalRentalRevenue = monthlyPrice * durationMonths;
         await connection.query(
@@ -3261,7 +4566,7 @@ var handlePaymentNotification = async (req, res) => {
 };
 function registerPaymentRoutes(router2) {
   router2.post("/payment/token", authenticateToken, async (req, res) => {
-    const { propertyId, tenantId, durationMonths } = req.body;
+    const { propertyId, tenantId, durationMonths, roomId } = req.body;
     const authUser = req.user;
     if (!propertyId || !tenantId) {
       return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
@@ -3300,15 +4605,16 @@ function registerPaymentRoutes(router2) {
       }
       const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
       const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-      const monthlyRent = Number(property.price);
-      const adminFee = 5e3;
-      const totalAmount = monthlyRent * duration + adminFee;
-      const [existingRental] = await pool.query("SELECT id FROM rentals WHERE id = ?", [rentalId]);
+      const [existingRental] = await pool.query("SELECT * FROM rentals WHERE id = ?", [rentalId]);
+      const monthlyRent = Number(existingRental[0]?.price || property.price);
+      const adminFee = Number(existingRental[0]?.admin_fee_amount || 5e3);
+      const resolvedDuration = existingRental.length > 0 && existingRental[0]?.duration_months ? Number(existingRental[0].duration_months) : duration;
+      const totalAmount = monthlyRent * resolvedDuration + adminFee;
       if (existingRental.length === 0) {
         await pool.query(
-          `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
-           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-          [rentalId, tenantId, propertyId, property.name, monthlyRent, startDate, adminFee, duration]
+          `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+          [rentalId, tenantId, propertyId, roomId || null, property.name, monthlyRent, startDate, adminFee, resolvedDuration]
         );
       }
       const attemptOrderId = `${rentalId}-${Date.now()}`;
@@ -3326,7 +4632,7 @@ function registerPaymentRoutes(router2) {
           {
             id: property.id,
             price: monthlyRent,
-            quantity: duration,
+            quantity: resolvedDuration,
             name: property.name.substring(0, 50)
           },
           {
@@ -3502,19 +4808,28 @@ function registerRentalRoutes(router2) {
     const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
     const offsetParam = req.query.offset ? parseInt(String(req.query.offset), 10) : limitParam ? (pageParam - 1) * limitParam : 0;
     try {
-      let sql = "SELECT * FROM rentals WHERE 1=1";
+      let sql = `
+        SELECT 
+          r.*,
+          rm.roomNumber,
+          rm.floor AS roomFloor,
+          rm.type AS roomType
+        FROM rentals r
+        LEFT JOIN rooms rm ON r.roomId = rm.id
+        WHERE 1=1
+      `;
       const params = [];
       if (authUser.role === "tenant") {
-        sql += " AND tenantId = ?";
+        sql += " AND r.tenantId = ?";
         params.push(authUser.id);
       } else if (authUser.role === "landlord") {
-        sql += " AND propertyId IN (SELECT id FROM properties WHERE ownerId = ?)";
+        sql += " AND r.propertyId IN (SELECT id FROM properties WHERE ownerId = ?)";
         params.push(authUser.id);
       } else if (authUser.role === "admin" && tenantId) {
-        sql += " AND tenantId = ?";
+        sql += " AND r.tenantId = ?";
         params.push(String(tenantId));
       }
-      sql += " ORDER BY id DESC";
+      sql += " ORDER BY r.id DESC";
       if (limitParam && limitParam > 0) {
         sql += " LIMIT ? OFFSET ?";
         params.push(limitParam, Math.max(0, offsetParam));
@@ -3553,7 +4868,15 @@ function registerRentalRoutes(router2) {
     }
     try {
       const [rows] = await pool.query(
-        "SELECT * FROM rentals WHERE tenantId = ? ORDER BY id DESC",
+        `SELECT 
+          r.*,
+          rm.roomNumber,
+          rm.floor AS roomFloor,
+          rm.type AS roomType
+        FROM rentals r
+        LEFT JOIN rooms rm ON r.roomId = rm.id
+        WHERE r.tenantId = ? 
+        ORDER BY r.id DESC`,
         [tenantId]
       );
       const enrichedRows = rows.map((r) => {
@@ -3579,7 +4902,7 @@ function registerRentalRoutes(router2) {
     }
   });
   router2.post("/rentals", authenticateToken, async (req, res) => {
-    const { tenantId, propertyId, propertyName, price, durationMonths, signature } = req.body;
+    const { tenantId, propertyId, propertyName, price, durationMonths, signature, roomId } = req.body;
     const authUser = req.user;
     if (!tenantId || !propertyId) {
       return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
@@ -3605,6 +4928,12 @@ function registerRentalRoutes(router2) {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      const [userRows] = await connection.query("SELECT * FROM users WHERE id = ? FOR UPDATE", [tenantId]);
+      const tenant = userRows[0];
+      if (!tenant) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Pengguna tidak ditemukan." });
+      }
       const [propRows] = await connection.query(
         "SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ? FOR UPDATE",
         [propertyId]
@@ -3615,7 +4944,7 @@ function registerRentalRoutes(router2) {
         return res.status(404).json({ message: "Properti tidak ditemukan." });
       }
       const [existingRentals] = await connection.query(
-        "SELECT id, status, document FROM rentals WHERE id = ? FOR UPDATE",
+        "SELECT id, status, document, roomId FROM rentals WHERE id = ? FOR UPDATE",
         [rentalId]
       );
       if (existingRentals.length > 0 && existingRentals[0].status === "active") {
@@ -3630,11 +4959,39 @@ function registerRentalRoutes(router2) {
         await connection.rollback();
         return res.status(400).json({ message: "Kamar kos sudah penuh." });
       }
-      const [userRows] = await connection.query("SELECT * FROM users WHERE id = ?", [tenantId]);
-      const tenant = userRows[0];
-      if (!tenant) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Pengguna tidak ditemukan." });
+      let assignedRoom;
+      const targetRoomId = roomId || existingRentals[0]?.roomId;
+      if (targetRoomId) {
+        const [roomRows] = await connection.query(
+          "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE",
+          [targetRoomId, propertyId]
+        );
+        assignedRoom = roomRows[0];
+        if (!assignedRoom) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
+        }
+        if (assignedRoom.status !== "available") {
+          await connection.rollback();
+          return res.status(409).json({ message: "Kamar sudah terisi atau tidak tersedia." });
+        }
+      } else {
+        const [availRooms] = await connection.query(
+          "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
+          [propertyId]
+        );
+        if (availRooms.length > 0) {
+          assignedRoom = availRooms[0];
+        } else {
+          const [countRows] = await connection.query(
+            "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+            [propertyId]
+          );
+          if (Number(countRows[0]?.count || 0) > 0) {
+            await connection.rollback();
+            return res.status(409).json({ message: "Kamar sudah terisi atau tidak tersedia." });
+          }
+        }
       }
       const profileCheck = isUserProfileComplete(tenant);
       if (!profileCheck.complete) {
@@ -3656,7 +5013,7 @@ function registerRentalRoutes(router2) {
         });
       }
       const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-      const rentalPrice = price || property.price;
+      const rentalPrice = assignedRoom && typeof assignedRoom.price === "number" && assignedRoom.price > 0 ? Number(assignedRoom.price) : price || property.price;
       const rentalName = propertyName || property.name;
       let documentPath = "sertifikat_kepemilikan.pdf";
       try {
@@ -3686,21 +5043,26 @@ function registerRentalRoutes(router2) {
       if (existingRentals.length > 0) {
         await connection.query(
           `UPDATE rentals 
-           SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ?, duration_months = ? 
+           SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ?, duration_months = ?, roomId = COALESCE(roomId, ?) 
            WHERE id = ?`,
-          [documentPath, rentalName, rentalPrice, startDate, rentalDuration, rentalId]
+          [documentPath, rentalName, rentalPrice, startDate, rentalDuration, assignedRoom?.id || null, rentalId]
         );
       } else {
         await connection.query(
-          `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document, duration_months) 
-           VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-          [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath, rentalDuration]
+          `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, document, duration_months) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+          [rentalId, tenantId, propertyId, assignedRoom?.id || null, rentalName, rentalPrice, startDate, documentPath, rentalDuration]
         );
       }
-      await connection.query(
-        "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
-        [propertyId]
-      );
+      if (assignedRoom) {
+        await connection.query("UPDATE rooms SET status = 'occupied' WHERE id = ?", [assignedRoom.id]);
+        await syncPropertyRoomCounts(connection, propertyId);
+      } else {
+        await connection.query(
+          "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
+          [propertyId]
+        );
+      }
       if (property.ownerId) {
         await connection.query(
           "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
@@ -3732,7 +5094,41 @@ function registerRentalRoutes(router2) {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
-      const [rentalRows] = await connection.query("SELECT * FROM rentals WHERE id = ? FOR UPDATE", [id]);
+      const [earlyRentalRows] = await connection.query(
+        "SELECT id, tenantId, propertyId, roomId, status FROM rentals WHERE id = ?",
+        [id]
+      );
+      const earlyRental = earlyRentalRows[0];
+      if (!earlyRental) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Data sewa tidak ditemukan." });
+      }
+      if (earlyRental.status === "terminated") {
+        await connection.rollback();
+        return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
+      }
+      const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
+      const caller = userRows[0];
+      if (!caller || !caller.password || !bcrypt6.compareSync(password, caller.password)) {
+        await connection.rollback();
+        return res.status(401).json({ message: "Password salah." });
+      }
+      const [propRows] = await connection.query(
+        "SELECT id, ownerId, totalRooms, occupiedRooms FROM properties WHERE id = ? FOR UPDATE",
+        [earlyRental.propertyId]
+      );
+      const property = propRows[0];
+      const isTenant = authUser?.id === earlyRental.tenantId;
+      const isOwner = property && authUser?.id === property.ownerId;
+      const isAdmin = authUser?.role === "admin";
+      if (!isTenant && !isOwner && !isAdmin) {
+        await connection.rollback();
+        return res.status(403).json({ message: "Akses ditolak. Anda tidak berhak memberhentikan sewa ini." });
+      }
+      const [rentalRows] = await connection.query(
+        "SELECT id, tenantId, propertyId, roomId, status FROM rentals WHERE id = ? FOR UPDATE",
+        [id]
+      );
       const rental = rentalRows[0];
       if (!rental) {
         await connection.rollback();
@@ -3742,31 +5138,22 @@ function registerRentalRoutes(router2) {
         await connection.rollback();
         return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
       }
-      const [propRows] = await connection.query("SELECT ownerId FROM properties WHERE id = ?", [rental.propertyId]);
-      const property = propRows[0];
-      const isTenant = authUser?.id === rental.tenantId;
-      const isOwner = property && authUser?.id === property.ownerId;
-      const isAdmin = authUser?.role === "admin";
-      if (!isTenant && !isOwner && !isAdmin) {
-        await connection.rollback();
-        return res.status(403).json({ message: "Akses ditolak. Anda tidak berhak memberhentikan sewa ini." });
-      }
-      const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
-      const caller = userRows[0];
-      if (!caller || !caller.password || !bcrypt5.compareSync(password, caller.password)) {
-        await connection.rollback();
-        return res.status(401).json({ message: "Password salah." });
+      if (rental.status === "active") {
+        if (rental.roomId) {
+          await connection.query("SELECT id, status FROM rooms WHERE id = ? FOR UPDATE", [rental.roomId]);
+          await connection.query("UPDATE rooms SET status = 'available' WHERE id = ?", [rental.roomId]);
+          await syncPropertyRoomCounts(connection, rental.propertyId);
+        } else {
+          await connection.query(
+            "UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?",
+            [rental.propertyId]
+          );
+        }
       }
       await connection.query(
         "UPDATE rentals SET status = 'terminated' WHERE id = ?",
         [id]
       );
-      if (rental.status === "active") {
-        await connection.query(
-          "UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?",
-          [rental.propertyId]
-        );
-      }
       await connection.commit();
       apiCache.invalidatePattern("properties");
       apiCache.invalidatePattern("rentals");
@@ -3790,6 +5177,8 @@ registerPropertyRoutes(router);
 registerReviewRoutes(router);
 registerLandlordRoutes(router);
 registerTrackingRoutes(router);
+registerRoomRoutes(router);
+registerPhotoRoutes(router);
 registerContractRoutes(router);
 registerRentalRoutes(router);
 registerPaymentRoutes(router);

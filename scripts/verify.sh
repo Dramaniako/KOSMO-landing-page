@@ -32,6 +32,8 @@ fi
 echo "=========================================="
 echo " 5. Running Playwright E2E Test Suite     "
 echo "=========================================="
+echo "Resetting database to pristine seed state..."
+npm run db:seed
 if [ -f "playwright.config.ts" ]; then
   npx playwright test
 fi

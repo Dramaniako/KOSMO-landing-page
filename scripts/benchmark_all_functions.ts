@@ -13,7 +13,7 @@ import {
 import { verifyMidtransSignature } from '../backend/routes/payment.routes';
 import { computePaymentSchedule } from '../backend/routes/rentals.routes';
 import { InMemoryCache } from '../backend/services/cache';
-import { normalizeProperty, normalizePropertySummary } from '../backend/services/transformers';
+import { normalizeProperty, normalizePropertySummary, type PropertyRow } from '../backend/services/transformers';
 import { generateId } from '../backend/utils/id';
 import {
   loginSchema,
@@ -308,20 +308,21 @@ export async function runFullPerformanceBenchmark(): Promise<PerfMetric[]> {
     name: 'KOSMO Seminyak Suite',
     district: 'Badung',
     address: 'Jl. Kayu Aya No. 12',
-    price: '4500000',
-    rating: '4.8',
+    price: 4500000,
+    rating: 4.8,
     image: 'https://example.com/prop.jpg',
     description: 'Boutique Room',
-    totalRooms: '10',
-    occupiedRooms: '7',
+    totalRooms: 10,
+    occupiedRooms: 7,
     ownerId: 'landlord-123',
     ownerName: 'Gede Host',
     ownerEmail: 'gede@host.bali',
     ownerPhone: '081122334455',
     latitude: '-8.6800',
     longitude: '115.1500',
+    document: 'sertifikat_denpasar.pdf',
     facilitiesString: 'Wifi,AC,Listrik,Air,Parkir'
-  };
+  } as unknown as PropertyRow;
 
   metrics.push(await profileFunction(
     'Transformers',

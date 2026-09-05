@@ -1,11 +1,12 @@
 import type { Request, Response, Router } from 'express';
 import bcrypt from 'bcryptjs';
 import type { RowDataPacket } from 'mysql2/promise';
-import { pool } from '../db';
+import { pool, syncPropertyRoomCounts } from '../db';
 import { apiCache } from '../services/cache';
 import { authenticateToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { PropertyRow } from '../services/transformers';
+import type { RoomRow } from '../types/index';
 import { generateRentalContractPdf } from '../services/contract';
 import { isUserProfileComplete } from '../types/index';
 import { generateId } from '../utils/id';
@@ -16,6 +17,10 @@ export interface RentalRow extends RowDataPacket {
   id: string;
   tenantId: string;
   propertyId: string;
+  roomId?: string | null;
+  roomNumber?: string | null;
+  roomFloor?: number | null;
+  roomType?: string | null;
   propertyName?: string;
   price?: number;
   startDate?: string;
@@ -159,20 +164,29 @@ export function registerRentalRoutes(router: Router): void {
     const offsetParam = req.query.offset ? parseInt(String(req.query.offset), 10) : (limitParam ? (pageParam - 1) * limitParam : 0);
 
     try {
-      let sql = 'SELECT * FROM rentals WHERE 1=1';
+      let sql = `
+        SELECT 
+          r.*,
+          rm.roomNumber,
+          rm.floor AS roomFloor,
+          rm.type AS roomType
+        FROM rentals r
+        LEFT JOIN rooms rm ON r.roomId = rm.id
+        WHERE 1=1
+      `;
       const params: (string | number)[] = [];
 
       if (authUser.role === 'tenant') {
-        sql += ' AND tenantId = ?';
+        sql += ' AND r.tenantId = ?';
         params.push(authUser.id);
       } else if (authUser.role === 'landlord') {
-        sql += ' AND propertyId IN (SELECT id FROM properties WHERE ownerId = ?)';
+        sql += ' AND r.propertyId IN (SELECT id FROM properties WHERE ownerId = ?)';
         params.push(authUser.id);
       } else if (authUser.role === 'admin' && tenantId) {
-        sql += ' AND tenantId = ?';
+        sql += ' AND r.tenantId = ?';
         params.push(String(tenantId));
       }
-      sql += ' ORDER BY id DESC';
+      sql += ' ORDER BY r.id DESC';
 
       if (limitParam && limitParam > 0) {
         sql += ' LIMIT ? OFFSET ?';
@@ -218,7 +232,15 @@ export function registerRentalRoutes(router: Router): void {
 
     try {
       const [rows] = await pool.query<RentalRow[]>(
-        'SELECT * FROM rentals WHERE tenantId = ? ORDER BY id DESC',
+        `SELECT 
+          r.*,
+          rm.roomNumber,
+          rm.floor AS roomFloor,
+          rm.type AS roomType
+        FROM rentals r
+        LEFT JOIN rooms rm ON r.roomId = rm.id
+        WHERE r.tenantId = ? 
+        ORDER BY r.id DESC`,
         [tenantId]
       );
       const enrichedRows = rows.map((r) => {
@@ -245,7 +267,7 @@ export function registerRentalRoutes(router: Router): void {
   });
 
   router.post('/rentals', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
-    const { tenantId, propertyId, propertyName, price, durationMonths, signature } = req.body;
+    const { tenantId, propertyId, propertyName, price, durationMonths, signature, roomId } = req.body;
     const authUser = req.user;
     if (!tenantId || !propertyId) {
       return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
@@ -283,6 +305,14 @@ export function registerRentalRoutes(router: Router): void {
     try {
       await connection.beginTransaction();
 
+      // Strict Lock Hierarchy: users -> properties -> rentals -> rooms
+      const [userRows] = await connection.query<UserRow[]>('SELECT * FROM users WHERE id = ? FOR UPDATE', [tenantId]);
+      const tenant = userRows[0];
+      if (!tenant) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Pengguna tidak ditemukan." });
+      }
+
       const [propRows] = await connection.query<PropertyRow[]>(
         'SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ? FOR UPDATE',
         [propertyId]
@@ -294,7 +324,7 @@ export function registerRentalRoutes(router: Router): void {
       }
 
       const [existingRentals] = await connection.query<RentalRow[]>(
-        'SELECT id, status, document FROM rentals WHERE id = ? FOR UPDATE',
+        'SELECT id, status, document, roomId FROM rentals WHERE id = ? FOR UPDATE',
         [rentalId]
       );
 
@@ -313,11 +343,40 @@ export function registerRentalRoutes(router: Router): void {
         return res.status(400).json({ message: "Kamar kos sudah penuh." });
       }
 
-      const [userRows] = await connection.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [tenantId]);
-      const tenant = userRows[0];
-      if (!tenant) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Pengguna tidak ditemukan." });
+      // Discrete Room Lock
+      let assignedRoom: RoomRow | undefined;
+      const targetRoomId = roomId || existingRentals[0]?.roomId;
+      if (targetRoomId) {
+        const [roomRows] = await connection.query<RoomRow[]>(
+          'SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE',
+          [targetRoomId, propertyId]
+        );
+        assignedRoom = roomRows[0];
+        if (!assignedRoom) {
+          await connection.rollback();
+          return res.status(404).json({ message: 'Kamar tidak ditemukan pada properti ini.' });
+        }
+        if (assignedRoom.status !== 'available') {
+          await connection.rollback();
+          return res.status(409).json({ message: 'Kamar sudah terisi atau tidak tersedia.' });
+        }
+      } else {
+        const [availRooms] = await connection.query<RoomRow[]>(
+          "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
+          [propertyId]
+        );
+        if (availRooms.length > 0) {
+          assignedRoom = availRooms[0];
+        } else {
+          const [countRows] = await connection.query<RowDataPacket[]>(
+            'SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?',
+            [propertyId]
+          );
+          if (Number(countRows[0]?.count || 0) > 0) {
+            await connection.rollback();
+            return res.status(409).json({ message: 'Kamar sudah terisi atau tidak tersedia.' });
+          }
+        }
       }
 
       // Check legal profile completeness
@@ -346,7 +405,9 @@ export function registerRentalRoutes(router: Router): void {
       const startDate = (req.body.startDate && typeof req.body.startDate === 'string' && req.body.startDate.trim() !== '')
         ? req.body.startDate.trim()
         : new Date().toISOString().split('T')[0];
-      const rentalPrice = price || property.price;
+      const rentalPrice = (assignedRoom && typeof assignedRoom.price === 'number' && assignedRoom.price > 0)
+        ? Number(assignedRoom.price)
+        : (price || property.price);
       const rentalName = propertyName || property.name;
 
       let documentPath = 'sertifikat_kepemilikan.pdf';
@@ -379,22 +440,27 @@ export function registerRentalRoutes(router: Router): void {
       if (existingRentals.length > 0) {
         await connection.query(
           `UPDATE rentals 
-           SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ?, duration_months = ? 
+           SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ?, duration_months = ?, roomId = COALESCE(roomId, ?) 
            WHERE id = ?`,
-          [documentPath, rentalName, rentalPrice, startDate, rentalDuration, rentalId]
+          [documentPath, rentalName, rentalPrice, startDate, rentalDuration, assignedRoom?.id || null, rentalId]
         );
       } else {
         await connection.query(
-          `INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status, document, duration_months) 
-           VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-          [rentalId, tenantId, propertyId, rentalName, rentalPrice, startDate, documentPath, rentalDuration]
+          `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, document, duration_months) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+          [rentalId, tenantId, propertyId, assignedRoom?.id || null, rentalName, rentalPrice, startDate, documentPath, rentalDuration]
         );
       }
 
-      await connection.query(
-        'UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?',
-        [propertyId]
-      );
+      if (assignedRoom) {
+        await connection.query("UPDATE rooms SET status = 'occupied' WHERE id = ?", [assignedRoom.id]);
+        await syncPropertyRoomCounts(connection, propertyId);
+      } else {
+        await connection.query(
+          'UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?',
+          [propertyId]
+        );
+      }
 
       if (property.ownerId) {
         await connection.query(
@@ -431,28 +497,19 @@ export function registerRentalRoutes(router: Router): void {
     try {
       await connection.beginTransaction();
 
-      const [rentalRows] = await connection.query<RentalRow[]>('SELECT * FROM rentals WHERE id = ? FOR UPDATE', [id]);
-      const rental = rentalRows[0];
-      if (!rental) {
+      // Early lookup of target rental
+      const [earlyRentalRows] = await connection.query<RentalRow[]>(
+        'SELECT id, tenantId, propertyId, roomId, status FROM rentals WHERE id = ?',
+        [id]
+      );
+      const earlyRental = earlyRentalRows[0];
+      if (!earlyRental) {
         await connection.rollback();
         return res.status(404).json({ message: "Data sewa tidak ditemukan." });
       }
-      if (rental.status === 'terminated') {
+      if (earlyRental.status === 'terminated') {
         await connection.rollback();
         return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
-      }
-
-      // Check authorization: caller must be tenant, property landlord, or admin
-      const [propRows] = await connection.query<PropertyRow[]>('SELECT ownerId FROM properties WHERE id = ?', [rental.propertyId]);
-      const property = propRows[0];
-
-      const isTenant = authUser?.id === rental.tenantId;
-      const isOwner = property && authUser?.id === property.ownerId;
-      const isAdmin = authUser?.role === 'admin';
-
-      if (!isTenant && !isOwner && !isAdmin) {
-        await connection.rollback();
-        return res.status(403).json({ message: "Akses ditolak. Anda tidak berhak memberhentikan sewa ini." });
       }
 
       // Verify caller's own password
@@ -463,17 +520,57 @@ export function registerRentalRoutes(router: Router): void {
         return res.status(401).json({ message: "Password salah." });
       }
 
+      // Strict Lock Hierarchy: users -> properties -> rentals -> rooms
+      // 1. Properties row lock
+      const [propRows] = await connection.query<PropertyRow[]>(
+        'SELECT id, ownerId, totalRooms, occupiedRooms FROM properties WHERE id = ? FOR UPDATE',
+        [earlyRental.propertyId]
+      );
+      const property = propRows[0];
+
+      // Check authorization: caller must be tenant, property landlord, or admin
+      const isTenant = authUser?.id === earlyRental.tenantId;
+      const isOwner = property && authUser?.id === property.ownerId;
+      const isAdmin = authUser?.role === 'admin';
+
+      if (!isTenant && !isOwner && !isAdmin) {
+        await connection.rollback();
+        return res.status(403).json({ message: "Akses ditolak. Anda tidak berhak memberhentikan sewa ini." });
+      }
+
+      // 2. Rentals row lock
+      const [rentalRows] = await connection.query<RentalRow[]>(
+        'SELECT id, tenantId, propertyId, roomId, status FROM rentals WHERE id = ? FOR UPDATE',
+        [id]
+      );
+      const rental = rentalRows[0];
+      if (!rental) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Data sewa tidak ditemukan." });
+      }
+      if (rental.status === 'terminated') {
+        await connection.rollback();
+        return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
+      }
+
+      // 3. Rooms row lock and release
+      if (rental.status === 'active') {
+        if (rental.roomId) {
+          await connection.query('SELECT id, status FROM rooms WHERE id = ? FOR UPDATE', [rental.roomId]);
+          await connection.query("UPDATE rooms SET status = 'available' WHERE id = ?", [rental.roomId]);
+          await syncPropertyRoomCounts(connection, rental.propertyId);
+        } else {
+          await connection.query(
+            'UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?',
+            [rental.propertyId]
+          );
+        }
+      }
+
       await connection.query(
         "UPDATE rentals SET status = 'terminated' WHERE id = ?",
         [id]
       );
-
-      if (rental.status === 'active') {
-        await connection.query(
-          'UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?',
-          [rental.propertyId]
-        );
-      }
 
       await connection.commit();
       apiCache.invalidatePattern('properties');

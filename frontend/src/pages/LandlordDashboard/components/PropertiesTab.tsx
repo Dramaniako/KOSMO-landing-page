@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Star, Edit, Trash2 } from 'lucide-react';
+import { Plus, Star, Edit, Trash2, Layers, Camera } from 'lucide-react';
 import { Property } from '../../../types/index';
 import { formatRupiah } from '../../../utils/format';
 import { shimmerStyle } from '../types';
@@ -10,6 +10,8 @@ export interface PropertiesTabProps {
   onAddProperty: () => void;
   onEditProperty: (p: Property) => void;
   onDeleteProperty: (id: string) => void;
+  onManageRooms: (p: Property) => void;
+  onManagePhotos: (p: Property) => void;
 }
 
 export default function PropertiesTab({
@@ -17,7 +19,9 @@ export default function PropertiesTab({
   loading,
   onAddProperty,
   onEditProperty,
-  onDeleteProperty
+  onDeleteProperty,
+  onManageRooms,
+  onManagePhotos
 }: PropertiesTabProps) {
   return (
     <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
@@ -75,12 +79,46 @@ export default function PropertiesTab({
                     </div>
                   </td>
                   <td style={{ padding: '16px', textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '8px' }}>
-                      <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => onEditProperty(p)}>
-                        <Edit size={14} />
+                    <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        style={{ padding: '6px 10px', fontSize: '12px' }}
+                        data-testid="manage-rooms-btn"
+                        onClick={() => onManageRooms(p)}
+                        title="Kelola Inventaris Kamar"
+                      >
+                        <Layers size={13} />
+                        Kelola Kamar
                       </button>
-                      <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => onDeleteProperty(p.id)}>
-                        <Trash2 size={14} />
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        style={{ padding: '6px 10px', fontSize: '12px' }}
+                        data-testid="manage-photos-btn"
+                        onClick={() => onManagePhotos(p)}
+                        title="Kelola Galeri Foto"
+                      >
+                        <Camera size={13} />
+                        Kelola Foto
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        style={{ padding: '6px 10px' }}
+                        onClick={() => onEditProperty(p)}
+                        title="Edit Data Properti"
+                      >
+                        <Edit size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        style={{ padding: '6px 10px' }}
+                        onClick={() => onDeleteProperty(p.id)}
+                        title="Hapus Properti"
+                      >
+                        <Trash2 size={13} />
                       </button>
                     </div>
                   </td>

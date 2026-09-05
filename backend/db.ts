@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import type { Connection, ConnectionOptions, FieldPacket, QueryResult, RowDataPacket } from 'mysql2/promise';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
@@ -127,8 +128,14 @@ export async function ensureIndexes(executor: QueryExecutor = pool): Promise<voi
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_room (roomId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_contract_hash (contract_hash)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_signed_at (contract_signed_at)",
+    "ALTER TABLE rooms ADD INDEX idx_rooms_property_status (propertyId, status)",
+    "ALTER TABLE rooms ADD INDEX idx_rooms_status (status)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_property (propertyId, orderIndex)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_room (roomId, orderIndex)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_category (category)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
@@ -236,6 +243,23 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
   // Tier 2: Leaf tables with foreign keys pointing to properties and users
   await Promise.all([
     executor.query(`
+      CREATE TABLE IF NOT EXISTS rooms (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        roomNumber VARCHAR(20) NOT NULL,
+        floor INT NOT NULL DEFAULT 1,
+        type VARCHAR(50) NOT NULL DEFAULT 'Standard',
+        price INT NULL,
+        status ENUM('available', 'occupied', 'maintenance') NOT NULL DEFAULT 'available',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_property_room_number (propertyId, roomNumber),
+        INDEX idx_rooms_property_status (propertyId, status),
+        INDEX idx_rooms_status (status),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
       CREATE TABLE IF NOT EXISTS property_facilities (
         propertyId VARCHAR(50),
         facility VARCHAR(50),
@@ -265,6 +289,7 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         tenantId VARCHAR(50) NOT NULL,
         propertyId VARCHAR(50) NOT NULL,
         propertyName VARCHAR(100) NOT NULL,
+        roomId VARCHAR(50),
         price INT NOT NULL,
         startDate VARCHAR(50) NOT NULL,
         status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending',
@@ -280,6 +305,7 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         duration_months INT DEFAULT 1,
         INDEX idx_rentals_tenant_status (tenantId, status),
         INDEX idx_rentals_property_status (propertyId, status),
+        INDEX idx_rentals_room (roomId),
         INDEX idx_rentals_contract_hash (contract_hash),
         INDEX idx_rentals_signed_at (contract_signed_at),
         FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
@@ -287,6 +313,230 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
   ]);
+
+  // Tier 3: Leaf tables referencing rooms and properties
+  await Promise.all([
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS property_photos (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        roomId VARCHAR(50) NULL,
+        url VARCHAR(500) NOT NULL,
+        publicId VARCHAR(255) NULL,
+        category VARCHAR(50) NOT NULL DEFAULT 'other',
+        caption VARCHAR(255) DEFAULT '',
+        orderIndex INT NOT NULL DEFAULT 0,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_photos_property (propertyId, orderIndex),
+        INDEX idx_photos_room (roomId, orderIndex),
+        INDEX idx_photos_category (category),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
+        FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `)
+  ]);
+}
+
+interface RoomCountSummaryRow extends RowDataPacket {
+  total: number | string;
+  occupied: number | string;
+}
+
+interface PropertyBackfillRow extends RowDataPacket {
+  id: string;
+  name: string;
+  totalRooms: number | string;
+  occupiedRooms: number | string;
+  price: number | string;
+  image: string | null;
+}
+
+interface CountRow extends RowDataPacket {
+  count: number | string;
+}
+
+interface RoomCandidateRow extends RowDataPacket {
+  id: string;
+}
+
+interface RentalUnlinkedRow extends RowDataPacket {
+  id: string;
+  propertyId: string;
+}
+
+/**
+ * Atomically recalculates and synchronizes `properties.totalRooms` and `properties.occupiedRooms`
+ * from the discrete `rooms` inventory table.
+ *
+ * @param executor QueryExecutor (pool or transactional Connection)
+ * @param propertyId Target property ID to synchronize
+ * @returns Synchronized totalRooms and occupiedRooms counts
+ */
+export async function syncPropertyRoomCounts(
+  executor: QueryExecutor,
+  propertyId: string
+): Promise<{ totalRooms: number; occupiedRooms: number }> {
+  const [rows] = await executor.query<RoomCountSummaryRow[]>(
+    `SELECT 
+       COUNT(*) as total,
+       COALESCE(SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END), 0) as occupied
+     FROM rooms 
+     WHERE propertyId = ?`,
+    [propertyId]
+  );
+
+  const totalRooms = Number(rows[0]?.total || 0);
+  const occupiedRooms = Number(rows[0]?.occupied || 0);
+
+  await executor.query(
+    'UPDATE properties SET totalRooms = ?, occupiedRooms = ? WHERE id = ?',
+    [totalRooms, occupiedRooms, propertyId]
+  );
+
+  return { totalRooms, occupiedRooms };
+}
+
+/**
+ * Deterministically provisions discrete rooms and gallery thumbnails for existing properties,
+ * and links existing active tenancies lacking a roomId to occupied rooms.
+ *
+ * Strictly idempotent: Multiple invocations will not duplicate rooms, create duplicate photos,
+ * or alter active assignments.
+ *
+ * @param executor QueryExecutor (defaults to pool)
+ */
+export async function backfillDiscreteRooms(executor: QueryExecutor = pool): Promise<void> {
+  // 1. Fetch all existing properties
+  const [properties] = await executor.query<PropertyBackfillRow[]>(
+    'SELECT id, name, totalRooms, occupiedRooms, price, image FROM properties ORDER BY id ASC'
+  );
+
+  for (const prop of properties) {
+    const propId = String(prop.id);
+    const total = Number(prop.totalRooms || 0);
+    const occupied = Math.max(0, Math.min(total, Number(prop.occupiedRooms || 0)));
+
+    if (total <= 0) continue;
+
+    // Check if discrete rooms already exist for this property
+    const [existingRooms] = await executor.query<CountRow[]>(
+      'SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?',
+      [propId]
+    );
+
+    const roomCount = Number(existingRooms[0]?.count || 0);
+
+    if (roomCount === 0) {
+      // Deterministically provision `total` rooms (10 rooms per floor: 101-110, 201-210...)
+      for (let i = 1; i <= total; i++) {
+        const floor = Math.floor((i - 1) / 10) + 1;
+        const roomIndex = ((i - 1) % 10) + 1;
+        const roomNumber = `${floor}${String(roomIndex).padStart(2, '0')}`;
+        const rawId = `room-${propId}-${roomNumber}`;
+        const roomId = rawId.length <= 50
+          ? rawId
+          : `rm-${crypto.createHash('md5').update(`${propId}-${roomNumber}`).digest('hex').slice(0, 24)}`;
+        const status = i <= occupied ? 'occupied' : 'available';
+        const type = i % 2 === 0 ? 'Deluxe' : 'Standard';
+
+        await executor.query(
+          `INSERT INTO rooms (id, propertyId, roomNumber, floor, type, price, status)
+           VALUES (?, ?, ?, ?, ?, NULL, ?)
+           ON DUPLICATE KEY UPDATE id = id`,
+          [roomId, propId, roomNumber, floor, type, status]
+        );
+      }
+    }
+
+    // Provision initial thumbnail in property_photos if property has an image and 0 gallery photos
+    const imageUrl = typeof prop.image === 'string' ? prop.image.trim() : '';
+    if (imageUrl.length > 0) {
+      const [existingPhotos] = await executor.query<CountRow[]>(
+        'SELECT COUNT(*) as count FROM property_photos WHERE propertyId = ?',
+        [propId]
+      );
+      const photoCount = Number(existingPhotos[0]?.count || 0);
+
+      if (photoCount === 0) {
+        const rawPhotoId = `photo-${propId}-thumb`;
+        const photoId = rawPhotoId.length <= 50
+          ? rawPhotoId
+          : `ph-${crypto.createHash('md5').update(`${propId}-thumb`).digest('hex').slice(0, 24)}`;
+        const safeUrl = imageUrl.slice(0, 500);
+
+        await executor.query(
+          `INSERT INTO property_photos (id, propertyId, roomId, url, category, caption, orderIndex)
+           VALUES (?, ?, NULL, ?, 'thumbnail', 'Foto Utama Properti', 0)
+           ON DUPLICATE KEY UPDATE url = VALUES(url)`,
+          [photoId, propId, safeUrl]
+        );
+      }
+    }
+  }
+
+  // 2. Link unlinked active rentals to occupied rooms on corresponding property
+  const [unlinkedRentals] = await executor.query<RentalUnlinkedRow[]>(
+    `SELECT id, propertyId FROM rentals 
+     WHERE (roomId IS NULL OR roomId = '') AND status = 'active'
+     ORDER BY id ASC`
+  );
+
+  for (const rental of unlinkedRentals) {
+    const rentalId = String(rental.id);
+    const propertyId = String(rental.propertyId);
+
+    // Find the first occupied room on this property not yet assigned to an active rental
+    const [candidateRooms] = await executor.query<RoomCandidateRow[]>(
+      `SELECT r.id FROM rooms r
+       LEFT JOIN rentals ren ON r.id = ren.roomId AND ren.status = 'active'
+       WHERE r.propertyId = ? AND r.status = 'occupied' AND ren.id IS NULL
+       ORDER BY r.floor ASC, r.roomNumber ASC
+       LIMIT 1`,
+      [propertyId]
+    );
+
+    let targetRoomId: string | null = candidateRooms[0]?.id ? String(candidateRooms[0].id) : null;
+
+    // Fallback: If no unassigned occupied room exists, allocate an available room and mark occupied
+    if (!targetRoomId) {
+      const [fallbackRooms] = await executor.query<RoomCandidateRow[]>(
+        `SELECT r.id FROM rooms r
+         LEFT JOIN rentals ren ON r.id = ren.roomId AND ren.status = 'active'
+         WHERE r.propertyId = ? AND r.status = 'available' AND ren.id IS NULL
+         ORDER BY r.floor ASC, r.roomNumber ASC
+         LIMIT 1`,
+        [propertyId]
+      );
+
+      if (fallbackRooms.length > 0 && fallbackRooms[0]?.id) {
+        targetRoomId = String(fallbackRooms[0].id);
+        await executor.query(
+          "UPDATE rooms SET status = 'occupied' WHERE id = ?",
+          [targetRoomId]
+        );
+      }
+    }
+
+    if (targetRoomId) {
+      await executor.query(
+        'UPDATE rentals SET roomId = ? WHERE id = ?',
+        [targetRoomId, rentalId]
+      );
+    }
+  }
+
+  // 3. Enforce that any room linked to an active rental is marked 'occupied'
+  await executor.query(
+    `UPDATE rooms r
+     JOIN rentals ren ON r.id = ren.roomId
+     SET r.status = 'occupied'
+     WHERE ren.status = 'active' AND r.status != 'occupied'`
+  );
+
+  // 4. Synchronize aggregate room counters for all properties
+  for (const prop of properties) {
+    await syncPropertyRoomCounts(executor, String(prop.id));
+  }
 }
 
 export async function applyMigrations(executor: QueryExecutor = pool): Promise<void> {
@@ -299,6 +549,47 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
       }
     }
   };
+
+  // Idempotent table creations for existing/migrated databases
+  try {
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS rooms (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        roomNumber VARCHAR(20) NOT NULL,
+        floor INT NOT NULL DEFAULT 1,
+        type VARCHAR(50) NOT NULL DEFAULT 'Standard',
+        price INT NULL,
+        status ENUM('available', 'occupied', 'maintenance') NOT NULL DEFAULT 'available',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_property_room_number (propertyId, roomNumber),
+        INDEX idx_rooms_property_status (propertyId, status),
+        INDEX idx_rooms_status (status),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS property_photos (
+        id VARCHAR(50) PRIMARY KEY,
+        propertyId VARCHAR(50) NOT NULL,
+        roomId VARCHAR(50) NULL,
+        url VARCHAR(500) NOT NULL,
+        publicId VARCHAR(255) NULL,
+        category VARCHAR(50) NOT NULL DEFAULT 'other',
+        caption VARCHAR(255) DEFAULT '',
+        orderIndex INT NOT NULL DEFAULT 0,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_photos_property (propertyId, orderIndex),
+        INDEX idx_photos_room (roomId, orderIndex),
+        INDEX idx_photos_category (category),
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
+        FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+  } catch {
+    // Safe ignore if tables already exist
+  }
 
   const propertiesQueries = [
     'ALTER TABLE properties MODIFY image LONGTEXT',
@@ -340,7 +631,8 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_nik_passport VARCHAR(50)",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS roomId VARCHAR(50)"
   ];
 
   // Run per-table migration pipelines in parallel
@@ -353,6 +645,11 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
   ]);
 
   await ensureIndexes(executor);
+  try {
+    await backfillDiscreteRooms(executor);
+  } catch (err) {
+    console.warn('Initial backfillDiscreteRooms skipped or deferred:', err);
+  }
 }
 
 export async function seedUsers(executor: QueryExecutor = pool): Promise<void> {
@@ -438,6 +735,8 @@ export async function seedDatabase(executor: QueryExecutor = pool): Promise<void
   await seedPropertiesAndFacilities(executor);
   // Step 3: Tenant reviews
   await seedReviews(executor);
+  // Step 4: Discrete room inventory auto-backfill & thumbnail seeding
+  await backfillDiscreteRooms(executor);
 }
 
 export async function initDb(): Promise<void> {
@@ -474,7 +773,9 @@ export async function initDb(): Promise<void> {
         'reviews',
         'withdrawals',
         'visitor_tracking',
-        'rentals'
+        'rentals',
+        'rooms',
+        'property_photos'
       ];
       
       const missingTables = requiredTables.filter(t => !existingTables.includes(t));

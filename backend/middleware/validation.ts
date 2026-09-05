@@ -124,6 +124,7 @@ export const previewContractSchema = z.object({
     .max(120, 'Durasi sewa maksimal 120 bulan')
     .optional()
     .default(1),
+  roomId: z.string().optional(),
   startDate: z.string().optional(),
   tenantNikPassport: z
     .string()
@@ -149,6 +150,7 @@ export const signContractSchema = z.object({
     .int('Durasi sewa harus berupa bilangan bulat')
     .min(1, 'Durasi sewa minimal 1 bulan')
     .max(120, 'Durasi sewa maksimal 120 bulan'),
+  roomId: z.string().optional(),
   startDate: z.string().min(1, 'Tanggal mulai sewa wajib diisi'),
   tenantNikPassport: z
     .string()
@@ -187,3 +189,60 @@ export function validateBody<T extends z.ZodTypeAny>(schema: T) {
     next();
   };
 }
+
+export const createRoomSchema = z.object({
+  roomNumber: z.string().trim().min(1, 'Nomor kamar wajib diisi'),
+  floor: z
+    .preprocess(
+      (val) => (val !== undefined && val !== null ? Number(val) : 1),
+      z.number().int('Nomor lantai harus berupa bilangan bulat').min(0, 'Nomor lantai minimal 0')
+    )
+    .default(1),
+  type: z.string().trim().min(1, 'Tipe kamar wajib diisi').default('Standard'),
+  price: z
+    .preprocess(
+      (val) => (val === '' || val === null || val === undefined ? null : Number(val)),
+      z.number().positive('Harga kamar harus lebih besar dari 0').nullable().optional()
+    ),
+  status: z.enum(['available', 'occupied', 'maintenance']).default('available')
+});
+
+export const updateRoomSchema = z.object({
+  roomNumber: z.string().trim().min(1, 'Nomor kamar tidak boleh kosong').optional(),
+  floor: z
+    .preprocess(
+      (val) => (val !== undefined && val !== null ? Number(val) : undefined),
+      z.number().int('Nomor lantai harus berupa bilangan bulat').min(0, 'Nomor lantai minimal 0').optional()
+    ),
+  type: z.string().trim().min(1, 'Tipe kamar tidak boleh kosong').optional(),
+  price: z
+    .preprocess(
+      (val) => (val === '' || val === null || val === undefined ? null : Number(val)),
+      z.number().positive('Harga kamar harus lebih besar dari 0').nullable().optional()
+    ),
+  status: z.enum(['available', 'occupied', 'maintenance']).optional()
+});
+
+export const updateRoomStatusSchema = z.object({
+  status: z.enum(['available', 'maintenance'], {
+    message: "Status kamar hanya dapat diubah antara 'available' atau 'maintenance'"
+  })
+});
+
+export const deleteRoomSchema = z.object({
+  password: z.string().min(1, 'Password konfirmasi diperlukan')
+});
+
+export const reorderPhotosSchema = z.object({
+  photoIds: z
+    .array(z.string().trim().min(1, 'ID foto tidak boleh kosong'), {
+      message: 'photoIds harus berupa array string ID foto'
+    })
+    .min(1, 'Daftar ID foto wajib memiliki minimal 1 item')
+    .refine(
+      (ids) => new Set(ids).size === ids.length,
+      'Daftar ID foto tidak boleh mengandung duplikasi'
+    )
+});
+
+

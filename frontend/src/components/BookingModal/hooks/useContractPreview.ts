@@ -14,7 +14,8 @@ export function useContractPreview() {
     durationMonths: number,
     startDate: string,
     tenantNikPassport: string,
-    signatureBase64?: string
+    signatureBase64?: string,
+    roomId?: string
   ) => {
     setPreviewLoading(true);
     setPreviewError(null);
@@ -31,7 +32,8 @@ export function useContractPreview() {
           durationMonths,
           startDate,
           tenantNikPassport,
-          signatureBase64: signatureBase64 || undefined
+          signatureBase64: signatureBase64 || undefined,
+          roomId: roomId || undefined
         })
       });
 

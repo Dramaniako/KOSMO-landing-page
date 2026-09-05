@@ -11,7 +11,7 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
   };
 
   test.beforeAll(async ({ request }) => {
-    // Reset occupiedRooms on test properties to ensure rooms are available
+    // Reset occupiedRooms and ensure discrete room availability on test properties
     try {
       const loginRes = await request.post('/api/auth/login', {
         data: { email: 'admin@kosmo.com', password: 'admin' }
@@ -19,14 +19,49 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
       if (loginRes.ok()) {
         const loginData = (await loginRes.json()) as { token: string };
         const token = loginData.token;
-        await request.put('/api/properties/prop-01', {
-          headers: { Authorization: `Bearer ${token}` },
-          data: { occupiedRooms: 0, totalRooms: 50 }
-        });
-        await request.put('/api/properties/prop-02', {
-          headers: { Authorization: `Bearer ${token}` },
-          data: { occupiedRooms: 0, totalRooms: 50 }
-        });
+
+        for (const propId of ['prop-01', 'prop-02']) {
+          // 1. Inspect existing discrete rooms on target test property
+          const roomsRes = await request.get(`/api/properties/${propId}/rooms`);
+          let availableCount = 0;
+          if (roomsRes.ok()) {
+            const rooms = (await roomsRes.json()) as Array<{ id: string; status: string }>;
+            for (const room of rooms) {
+              if (room.status === 'available') {
+                availableCount++;
+              } else {
+                // Attempt to toggle status back to 'available' (succeeds if no active tenancy locks it)
+                const patchRes = await request.patch(`/api/properties/${propId}/rooms/${room.id}/status`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                  data: { status: 'available' }
+                });
+                if (patchRes.ok()) {
+                  availableCount++;
+                }
+              }
+            }
+          }
+
+          // 2. Guarantee at least 3 available rooms by provisioning fresh rooms if needed
+          while (availableCount < 3) {
+            const uniqueNum = `RF-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 1000)}`;
+            const addRes = await request.post(`/api/properties/${propId}/rooms`, {
+              headers: { Authorization: `Bearer ${token}` },
+              data: {
+                roomNumber: uniqueNum,
+                floor: 1,
+                type: 'Standard',
+                price: 3500000,
+                status: 'available'
+              }
+            });
+            if (addRes.ok()) {
+              availableCount++;
+            } else {
+              break;
+            }
+          }
+        }
       }
     } catch (e) {
       console.warn('Property occupancy reset fallback:', e);

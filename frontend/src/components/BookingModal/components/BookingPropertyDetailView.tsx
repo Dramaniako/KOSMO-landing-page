@@ -1,8 +1,10 @@
 import React from 'react';
 import { MapPin, Star, Sparkles, ShieldCheck, Download, CheckCircle2, FileText, Eye, AlertCircle, AlertTriangle, ArrowRight } from 'lucide-react';
-import { Property, User } from '../../../types/index';
+import { Property, User, PropertyPhoto, Room } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
 import { formatRupiah } from '../../../utils/format';
+import { PropertyPhotoGallery } from './PropertyPhotoGallery';
+import { RoomSelectionGrid } from './RoomSelectionGrid';
 
 export interface BookingPropertyDetailViewProps {
   property: Property;
@@ -24,6 +26,12 @@ export interface BookingPropertyDetailViewProps {
     missingFields: string[];
     missingFieldLabels: string[];
   };
+  photos?: PropertyPhoto[];
+  photosLoading?: boolean;
+  rooms?: Room[];
+  roomsLoading?: boolean;
+  selectedRoom?: Room | null;
+  onSelectRoom?: (room: Room) => void;
   onClose: () => void;
   onBookNow: () => void;
   onNavigateToLogin: () => void;
@@ -44,54 +52,51 @@ export default function BookingPropertyDetailView({
   activeRentalError,
   currentUser,
   profileStatus,
+  photos = [],
+  photosLoading = false,
+  rooms = [],
+  roomsLoading = false,
+  selectedRoom = null,
+  onSelectRoom,
   onClose,
   onBookNow,
   onNavigateToLogin
 }: BookingPropertyDetailViewProps) {
   const { t } = useTranslation();
 
+  const displayPrice =
+    selectedRoom && typeof (selectedRoom.effectivePrice ?? selectedRoom.price) === 'number' && Number(selectedRoom.effectivePrice ?? selectedRoom.price) > 0
+      ? Number(selectedRoom.effectivePrice ?? selectedRoom.price)
+      : price;
+
+  const hasDiscreteRooms = Boolean(onSelectRoom && Array.isArray(rooms));
+  const isRoomSelectionRequired = hasDiscreteRooms && (rooms.length === 0 || !selectedRoom);
+  const isBookDisabled =
+    isFull ||
+    hasActiveRental ||
+    Boolean(activeRentalError) ||
+    !profileStatus.complete ||
+    Boolean(hasDiscreteRooms && roomsLoading) ||
+    isRoomSelectionRequired;
+
+  // Auto-select first available room when discrete rooms inventory loads and none selected
+  React.useEffect(() => {
+    if (!selectedRoom && onSelectRoom && Array.isArray(rooms) && rooms.length > 0) {
+      const firstAvailable = rooms.find((r) => r && r.status === 'available');
+      if (firstAvailable) {
+        onSelectRoom(firstAvailable);
+      }
+    }
+  }, [rooms, selectedRoom, onSelectRoom]);
+
   return (
     <div className="flex flex-col">
-      {/* Hero Image Media Banner */}
-      <div className="relative w-full h-64 sm:h-72 bg-slate-100 dark:bg-slate-800 overflow-hidden flex-shrink-0">
-        <img
-          src={image}
-          alt={property.name || 'Kosmo Property'}
-          className="w-full h-full object-cover"
-          loading="eager"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src =
-              'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
-          }}
-        />
-        {/* Cinematic Gradient Overlays */}
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/20 to-black/30 pointer-events-none" />
-
-        {/* Floating Top Badges (Left) */}
-        <div className="absolute top-4 left-4 flex flex-wrap items-center gap-2 z-10">
-          <span className="px-3 py-1 rounded-full text-xs font-bold backdrop-blur-md shadow-md flex items-center gap-1.5 bg-blue-600/90 text-white">
-            <Sparkles size={12} className="text-amber-300" />
-            <span>KOSMO Living</span>
-          </span>
-
-          <span className="bg-slate-900/80 text-white backdrop-blur-md px-2.5 py-1 rounded-full text-xs font-medium shadow-md">
-            {property.district || 'Bali'}
-          </span>
-        </div>
-
-        {/* Floating Bottom Quick Info over Hero */}
-        <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between text-white z-10">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 text-xs font-medium text-slate-200">
-            <MapPin size={13} className="text-blue-400 flex-shrink-0" />
-            <span className="line-clamp-1">{property.district || 'Bali'}, Bali</span>
-          </div>
-          <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 text-xs font-bold text-amber-400">
-            <Star size={13} className="fill-amber-400 text-amber-400" />
-            <span>{property.rating && Number(property.rating) > 0 ? Number(property.rating).toFixed(1) : '4.9'}</span>
-            <span className="text-slate-300 font-normal text-[11px]">(Terverifikasi)</span>
-          </div>
-        </div>
-      </div>
+      {/* Interactive Photo Gallery */}
+      <PropertyPhotoGallery
+        property={property}
+        photos={photos}
+        loading={photosLoading}
+      />
 
       {/* Modal Body Container */}
       <div className="p-5 sm:p-6 flex flex-col gap-5">
@@ -109,7 +114,7 @@ export default function BookingPropertyDetailView({
 
           <div className="sm:text-right flex-shrink-0 bg-blue-50/70 dark:bg-blue-950/40 sm:bg-transparent p-3 sm:p-0 rounded-xl border border-blue-100 dark:border-blue-900/50 sm:border-0">
             <div className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight property-price">
-              {formatRupiah(price)}
+              {formatRupiah(displayPrice)}
             </div>
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5 flex items-center sm:justify-end gap-1">
               <span>{t('prop.perMonth')}</span>
@@ -236,6 +241,17 @@ export default function BookingPropertyDetailView({
           </div>
         </div>
 
+        {/* Discrete Room Selection Grid */}
+        {hasDiscreteRooms && onSelectRoom && (
+          <RoomSelectionGrid
+            rooms={rooms}
+            selectedRoom={selectedRoom}
+            onSelectRoom={onSelectRoom}
+            basePrice={price}
+            loading={roomsLoading}
+          />
+        )}
+
         {/* Interactive Location Map */}
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -311,7 +327,7 @@ export default function BookingPropertyDetailView({
             <button
               type="button"
               className="btn btn-primary flex-[2] py-2.5 rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={isFull || hasActiveRental || Boolean(activeRentalError) || !profileStatus.complete}
+              disabled={isBookDisabled}
               onClick={onBookNow}
             >
               {!profileStatus.complete

@@ -14,6 +14,8 @@ export interface UtilityQuotas {
 
 export interface RentalContractData {
   rentalId?: string;
+  roomId?: string;
+  roomNumber?: string;
   propertyName: string;
   propertyAddress?: string;
   landlordName?: string;
@@ -198,7 +200,7 @@ export function generateRentalContractBuffer(data: RentalContractData): Promise<
       doc.font('Helvetica-Oblique').fontSize(6.5).fillColor('#64748b')
         .text('ARTICLE 2: PREMISES & BALI LOCATION', 42, gridY + 14);
       doc.font('Helvetica').fontSize(7).fillColor('#334155')
-        .text(`• Unit / Room    : ${data.propertyName}`, 42, gridY + 26)
+        .text(`• Unit / Room    : ${data.propertyName}${data.roomNumber ? ` (Kamar ${data.roomNumber})` : ''}`, 42, gridY + 26)
         .text(`• Alamat / Addr  : ${propertyAddress}`, 42, gridY + 38, { width: colWidth - 12 })
         .text(`• Mulai / Start  : ${data.startDate} • Durasi: ${duration} Bulan / Month(s)`, 42, gridY + 60);
 

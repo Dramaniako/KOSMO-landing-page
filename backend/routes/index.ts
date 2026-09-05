@@ -1,0 +1,12 @@
+export { registerSystemRoutes } from './system.routes';
+export { registerAuthRoutes } from './auth.routes';
+export { registerUserRoutes } from './users.routes';
+export { registerPropertyRoutes } from './properties.routes';
+export { registerReviewRoutes } from './reviews.routes';
+export { registerLandlordRoutes } from './landlord.routes';
+export { registerTrackingRoutes } from './tracking.routes';
+export { registerContractRoutes } from './contracts.routes';
+export { registerRentalRoutes } from './rentals.routes';
+export { registerPaymentRoutes } from './payment.routes';
+export { registerRoomRoutes } from './rooms.routes';
+export { registerPhotoRoutes } from './photos.routes';

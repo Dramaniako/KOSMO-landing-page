@@ -188,5 +188,37 @@ export function uploadContractStream(
   });
 }
 
+/**
+ * Deletes an image from Cloudinary by its public ID.
+ * Gracefully resolves mock status in test environments and unconfigured states.
+ */
+export function deleteCloudinaryImage(publicId: string): Promise<{ result: string }> {
+  return new Promise((resolve) => {
+    if (!publicId || typeof publicId !== 'string' || publicId.trim() === '') {
+      return resolve({ result: 'not_found' });
+    }
+
+    const isConfigured = isCloudinaryConfigured();
+    const isTest = process.env.NODE_ENV === 'test';
+
+    if (!isConfigured || (isTest && process.env.ALLOW_LIVE_CLOUDINARY !== 'true')) {
+      return resolve({ result: 'ok' });
+    }
+
+    cloudinary.uploader.destroy(
+      publicId.trim(),
+      { resource_type: 'image', invalidate: true },
+      (error, result) => {
+        if (error) {
+          console.warn(`[Cloudinary] Failed to delete image ${publicId}:`, error);
+          return resolve({ result: 'error' });
+        }
+        resolve(result || { result: 'ok' });
+      }
+    );
+  });
+}
+
 export { cloudinary };
+
 

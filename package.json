@@ -16,7 +16,7 @@
     "type-check:backend": "npx tsc --noEmit",
     "dev:backend": "tsx watch backend/server.ts",
     "start": "tsx backend/server.ts",
-    "test": "node --import tsx --test --test-force-exit tests/auth.test.ts tests/cache.test.ts tests/contract.test.ts tests/db_init.test.ts tests/jwt.test.ts tests/payment.test.ts tests/rentals.test.ts tests/router.test.ts tests/search.test.ts tests/types.test.ts tests/upload.test.ts tests/validation.test.ts tests/withdrawals.test.ts",
+    "test": "node --import tsx --test --test-force-exit tests/auth.test.ts tests/cache.test.ts tests/contract.test.ts tests/db_init.test.ts tests/gallery.test.ts tests/jwt.test.ts tests/payment.test.ts tests/rentals.test.ts tests/room_concurrency.test.ts tests/rooms.test.ts tests/router.test.ts tests/search.test.ts tests/types.test.ts tests/upload.test.ts tests/validation.test.ts tests/withdrawals.test.ts",
     "test:integration": "node --import tsx --test --test-force-exit tests/db_integration.test.ts tests/perf_api.test.ts tests/perf_db.test.ts tests/perf_all_functions.test.ts",
     "test:e2e": "playwright test",
     "db:diagnose": "tsx scripts/diagnose_db.ts",
