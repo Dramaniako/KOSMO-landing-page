@@ -478,7 +478,7 @@ export function registerRentalRoutes(router: Router): void {
       });
     } catch (err) {
       await connection.rollback();
-      console.error("Create rental error:", err);
+      console.error("Create rental error:", err, "STATUS COUNTS:", err.code);
       res.status(500).json({ message: "Gagal memproses penyewaan kos." });
     } finally {
       connection.release();
