@@ -5015,31 +5015,8 @@ function registerRentalRoutes(router2) {
       const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
       const rentalPrice = assignedRoom && typeof assignedRoom.price === "number" && assignedRoom.price > 0 ? Number(assignedRoom.price) : price || property.price;
       const rentalName = propertyName || property.name;
-      let documentPath = "sertifikat_kepemilikan.pdf";
-      try {
-        const contractResult = await generateRentalContractPdf({
-          rentalId,
-          tenantName: tenant ? tenant.name : "Penyewa",
-          tenantEmail: tenant ? tenant.email : "",
-          tenantPhone: tenant ? tenant.phone : "",
-          tenantNikPassport: tenant ? tenant.identity_number : "",
-          tenantAddress: tenant ? tenant.address : "",
-          tenantOccupation: tenant ? tenant.occupation : "",
-          emergencyContactName: tenant ? tenant.emergency_contact_name : "",
-          emergencyContactPhone: tenant ? tenant.emergency_contact_phone : "",
-          emergencyContactRelation: tenant ? tenant.emergency_contact_relation : "",
-          propertyName: rentalName,
-          propertyAddress: property.address || "",
-          pricePerMonth: rentalPrice,
-          startDate,
-          durationMonths: durationMonths || 1,
-          signatureBase64: signature
-        });
-        documentPath = contractResult.filePath;
-      } catch (contractErr) {
-        console.warn("PDF contract generation warning:", contractErr);
-      }
       const rentalDuration = durationMonths && durationMonths > 0 ? durationMonths : 1;
+      let documentPath = "sertifikat_kepemilikan.pdf";
       if (existingRentals.length > 0) {
         await connection.query(
           `UPDATE rentals 
@@ -5070,6 +5047,30 @@ function registerRentalRoutes(router2) {
         );
       }
       await connection.commit();
+      try {
+        const contractResult = await generateRentalContractPdf({
+          rentalId,
+          tenantName: tenant ? tenant.name : "Penyewa",
+          tenantEmail: tenant ? tenant.email : "",
+          tenantPhone: tenant ? tenant.phone : "",
+          tenantNikPassport: tenant ? tenant.identity_number : "",
+          tenantAddress: tenant ? tenant.address : "",
+          tenantOccupation: tenant ? tenant.occupation : "",
+          emergencyContactName: tenant ? tenant.emergency_contact_name : "",
+          emergencyContactPhone: tenant ? tenant.emergency_contact_phone : "",
+          emergencyContactRelation: tenant ? tenant.emergency_contact_relation : "",
+          propertyName: rentalName,
+          propertyAddress: property.address || "",
+          pricePerMonth: rentalPrice,
+          startDate,
+          durationMonths: durationMonths || 1,
+          signatureBase64: signature
+        });
+        documentPath = contractResult.filePath;
+        await pool.query("UPDATE rentals SET document = ? WHERE id = ?", [documentPath, rentalId]);
+      } catch (contractErr) {
+        console.warn("PDF contract generation warning:", contractErr);
+      }
       apiCache.invalidatePattern("properties");
       res.status(201).json({
         message: "Penyewaan kos berhasil diproses!",
