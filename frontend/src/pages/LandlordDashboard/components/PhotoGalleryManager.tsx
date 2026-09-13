@@ -78,7 +78,7 @@ export default function PhotoGalleryManager({ property, onClose, onPhotosUpdated
     setSuccessMsg('');
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const formData = new FormData();
       Array.from(uploadFiles).forEach((file) => {
         formData.append('images', file);
@@ -126,7 +126,7 @@ export default function PhotoGalleryManager({ property, onClose, onPhotosUpdated
     setPhotos(newPhotos);
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const photoIds = newPhotos.map((p) => p.id);
       const res = await fetch(`${API_BASE}/properties/${property.id}/photos/reorder`, {
         method: 'PUT',
@@ -159,7 +159,7 @@ export default function PhotoGalleryManager({ property, onClose, onPhotosUpdated
     setPhotos(newPhotos);
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const photoIds = newPhotos.map((p) => p.id);
       const res = await fetch(`${API_BASE}/properties/${property.id}/photos/reorder`, {
         method: 'PUT',
@@ -184,7 +184,7 @@ export default function PhotoGalleryManager({ property, onClose, onPhotosUpdated
   const handleDeletePhoto = async (photoId: string) => {
     setErrorMsg('');
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const res = await fetch(`${API_BASE}/properties/${property.id}/photos/${photoId}`, {
         method: 'DELETE',
         headers: token ? { Authorization: `Bearer ${token}` } : {}

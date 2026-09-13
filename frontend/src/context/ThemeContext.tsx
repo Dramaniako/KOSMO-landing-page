@@ -13,7 +13,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>(() => {
     try {
-      const savedTheme = localStorage.getItem('kosmo_theme');
+      const savedTheme = localStorage.getItem('juragankost_theme') || localStorage.getItem('kosmo_theme');
       if (savedTheme === 'light' || savedTheme === 'dark') {
         return savedTheme;
       }
@@ -34,6 +34,7 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } else {
         root.classList.remove('dark');
       }
+      localStorage.setItem('juragankost_theme', theme);
       localStorage.setItem('kosmo_theme', theme);
     } catch (e) {
       console.warn('Failed to save theme preference:', e);

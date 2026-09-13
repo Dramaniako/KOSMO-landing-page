@@ -1,5 +1,6 @@
 import React from 'react';
-import { ShieldAlert, Users, Building, MessageSquare, Landmark, BarChart3, LogOut } from 'lucide-react';
+import { Users, Building, MessageSquare, Landmark, BarChart3, LogOut } from 'lucide-react';
+import JuraganKostLogo from '../../../components/JuraganKostLogo';
 
 export interface AdminSidebarProps {
   activeTab: 'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals';
@@ -15,11 +16,10 @@ export default function AdminSidebar({
   onLogout
 }: AdminSidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className="sidebar sidebar-dark-theme">
       <div>
-        <div className="nav-brand" style={{ marginBottom: '40px', paddingLeft: '16px' }}>
-          <ShieldAlert size={26} style={{ color: 'var(--danger)' }} />
-          <span>KOSMO Admin</span>
+        <div className="nav-brand" style={{ marginBottom: '36px', paddingLeft: '12px' }}>
+          <JuraganKostLogo variant="white" size="md" subtitle="Admin" />
         </div>
 
         <ul className="sidebar-links">
@@ -47,7 +47,7 @@ export default function AdminSidebar({
               onClick={() => setActiveTab('reviews')}
             >
               <MessageSquare size={18} />
-              Manajemen Review
+              Kelola Review
             </button>
           </li>
           <li>
@@ -71,10 +71,10 @@ export default function AdminSidebar({
         </ul>
       </div>
 
-      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
+      <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '20px' }}>
         <button
           className="sidebar-link"
-          style={{ width: '100%', border: 'none', background: 'none', color: 'var(--danger)' }}
+          style={{ width: '100%', border: 'none', background: 'none', color: '#fca5a5' }}
           onClick={onLogout}
         >
           <LogOut size={18} />

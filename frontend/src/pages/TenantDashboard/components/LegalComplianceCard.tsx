@@ -7,7 +7,7 @@ export const LegalComplianceCard: React.FC = () => {
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
         <FileText size={20} style={{ color: 'var(--primary)' }} />
         <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--primary)' }}>
-          Ketetapan Hukum E-Kontrak Sewa KOSMO
+          Ketetapan Hukum E-Kontrak Sewa juragankost
         </h4>
       </div>
       <ul style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.6', paddingLeft: '18px', margin: 0 }}>

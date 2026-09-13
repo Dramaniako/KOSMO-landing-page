@@ -8,7 +8,7 @@ export function useRentalContractDownload() {
   const handleOpenContract = useCallback(async (rentalId: string): Promise<void> => {
     setContractDownloading(prev => ({ ...prev, [rentalId]: true }));
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const res = await fetch(`${API_BASE}/rentals/${rentalId}/contract?download=true`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });

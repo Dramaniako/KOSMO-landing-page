@@ -69,7 +69,7 @@ export function useTenantProfile({
     if (!currentUser || isSubmittingProfile) return;
     setIsSubmittingProfile(true);
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       if (!token) {
         navigate('/login');
         return;

@@ -384,7 +384,7 @@ export default function ContractSigningView({
           }}
         >
           <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginBottom: '8px' }}>
-            <p><strong>1. PIHAK PERTAMA / FIRST PARTY:</strong> Pengelola KOSMO Hub Bali & Pemilik Properti ({property.ownerId || 'KOSMO Management'}).</p>
+            <p><strong>1. PIHAK PERTAMA / FIRST PARTY:</strong> Pengelola juragankost Hub Bali & Pemilik Properti ({property.ownerId || 'juragankost Management'}).</p>
             <p><strong>2. PIHAK KEDUA / SECOND PARTY:</strong> {currentUser ? currentUser.name : 'Calon Penyewa'} ({currentUser ? currentUser.email : '-'}) &bull; ID/NIK: {idNumber.trim() || 'Terlampir'}.</p>
           </div>
 

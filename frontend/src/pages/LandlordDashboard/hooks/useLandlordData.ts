@@ -35,7 +35,7 @@ export function useLandlordData() {
   const fetchOverviewStats = useCallback(async (landlordId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, overview: true }));
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const statsRes = await fetch(`${API_BASE}/stats?landlordId=${encodeURIComponent(landlordId)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
@@ -96,7 +96,7 @@ export function useLandlordData() {
   const fetchLandlordRentals = useCallback(async (landlordId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, tenants: true }));
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const res = await fetch(`${API_BASE}/landlord/rentals?landlordId=${encodeURIComponent(landlordId)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });

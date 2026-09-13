@@ -9,4 +9,4 @@ Disallow: /landlord
 Disallow: /tenant
 
 # Link to the sitemap (Ganti URL di bawah dengan domain kustom Anda jika sudah ada)
-Sitemap: https://kosmo-landing-page-red.vercel.app/sitemap.xml
+Sitemap: https://juragankost.vercel.app/sitemap.xml

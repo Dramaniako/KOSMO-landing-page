@@ -30,7 +30,7 @@ export default function PropertyFormModal({
         </button>
         <div style={{ padding: '32px' }}>
           <h3 style={{ fontSize: '22px', marginBottom: '20px' }}>
-            {editingProperty ? 'Edit Properti KOSMO' : 'Formulir Pendaftaran Kos Baru'}
+            {editingProperty ? 'Edit Properti juragankost' : 'Formulir Pendaftaran Kos Baru'}
           </h3>
 
           <form onSubmit={onSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
@@ -39,7 +39,7 @@ export default function PropertyFormModal({
               <input
                 type="text"
                 className="form-input"
-                placeholder="Contoh: KOSMO Hub Seminyak"
+                placeholder="Contoh: juragankost Hub Seminyak"
                 value={propertyForm.name}
                 onChange={(e) => setPropertyForm({ ...propertyForm, name: e.target.value })}
                 required

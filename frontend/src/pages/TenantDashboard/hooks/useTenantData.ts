@@ -28,7 +28,7 @@ export function useTenantData() {
   const fetchMyRentals = useCallback(async (userId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, rentals: true, bills: true }));
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });

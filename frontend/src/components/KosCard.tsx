@@ -36,7 +36,7 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
       <div className="relative w-full h-48 sm:h-52 bg-slate-100 dark:bg-slate-800 overflow-hidden property-img-wrapper">
         <img
           src={image}
-          alt={property.name || 'Kosmo Property'}
+          alt={property.name || 'juragankost Property'}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 property-img"
           loading="lazy"
           decoding="async"
@@ -52,7 +52,7 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
           className={`absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-md shadow-sm flex items-center gap-1.5 ${
             isFull
               ? 'bg-rose-500/90 text-white'
-              : 'bg-emerald-500/90 text-white'
+              : 'bg-emerald-600/90 text-white'
           }`}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${isFull ? 'bg-rose-200' : 'bg-emerald-200'} animate-pulse`} />
@@ -69,12 +69,12 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
       {/* Content Body */}
       <div className="p-4 sm:p-5 flex flex-col flex-grow justify-between gap-3 property-body">
         <div>
-          <h3 className="font-bold text-slate-900 text-base sm:text-lg line-clamp-1 group-hover:text-blue-600 transition-colors property-title">
-            {property.name || 'Properti KOSMO'}
+          <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base sm:text-lg line-clamp-1 group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors property-title">
+            {property.name || 'Properti juragankost'}
           </h3>
 
-          <div className="flex items-center gap-1 text-xs sm:text-sm text-slate-500 mt-1 property-location">
-            <MapPin size={14} className="text-blue-500 flex-shrink-0" />
+          <div className="flex items-center gap-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 property-location">
+            <MapPin size={14} className="text-emerald-600 flex-shrink-0" />
             <span className="line-clamp-1">{property.district || 'Bali'}, Bali</span>
           </div>
 
@@ -83,14 +83,14 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
             {facilities.slice(0, 4).map((fac, idx) => (
               <span
                 key={idx}
-                className="bg-slate-50 text-slate-600 border border-slate-200/50 text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1 font-medium facility-pill"
+                className="bg-emerald-50/70 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200/50 dark:border-emerald-800/50 text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1 font-medium facility-pill"
               >
                 {renderFacilityIcon(fac)}
                 {fac}
               </span>
             ))}
             {facilities.length > 4 && (
-              <span className="bg-slate-100 text-slate-500 text-[11px] px-2 py-0.5 rounded-md font-medium facility-pill">
+              <span className="bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] px-2 py-0.5 rounded-md font-medium facility-pill">
                 +{facilities.length - 4}
               </span>
             )}
@@ -98,10 +98,10 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
         </div>
 
         {/* Price & Detail Button */}
-        <div className="flex items-center justify-between pt-3 border-t border-slate-100 property-footer">
+        <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800 property-footer">
           <div>
             <div className="flex items-baseline gap-1">
-              <span className="text-blue-600 font-extrabold text-base sm:text-lg property-price">
+              <span className="text-emerald-700 dark:text-emerald-400 font-extrabold text-base sm:text-lg property-price">
                 {formatRupiah(price)}
               </span>
               <span className="text-slate-400 text-xs font-normal property-period">/bulan</span>
@@ -113,7 +113,7 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
           </div>
 
           <button
-            className="px-4 py-2 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white text-xs sm:text-sm font-semibold transition-colors btn btn-secondary"
+            className="px-4 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-700 hover:text-white dark:hover:bg-emerald-600 text-xs sm:text-sm font-semibold transition-colors btn btn-secondary"
             onClick={(e) => {
               e.stopPropagation();
               onOpenDetail(property);

@@ -23,7 +23,7 @@ export function useDeleteProperty(
     if (!landlordUser || !deletingPropertyId) return;
     setDeleteProcessing(true);
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token') || '';
       const res = await fetch(`${API_BASE}/properties/${deletingPropertyId}`, {
         method: 'DELETE',
         headers: {

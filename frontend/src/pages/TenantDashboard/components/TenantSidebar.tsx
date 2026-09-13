@@ -2,6 +2,7 @@ import React from 'react';
 import { User as UserIcon, Building, FileText, MessageSquare, LogOut } from 'lucide-react';
 import { User } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
+import JuraganKostLogo from '../../../components/JuraganKostLogo';
 
 interface TenantSidebarProps {
   currentUser: User;
@@ -23,6 +24,9 @@ export const TenantSidebar: React.FC<TenantSidebarProps> = ({
   return (
     <aside className="sidebar">
       <div>
+        <div style={{ marginBottom: '24px', paddingLeft: '8px' }}>
+          <JuraganKostLogo size="sm" />
+        </div>
         {/* Tenant short profile summary */}
         <div style={{ textAlign: 'center', marginBottom: '32px', padding: '0 8px' }}>
           <div style={{ position: 'relative', width: '72px', height: '72px', margin: '0 auto 12px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

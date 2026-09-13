@@ -69,7 +69,7 @@ export function useTenantReviews({
     const method = editingReview ? 'PUT' : 'POST';
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       if (!token) {
         navigate('/login');
         return;
@@ -118,7 +118,7 @@ export function useTenantReviews({
     if (!window.confirm("Apakah Anda yakin ingin menghapus review ini?")) return;
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       if (!token) {
         navigate('/login');
         return;

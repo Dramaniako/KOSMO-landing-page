@@ -62,7 +62,7 @@ export const LegalKycBanner: React.FC<LegalKycBannerProps> = ({
             </div>
             <p style={{ fontSize: '13px', color: profileStatus.complete ? '#15803d' : '#b45309', marginTop: '6px', lineHeight: '1.5' }}>
               {profileStatus.complete 
-                ? 'Data identitas legal Anda telah lengkap sesuai standar Pasal 1320 KUHPerdata dan UU ITE No. 11/2008 jo. UU No. 1/2024. Anda berhak melakukan penandatanganan digital dan pemesanan kos di KOSMO.'
+                ? 'Data identitas legal Anda telah lengkap sesuai standar Pasal 1320 KUHPerdata dan UU ITE No. 11/2008 jo. UU No. 1/2024. Anda berhak melakukan penandatanganan digital dan pemesanan kos di juragankost.'
                 : 'Berdasarkan hukum perjanjian sewa Indonesia (KUHPerdata Pasal 1320), Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, dan Kontak Darurat) sebelum dapat menandatangani kontrak dan menyewa kos.'}
             </p>
             {!profileStatus.complete && (

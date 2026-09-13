@@ -18,7 +18,7 @@ export function useAdminData() {
   const loadedTabs = useRef<Set<string>>(new Set());
 
   const getAuthToken = useCallback((): string => {
-    return localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
+    return localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token') || '';
   }, []);
 
   const getAuthHeaders = useCallback((): Record<string, string> => {

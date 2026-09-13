@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="KOSMO adalah platform co-living terintegrasi untuk digital nomad dan profesional muda di Bali. Cari properti sewa kamar modern all-inclusive tanpa ribet." />
+    <meta name="description" content="juragankost adalah platform sewa kamar kost dan co-living modern di Bali. Cari kost jadi mudah, tinggal nyaman, hidup aman." />
     <!-- Leaflet CSS & JS for Interactive Map Picker -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
@@ -17,7 +17,7 @@
     <script>
       (function() {
         try {
-          var theme = localStorage.getItem('kosmo_theme');
+          var theme = localStorage.getItem('juragankost_theme') || localStorage.getItem('kosmo_theme');
           if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
           } else {
@@ -26,7 +26,7 @@
         } catch (e) {}
       })();
     </script>
-    <title>KOSMO - Premium Co-living Bali</title>
+    <title>juragankost - Cari Kost Jadi Mudah Bali</title>
   </head>
   <body>
     <div id="root"></div>

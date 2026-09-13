@@ -12,7 +12,7 @@ export class ApiError extends Error {
 export const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
 export function getAuthToken(): string | null {
-  return localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+  return localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
 }
 
 export async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {

@@ -5,10 +5,10 @@
 @tailwind utilities;
 
 :root {
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-light: #eff6ff;
-  --primary-rgb: 37, 99, 235;
+  --primary: #0D5C3A;
+  --primary-hover: #09452B;
+  --primary-light: #E8F5EE;
+  --primary-rgb: 13, 92, 58;
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
@@ -19,6 +19,10 @@
   --bg-main: #f8fafc;
   --bg-card: #ffffff;
   --border-color: #e2e8f0;
+
+  --sidebar-dark: #0A4D3C;
+  --sidebar-hover: #0E5E4A;
+  --sidebar-active: #12725A;
 
   --font-heading: 'Outfit', 'Inter', sans-serif;
   --font-body: 'Inter', sans-serif;
@@ -37,10 +41,10 @@
 }
 
 .dark {
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --primary-light: rgba(59, 130, 246, 0.15);
-  --primary-rgb: 59, 130, 246;
+  --primary: #10b981;
+  --primary-hover: #059669;
+  --primary-light: rgba(16, 185, 129, 0.15);
+  --primary-rgb: 16, 185, 129;
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
@@ -48,9 +52,12 @@
   --dark-light: #334155;
   --text-main: #e2e8f0;
   --text-muted: #94a3b8;
-  --bg-main: #0b0f19;
-  --bg-card: #131b2e;
-  --border-color: #1e293b;
+  --bg-main: #08110e;
+  --bg-card: #0e1e18;
+  --border-color: #173329;
+  --sidebar-dark: #051e17;
+  --sidebar-hover: #093427;
+  --sidebar-active: #0e4c3a;
 }
 
 .dark .glass-panel {
@@ -367,7 +374,7 @@ a {
 /* Hero Section */
 .hero-section {
   padding: 80px 0 60px;
-  background: radial-gradient(circle at top right, rgba(37, 99, 235, 0.05), transparent 60%);
+  background: radial-gradient(circle at top right, rgba(13, 92, 58, 0.06), transparent 60%);
   position: relative;
 }
 
@@ -537,6 +544,29 @@ a {
 .sidebar-link.active {
   background-color: var(--primary-light);
   color: var(--primary);
+}
+
+.sidebar-dark-theme {
+  background: var(--sidebar-dark);
+  color: #ffffff;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-dark-theme .sidebar-link {
+  color: #d1fae5;
+  border-radius: 12px;
+}
+
+.sidebar-dark-theme .sidebar-link:hover {
+  background: var(--sidebar-hover);
+  color: #ffffff;
+}
+
+.sidebar-dark-theme .sidebar-link.active {
+  background: var(--sidebar-active);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .dashboard-content {

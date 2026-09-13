@@ -20,7 +20,7 @@ export function useContractPreview() {
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const res = await fetch(`${API_BASE}/rentals/contract/preview`, {
         method: 'POST',
         headers: {

@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Wifi, Tv, Wind, Shield, Droplet, Check, ShieldCheck, Heart,
-  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal
+  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal,
+  Bell, ChevronDown, ArrowRight, User as UserIcon, Building2, Users
 } from 'lucide-react';
 import { Property, Review, User, FacilityFilterState, ContractSignPayload, SignedContractData } from '../types/index';
 import KosCard from '../components/KosCard';
@@ -10,7 +11,10 @@ import KosCardSkeleton from '../components/KosCardSkeleton';
 import SearchFilterBar from '../components/SearchFilterBar';
 import BookingModal from '../components/BookingModal';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
+import JuraganKostLogo from '../components/JuraganKostLogo';
+import MobileBottomNav from '../components/MobileBottomNav';
 import { useTranslation } from '../context/LanguageContext';
+import { getAuthToken } from '../services/apiClient';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -45,6 +49,8 @@ export default function LandingPage() {
     Parkir: false
   });
 
+  const [activeCategory, setActiveCategory] = useState<string>('Semua');
+
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const rawUser = localStorage.getItem('user');
@@ -53,6 +59,21 @@ export default function LandingPage() {
       return null;
     }
   });
+
+  const displayedProperties = useMemo(() => {
+    if (activeCategory === 'Semua') return properties;
+    const lower = activeCategory.toLowerCase();
+    const filtered = properties.filter((p) => {
+      const name = (p.name || '').toLowerCase();
+      const desc = (p.description || '').toLowerCase();
+      if (lower === 'putra') return name.includes('putra') || desc.includes('putra') || name.includes('pria') || desc.includes('pria');
+      if (lower === 'putri') return name.includes('putri') || desc.includes('putri') || name.includes('wanita') || desc.includes('wanita');
+      if (lower === 'apartemen') return name.includes('apartemen') || name.includes('suite') || name.includes('residence') || name.includes('villa');
+      if (lower === 'campur') return name.includes('campur') || desc.includes('campur') || (!name.includes('putri') && !name.includes('putra') && !desc.includes('putri') && !desc.includes('putra'));
+      return true;
+    });
+    return filtered;
+  }, [properties, activeCategory]);
 
   useEffect(() => {
     try {
@@ -185,6 +206,7 @@ export default function LandingPage() {
 
   const resetFilters = useCallback((): void => {
     setDistrict('Semua');
+    setActiveCategory('Semua');
     setPriceMin(0);
     setPriceMax(10000000);
     setFacilities({
@@ -214,7 +236,7 @@ export default function LandingPage() {
 
     // If tenant is logged in, check if they already have an active tenancy
     if (currentUser) {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = getAuthToken();
       fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(currentUser.id)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       })
@@ -248,7 +270,7 @@ export default function LandingPage() {
     setActiveRentalError(null);
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = getAuthToken();
       const res = await fetch(`${API_BASE}/rentals/contract/sign`, {
         method: 'POST',
         headers: {
@@ -308,7 +330,7 @@ export default function LandingPage() {
     setActiveRentalError(null);
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = getAuthToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -434,39 +456,48 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 landing-page transition-colors duration-200">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 landing-page pb-16 md:pb-0 transition-colors duration-200">
       {/* Header Navigation */}
-      <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 site-header transition-colors duration-200">
+      <header className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 site-header transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 cursor-pointer nav-brand" onClick={() => navigate('/')}>
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
-              <ShieldCheck size={20} />
+          <div className="flex items-center gap-4">
+            <div className="cursor-pointer nav-brand" onClick={() => navigate('/')}>
+              <JuraganKostLogo size="md" />
             </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-xl font-bold text-blue-600 dark:text-blue-400 tracking-tight">KOSMO</span>
-              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-wider hidden sm:inline">BALI CO-LIVING</span>
+
+            {/* Location Dropdown Pill (Mockup Screen 3) */}
+            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 text-xs font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+              <MapPin size={13} className="text-emerald-600 dark:text-emerald-400" />
+              <span>Denpasar, Bali</span>
+              <ChevronDown size={14} className="text-slate-400" />
             </div>
           </div>
 
-          <nav className="flex items-center gap-3 sm:gap-6">
+          <nav className="flex items-center gap-3 sm:gap-5">
             <div className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
-              <a href="#properties" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.explore')}</a>
-              <a href="#all-inclusive" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.whyUs')}</a>
-              <a href="#reviews" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.testimonials')}</a>
+              <a href="#properties" className="hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors">{t('nav.explore')}</a>
+              <a href="#all-inclusive" className="hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors">{t('nav.whyUs')}</a>
+              <a href="#reviews" className="hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors">{t('nav.testimonials')}</a>
+            </div>
+
+            {/* Notification Bell with Badge (Mockup Screen 3) */}
+            <div className="relative p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer hidden sm:block">
+              <Bell size={18} />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-900" />
             </div>
 
             <ThemeLanguageToggle />
 
             {currentUser ? (
               <button
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition btn btn-primary shadow-sm min-h-[44px]"
+                className="px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-sm transition btn btn-primary shadow-sm min-h-[44px]"
                 onClick={handleUserDashboardRedirect}
               >
                 {t('nav.dashboard')} ({currentUser.name})
               </button>
             ) : (
               <button
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition btn btn-primary shadow-sm min-h-[44px]"
+                className="px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-sm transition btn btn-primary shadow-sm min-h-[44px]"
                 onClick={() => navigate('/login')}
               >
                 {t('nav.login')}
@@ -477,17 +508,17 @@ export default function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-blue-50/50 via-slate-50 to-slate-50 dark:from-slate-900/40 dark:via-slate-950 dark:to-slate-950 pt-16 pb-20 hero-section transition-colors duration-200">
+      <section className="relative overflow-hidden bg-gradient-to-b from-emerald-50/40 via-slate-50 to-slate-50 dark:from-emerald-950/20 dark:via-slate-950 dark:to-slate-950 pt-14 pb-16 hero-section transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-100/80 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold mb-6 border border-blue-200/60 dark:border-blue-800 shadow-sm">
-            <Sparkles size={14} />
-            <span>{t('hero.badge')}</span>
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-xs font-bold mb-5 border border-emerald-200/60 dark:border-emerald-800 shadow-sm">
+            <Sparkles size={14} className="text-emerald-600 dark:text-emerald-400" />
+            <span>Platform Kost & Co-Living Terpercaya di Bali</span>
           </div>
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 dark:text-slate-50 tracking-tight max-w-4xl mx-auto leading-tight mb-6">
-            {t('hero.title')} <span className="text-blue-600 dark:text-blue-400">All-Inclusive</span>
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 dark:text-slate-50 tracking-tight max-w-4xl mx-auto leading-tight mb-5">
+            Cari Kost Jadi Mudah, <span className="text-emerald-700 dark:text-emerald-400">Tinggal Nyaman</span>
           </h1>
-          <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto leading-relaxed mb-8">
-            {t('hero.subtitle')}
+          <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto leading-relaxed mb-6">
+            Temukan hunian kos eksklusif dan aman di Denpasar, Badung, dan sekitarnya dengan transparansi fasilitas all-inclusive tanpa ribet.
           </p>
         </div>
       </section>
@@ -510,17 +541,70 @@ export default function LandingPage() {
         />
       </section>
 
+      {/* Quick Category Chips & Promo Banner (Mockup Screen 3) */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+        {/* Category Horizontal Chips */}
+        <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto pb-2 scrollbar-none">
+          {[
+            { id: 'Semua', label: 'Semua', icon: '🏠' },
+            { id: 'Putra', label: 'Kost Putra', icon: '👨' },
+            { id: 'Putri', label: 'Kost Putri', icon: '👩' },
+            { id: 'Apartemen', label: 'Apartemen', icon: '🏢' },
+            { id: 'Campur', label: 'Kos Campur', icon: '👥' }
+          ].map((cat) => {
+            const isActive = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setActiveCategory(cat.id)}
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-200 border ${
+                  isActive
+                    ? 'bg-emerald-800 text-white border-emerald-800 shadow-sm shadow-emerald-900/20 scale-[1.02]'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-300 hover:text-emerald-700'
+                }`}
+              >
+                <span>{cat.icon}</span>
+                <span>{cat.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Promo Spesial Bulan Ini Banner Card */}
+        <div className="mt-4 bg-gradient-to-r from-emerald-800 via-emerald-900 to-teal-950 text-white rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md border border-emerald-700/40">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-700/60 border border-emerald-500/40 flex items-center justify-center text-xl shrink-0">
+              🎉
+            </div>
+            <div>
+              <h3 className="font-extrabold text-sm sm:text-base">Promo Spesial Bulan Ini</h3>
+              <p className="text-xs sm:text-sm text-emerald-100/90 mt-0.5">
+                Diskon sewa hingga 10% untuk berbagai pilihan kost idaman di area kampus & pusat kota.
+              </p>
+            </div>
+          </div>
+          <a
+            href="#properties"
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-white text-emerald-900 font-bold text-xs sm:text-sm hover:bg-emerald-50 transition shrink-0 shadow-sm"
+          >
+            <span>Lihat Promo</span>
+            <ArrowRight size={14} />
+          </a>
+        </div>
+      </section>
+
       {/* Property Listings */}
       <section id="properties" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-8">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-2">
           <div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">Pilihan Kos & Co-Living</h2>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">Rekomendasi untukmu</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               Daftar hunian eksklusif dengan sistem smart lock dan fasilitas lengkap di Bali
             </p>
           </div>
           <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-            {t('filter.results', { count: loading ? '...' : properties.length })}
+            {t('filter.results', { count: loading ? '...' : displayedProperties.length })}
           </span>
         </div>
 
@@ -530,19 +614,19 @@ export default function LandingPage() {
               <KosCardSkeleton key={i} />
             ))}
           </div>
-        ) : properties.length === 0 ? (
+        ) : displayedProperties.length === 0 ? (
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-12 text-center shadow-sm">
             <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-2">Tidak Ada Properti Ditemukan</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6">
               Coba sesuaikan filter wilayah atau turunkan fasilitas pencarian Anda.
             </p>
-            <button className="btn btn-primary bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl min-h-[44px]" onClick={resetFilters}>
+            <button className="btn btn-primary bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold px-5 py-2.5 rounded-xl min-h-[44px]" onClick={resetFilters}>
               {t('filter.resetBtn')}
             </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 property-grid">
-            {properties.map((prop) => (
+            {displayedProperties.map((prop) => (
               <KosCard
                 key={prop.id}
                 property={prop}
@@ -557,12 +641,12 @@ export default function LandingPage() {
       {/* All-Inclusive Feature Highlight Section */}
       <section id="all-inclusive" className="bg-white dark:bg-slate-900 border-y border-slate-200/80 dark:border-slate-800 py-16 transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold mb-4 border border-blue-100 dark:border-blue-800">
-            <Zap size={14} />
-            <span>KOSMO Experience & Transparency</span>
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-xs font-bold mb-4 border border-emerald-100 dark:border-emerald-800">
+            <Zap size={14} className="text-emerald-600" />
+            <span>juragankost Experience & Transparency</span>
           </div>
           <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-4">
-            Kenapa Memilih KOSMO All-Inclusive?
+            Kenapa Memilih juragankost All-Inclusive?
           </h2>
           <p className="text-slate-600 dark:text-slate-300 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed mb-12">
             Temukan kemudahan mencari dan menyewa kos impian, transparansi fasilitas & infrastruktur tanpa biaya tersembunyi, serta opsi pencarian yang dipersonalisasi sesuai kebutuhan gaya hidup Anda.
@@ -570,7 +654,7 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
             <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
-              <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 flex items-center justify-center mb-4">
                 <Search size={24} />
               </div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Kemudahan Cari & Sewa Kos</h3>
@@ -580,7 +664,7 @@ export default function LandingPage() {
             </div>
 
             <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
-              <div className="w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-400 flex items-center justify-center mb-4">
                 <ShieldCheck size={24} />
               </div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Kejelasan Fasilitas & Infrastruktur</h3>
@@ -590,7 +674,7 @@ export default function LandingPage() {
             </div>
 
             <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-700">
-              <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 flex items-center justify-center mb-4">
                 <SlidersHorizontal size={24} />
               </div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Opsi Pencarian Terpersonalisasi</h3>
@@ -605,9 +689,9 @@ export default function LandingPage() {
       {/* Reviews Section */}
       <section id="reviews" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center mb-12">
-          <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">Apa Kata Penghuni KOSMO?</h2>
+          <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">Apa Kata Penghuni juragankost?</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-            Ulasan asli dan pengalaman langsung dari para digital nomad & tenant kami di Bali
+            Ulasan asli dan pengalaman langsung dari para mahasiswa, nomad & tenant kami di Bali
           </p>
         </div>
 
@@ -618,7 +702,7 @@ export default function LandingPage() {
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{rev.userName}</h4>
-                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">{rev.propertyName}</span>
+                    <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">{rev.propertyName}</span>
                   </div>
                   <div className="flex text-amber-400">
                     {[...Array(rev.rating)].map((_, i) => (
@@ -641,20 +725,20 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 py-12 text-center transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
-              <ShieldCheck size={18} />
-            </div>
-            <span className="text-base font-extrabold text-slate-900 dark:text-slate-100">KOSMO Bali</span>
+          <div className="cursor-pointer" onClick={() => navigate('/')}>
+            <JuraganKostLogo size="md" showTagline />
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md">
             {t('footer.about')}
           </p>
           <div className="text-[11px] text-slate-400 dark:text-slate-500">
-            &copy; {new Date().getFullYear()} KOSMO Bali. {t('footer.copyright')}
+            &copy; {new Date().getFullYear()} juragankost Bali. {t('footer.copyright')}
           </div>
         </div>
       </footer>
+
+      {/* Mobile Bottom Navigation Bar (Mockup Screen 3, 6, 7, 8) */}
+      <MobileBottomNav />
 
       {/* Booking and Details Modal */}
       <BookingModal

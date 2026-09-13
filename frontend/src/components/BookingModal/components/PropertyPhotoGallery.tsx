@@ -120,7 +120,7 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
           data-testid="category-filter-all"
           className={`px-3 py-1 text-xs font-semibold rounded-full transition-colors whitespace-nowrap ${
             selectedCategory === 'all'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-emerald-800 text-white shadow-sm'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
           }`}
           onClick={() => handleSelectCategory('all')}
@@ -133,7 +133,7 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
           data-testid="category-filter-bedroom"
           className={`px-3 py-1 text-xs font-semibold rounded-full transition-colors whitespace-nowrap ${
             selectedCategory === 'bedroom'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-emerald-800 text-white shadow-sm'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
           }`}
           onClick={() => handleSelectCategory('bedroom')}
@@ -146,7 +146,7 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
           data-testid="category-filter-bathroom"
           className={`px-3 py-1 text-xs font-semibold rounded-full transition-colors whitespace-nowrap ${
             selectedCategory === 'bathroom'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-emerald-800 text-white shadow-sm'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
           }`}
           onClick={() => handleSelectCategory('bathroom')}
@@ -159,7 +159,7 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
           data-testid="category-filter-pool"
           className={`px-3 py-1 text-xs font-semibold rounded-full transition-colors whitespace-nowrap ${
             selectedCategory === 'pool'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-emerald-800 text-white shadow-sm'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
           }`}
           onClick={() => handleSelectCategory('pool')}
@@ -172,7 +172,7 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
           data-testid="category-filter-wifi_speedtest"
           className={`px-3 py-1 text-xs font-semibold rounded-full transition-colors whitespace-nowrap flex items-center gap-1 ${
             selectedCategory === 'wifi_speedtest'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-emerald-800 text-white shadow-sm'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
           }`}
           onClick={() => handleSelectCategory('wifi_speedtest')}
@@ -261,7 +261,7 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
                 data-testid={`gallery-thumb-${idx}`}
                 className={`gallery-thumbnail relative flex-shrink-0 w-16 h-14 rounded-lg overflow-hidden border-2 transition-all ${
                   isActive
-                    ? 'border-blue-600 ring-2 ring-blue-500/30 scale-105'
+                    ? 'border-emerald-700 ring-2 ring-emerald-600/30 scale-105'
                     : 'border-transparent opacity-70 hover:opacity-100 hover:border-slate-300'
                 }`}
                 onClick={() => setActivePhotoIndex(idx)}

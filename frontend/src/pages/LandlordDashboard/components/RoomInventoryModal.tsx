@@ -96,7 +96,7 @@ export default function RoomInventoryModal({ property, onClose, onRoomUpdated }:
     setRooms((prev) => prev.map((r) => (r.id === room.id ? { ...r, status: nextStatus } : r)));
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const res = await fetch(`${API_BASE}/properties/${property.id}/rooms/${room.id}/status`, {
         method: 'PATCH',
         headers: {
@@ -133,7 +133,7 @@ export default function RoomInventoryModal({ property, onClose, onRoomUpdated }:
     setSuccessMsg('');
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const payload = {
         roomNumber: addForm.roomNumber.trim(),
         floor: parseInt(addForm.floor, 10) || 1,
@@ -188,7 +188,7 @@ export default function RoomInventoryModal({ property, onClose, onRoomUpdated }:
     setSuccessMsg('');
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const payload = {
         roomNumber: editForm.roomNumber.trim(),
         floor: parseInt(editForm.floor, 10) || 1,
@@ -232,7 +232,7 @@ export default function RoomInventoryModal({ property, onClose, onRoomUpdated }:
     setErrorMsg('');
 
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const res = await fetch(`${API_BASE}/properties/${property.id}/rooms/${deletingRoom.id}`, {
         method: 'DELETE',
         headers: {

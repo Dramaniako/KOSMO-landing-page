@@ -23,8 +23,8 @@ export const BillingHistoryList: React.FC<BillingHistoryListProps> = ({
           <div className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#ffffff' }}>
             <div>
               <span className="badge badge-success" style={{ marginBottom: '6px', fontSize: '10px' }}>Berhasil</span>
-              <h4 style={{ fontSize: '15px' }}>KOSMO Hub Denpasar (Kamar 101)</h4>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Invoice: INV-KSM-0526-782 &bull; Tanggal: 3 Jun 2026</p>
+              <h4 style={{ fontSize: '15px' }}>juragankost Hub Denpasar (Kamar 101)</h4>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Invoice: INV-JK-0526-782 &bull; Tanggal: 3 Jun 2026</p>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tagihan: All-Inclusive (Sewa, Listrik, Air)</p>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -36,8 +36,8 @@ export const BillingHistoryList: React.FC<BillingHistoryListProps> = ({
           <div className="flex-between" style={{ padding: '20px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: '#ffffff' }}>
             <div>
               <span className="badge badge-success" style={{ marginBottom: '6px', fontSize: '10px' }}>Berhasil</span>
-              <h4 style={{ fontSize: '15px' }}>KOSMO Hub Denpasar (Kamar 101) - Deposit</h4>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Invoice: INV-KSM-0526-462 &bull; Tanggal: 3 Jun 2026</p>
+              <h4 style={{ fontSize: '15px' }}>juragankost Hub Denpasar (Kamar 101) - Deposit</h4>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Invoice: INV-JK-0526-462 &bull; Tanggal: 3 Jun 2026</p>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tagihan: Deposit Awal Jaminan Kamar</p>
             </div>
             <div style={{ textAlign: 'right' }}>

@@ -42,7 +42,7 @@ export const ContractViewerModal: React.FC<ContractViewerModalProps> = ({
                 Dokumen Perjanjian Sewa Digital
               </h3>
               <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                KOSMO Bali Co-Living Marketplace Legal Contract
+                juragankost Bali Co-Living Marketplace Legal Contract
               </p>
             </div>
           </div>

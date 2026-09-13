@@ -26,7 +26,7 @@ export default function PropertyModerationModal({
         </button>
         <div style={{ padding: '32px' }}>
           <h3 style={{ fontSize: '22px', marginBottom: '20px' }}>
-            Moderasi Properti KOSMO
+            Moderasi Properti juragankost
           </h3>
 
           <form onSubmit={onSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>

@@ -67,7 +67,7 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
     <div className="space-y-3 mb-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <DoorOpen size={18} className="text-blue-600" />
+          <DoorOpen size={18} className="text-emerald-600" />
           <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
             Pilih Unit Kamar
           </h4>
@@ -84,7 +84,7 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
           data-testid="floor-tab-all"
           className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
             activeFloor === 'all'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-emerald-800 text-white shadow-sm'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
           }`}
           onClick={() => setActiveFloor('all')}
@@ -105,7 +105,7 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
               data-floor={floor}
               className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                 isSelected
-                  ? 'bg-blue-600 text-white shadow-sm'
+                  ? 'bg-emerald-800 text-white shadow-sm'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
               }`}
               onClick={() => setActiveFloor(floor)}
@@ -114,7 +114,7 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
               <span
                 className={`text-[10px] px-1.5 py-0.2 rounded-full ${
                   isSelected
-                    ? 'bg-blue-700 text-white'
+                    ? 'bg-emerald-900 text-white'
                     : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
                 }`}
               >
@@ -150,9 +150,9 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
               aria-disabled={!isAvailable}
               className={`room-card room-item text-left p-3 rounded-xl border transition-all relative flex flex-col justify-between ${
                 isSelected
-                  ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/40 ring-2 ring-blue-500/30'
+                  ? 'border-emerald-700 bg-emerald-50/70 dark:bg-emerald-950/40 ring-2 ring-emerald-600/30'
                   : isAvailable
-                  ? 'border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-850 hover:border-blue-400 cursor-pointer shadow-sm hover:shadow'
+                  ? 'border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-850 hover:border-emerald-400 cursor-pointer shadow-sm hover:shadow'
                   : 'border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/60 opacity-60 cursor-not-allowed'
               }`}
               onClick={() => {
@@ -201,7 +201,7 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
               {/* Pricing & Selection Indicator */}
               <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                  <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
                     {formatRupiah(effectivePrice)}
                   </span>
                   <span className="text-[10px] text-slate-400 ml-0.5">/bln</span>
@@ -213,7 +213,7 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
                 </div>
 
                 {isSelected && (
-                  <CheckCircle size={15} className="text-blue-600 flex-shrink-0" />
+                  <CheckCircle size={15} className="text-emerald-700 flex-shrink-0" />
                 )}
               </div>
             </button>
@@ -223,9 +223,9 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
 
       {/* Selected Room Notification Banner */}
       {selectedRoom && (
-        <div className="p-3 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center justify-between text-xs">
+        <div className="p-3 bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center justify-between text-xs">
           <div className="flex items-center gap-2">
-            <CheckCircle size={16} className="text-blue-600 flex-shrink-0" />
+            <CheckCircle size={16} className="text-emerald-700 flex-shrink-0" />
             <div>
               <span className="font-bold text-slate-900 dark:text-slate-100">
                 Kamar Dipilih: Kamar {selectedRoom.roomNumber}
@@ -235,7 +235,7 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
               </span>
             </div>
           </div>
-          <span className="font-extrabold text-blue-600 dark:text-blue-400">
+          <span className="font-extrabold text-emerald-700 dark:text-emerald-400">
             {formatRupiah(selectedRoom.effectivePrice ?? (selectedRoom.price ? selectedRoom.price : basePrice))}/bln
           </span>
         </div>

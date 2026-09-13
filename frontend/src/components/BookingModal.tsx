@@ -183,7 +183,7 @@ export default function BookingModal({
   const handleDownloadSignedContract = async (rentalId: string): Promise<void> => {
     setDownloadingSignedContract(true);
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const res = await fetch(`${API_BASE}/rentals/${rentalId}/contract?download=true`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });

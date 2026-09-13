@@ -1,5 +1,6 @@
 import React from 'react';
 import { Building, LayoutDashboard, MessageSquare, Users, LogOut } from 'lucide-react';
+import JuraganKostLogo from '../../../components/JuraganKostLogo';
 
 export interface LandlordSidebarProps {
   activeTab: 'overview' | 'properties' | 'reviews' | 'tenants';
@@ -13,11 +14,10 @@ export default function LandlordSidebar({
   onLogout
 }: LandlordSidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className="sidebar sidebar-dark-theme">
       <div>
-        <div className="nav-brand" style={{ marginBottom: '40px', paddingLeft: '16px' }}>
-          <Building size={26} />
-          <span>KOSMO Landlord</span>
+        <div className="nav-brand" style={{ marginBottom: '36px', paddingLeft: '12px' }}>
+          <JuraganKostLogo variant="white" size="md" subtitle="Pemilik" />
         </div>
 
         <ul className="sidebar-links">
@@ -60,10 +60,10 @@ export default function LandlordSidebar({
         </ul>
       </div>
 
-      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
+      <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '20px' }}>
         <button
           className="sidebar-link"
-          style={{ width: '100%', border: 'none', background: 'none', color: 'var(--danger)' }}
+          style={{ width: '100%', border: 'none', background: 'none', color: '#fca5a5' }}
           onClick={onLogout}
         >
           <LogOut size={18} />

@@ -9,11 +9,11 @@ export interface Translations {
 const translations: Record<Language, Translations> = {
   id: {
     // Navigation & Common
-    'nav.brand': 'KOSMO Bali',
-    'nav.tagline': 'Co-Living & Kos All-Inclusive',
+    'nav.brand': 'juragankost Bali',
+    'nav.tagline': 'Cari Kost Jadi Mudah • Tinggal Nyaman, Hidup Aman',
     'nav.home': 'Beranda',
     'nav.explore': 'Jelajahi Kos',
-    'nav.whyUs': 'Kenapa KOSMO',
+    'nav.whyUs': 'Kenapa juragankost',
     'nav.testimonials': 'Ulasan',
     'nav.login': 'Masuk Akun',
     'nav.register': 'Daftar',
@@ -89,7 +89,7 @@ const translations: Record<Language, Translations> = {
     'contract.startDate': 'Tanggal Mulai Sewa',
     'contract.scrollToReadPrompt': 'Harap gulir ke bawah dokumen perjanjian hingga akhir untuk mengaktifkan persetujuan.',
     'contract.mustScrollToBottom': 'Gulir dokumen hingga akhir untuk menyetujui',
-    'contract.consentCheckbox': 'Saya telah membaca, memahami, dan menyetujui seluruh klausul Perjanjian Sewa Digital KOSMO sesuai KUHPerdata Pasal 1320 & UU ITE.',
+    'contract.consentCheckbox': 'Saya telah membaca, memahami, dan menyetujui seluruh klausul Perjanjian Sewa Digital juragankost sesuai KUHPerdata Pasal 1320 & UU ITE.',
     'contract.signatureTitle': 'Goreskan Tanda Tangan Digital',
     'contract.signatureInstruction': 'Tanda tangani pada area kanvas di bawah menggunakan mouse atau layar sentuh:',
     'contract.signatureClear': 'Hapus & Gores Ulang',
@@ -109,7 +109,7 @@ const translations: Record<Language, Translations> = {
     'contract.wifiQuota': 'WiFi Internet: Fiber Optic Berkecepatan Tinggi 100 Mbps',
     'contract.securityQuota': 'Keamanan: CCTV 24 Jam & Akses Gerbang Terkontrol',
     'contract.wasteQuota': 'Kebersihan: Pengangkutan Sampah Harian & Area Komunal',
-    'contract.singleTenancyClause': 'Klausul Sewa Tunggal: Penyewa menyatakan tidak memiliki unit sewa aktif lain yang belum terselesaikan di jaringan KOSMO.',
+    'contract.singleTenancyClause': 'Klausul Sewa Tunggal: Penyewa menyatakan tidak memiliki unit sewa aktif lain yang belum terselesaikan di jaringan juragankost.',
     'contract.jurisdictionClause': 'Yurisdiksi Hukum: Perjanjian ini tunduk pada hukum Republik Indonesia dengan domisili hukum Pengadilan Negeri Denpasar / Badung, Bali.',
     'contract.previewTitle': 'Draf Kontrak Digital',
     'contract.previewSubtitle': 'Pratinjau dokumen perjanjian sebelum penandatanganan resmi',
@@ -184,7 +184,7 @@ const translations: Record<Language, Translations> = {
     'admin.visitorTracking': 'Tracking Pengunjung',
 
     // Auth (Login / Register)
-    'auth.loginTitle': 'Masuk ke Akun KOSMO',
+    'auth.loginTitle': 'Masuk ke Akun juragankost',
     'auth.registerTitle': 'Daftar Akun Baru',
     'auth.email': 'Alamat Email',
     'auth.password': 'Kata Sandi',
@@ -204,11 +204,11 @@ const translations: Record<Language, Translations> = {
   },
   en: {
     // Navigation & Common
-    'nav.brand': 'KOSMO Bali',
-    'nav.tagline': 'All-Inclusive Co-Living & Kos',
+    'nav.brand': 'juragankost Bali',
+    'nav.tagline': 'Modern Boarding House & Co-Living',
     'nav.home': 'Home',
     'nav.explore': 'Explore Rooms',
-    'nav.whyUs': 'Why KOSMO',
+    'nav.whyUs': 'Why juragankost',
     'nav.testimonials': 'Reviews',
     'nav.login': 'Sign In',
     'nav.register': 'Sign Up',
@@ -284,7 +284,7 @@ const translations: Record<Language, Translations> = {
     'contract.startDate': 'Lease Start Date',
     'contract.scrollToReadPrompt': 'Please scroll to the bottom of the agreement to enable consent.',
     'contract.mustScrollToBottom': 'Scroll document to bottom to enable agreement',
-    'contract.consentCheckbox': 'I have read, understood, and agree to all terms of the KOSMO Digital Lease Agreement pursuant to Indonesian Civil Code Art. 1320 & UU ITE.',
+    'contract.consentCheckbox': 'I have read, understood, and agree to all terms of the juragankost Digital Lease Agreement pursuant to Indonesian Civil Code Art. 1320 & UU ITE.',
     'contract.signatureTitle': 'Digital Signature Pad',
     'contract.signatureInstruction': 'Draw your digital signature on the canvas area below using mouse or touchscreen:',
     'contract.signatureClear': 'Clear & Redraw',
@@ -304,7 +304,7 @@ const translations: Record<Language, Translations> = {
     'contract.wifiQuota': 'WiFi Internet: High-Speed Fiber Optic 100 Mbps',
     'contract.securityQuota': 'Security: 24/7 CCTV & Controlled Access Gate',
     'contract.wasteQuota': 'Housekeeping: Daily Waste Removal & Communal Cleaning',
-    'contract.singleTenancyClause': 'Single Active Tenancy Covenant: Tenant warrants no other active unfulfilled lease exists within KOSMO network.',
+    'contract.singleTenancyClause': 'Single Active Tenancy Covenant: Tenant warrants no other active unfulfilled lease exists within juragankost network.',
     'contract.jurisdictionClause': 'Dispute Jurisdiction: This agreement is governed by the laws of Indonesia with exclusive legal jurisdiction at the District Court of Denpasar / Badung, Bali.',
     'contract.previewTitle': 'Draft Digital Lease Agreement',
     'contract.previewSubtitle': 'Preview agreement document prior to formal execution',
@@ -379,7 +379,7 @@ const translations: Record<Language, Translations> = {
     'admin.visitorTracking': 'Visitor Analytics',
 
     // Auth (Login / Register)
-    'auth.loginTitle': 'Sign In to KOSMO',
+    'auth.loginTitle': 'Sign In to juragankost',
     'auth.registerTitle': 'Create New Account',
     'auth.email': 'Email Address',
     'auth.password': 'Password',
@@ -411,7 +411,7 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [language, setLanguageState] = useState<Language>(() => {
     try {
-      const saved = localStorage.getItem('kosmo_lang');
+      const saved = localStorage.getItem('juragankost_lang') || localStorage.getItem('kosmo_lang');
       if (saved === 'id' || saved === 'en') {
         return saved;
       }
@@ -431,9 +431,10 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
     try {
+      localStorage.setItem('juragankost_lang', lang);
       localStorage.setItem('kosmo_lang', lang);
       // Persist to user record if logged in
-      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token');
       const rawUser = localStorage.getItem('user');
       if (token && rawUser) {
         const user = JSON.parse(rawUser) as { id?: string };

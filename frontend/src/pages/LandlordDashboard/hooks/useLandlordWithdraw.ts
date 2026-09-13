@@ -23,7 +23,7 @@ export function useLandlordWithdraw(
       alert("Masukkan jumlah penarikan yang valid.");
       return;
     }
-    const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
+    const token = localStorage.getItem('token') || localStorage.getItem('juragankost_token') || localStorage.getItem('kosmo_token') || '';
     try {
       const res = await fetch(`${API_BASE}/withdraw`, {
         method: 'POST',

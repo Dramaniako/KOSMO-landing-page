@@ -18,7 +18,7 @@ export const TenantHeader: React.FC<TenantHeaderProps> = ({
       <div>
         <h1 style={{ fontSize: '28px' }}>{t('tenant.welcome', { name: userName })}</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '2px' }}>
-          {t('tenant.title')} &bull; KOSMO Bali Co-Living
+          {t('tenant.title')} &bull; juragankost Bali
         </p>
       </div>
       <div className="flex items-center gap-3">

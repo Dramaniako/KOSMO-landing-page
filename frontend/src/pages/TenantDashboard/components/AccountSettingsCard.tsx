@@ -65,7 +65,7 @@ export const AccountSettingsCard: React.FC<AccountSettingsCardProps> = ({
         <div className="flex-between">
           <div>
             <strong style={{ display: 'block', fontSize: '14px' }}>Bahasa Aplikasi (Language)</strong>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pilih bahasa antarmuka aplikasi KOSMO.</span>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pilih bahasa antarmuka aplikasi juragankost.</span>
           </div>
           <select 
             className="form-select" 

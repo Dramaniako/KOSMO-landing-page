@@ -13,8 +13,8 @@ function RouteLoadingFallback() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center p-6 transition-colors duration-200">
       <div className="flex flex-col items-center gap-4 max-w-sm w-full">
-        <div className="w-12 h-12 rounded-2xl bg-blue-600/10 dark:bg-blue-500/20 flex items-center justify-center animate-pulse">
-          <div className="w-6 h-6 rounded-full border-2 border-blue-600 dark:border-blue-400 border-t-transparent animate-spin" />
+        <div className="w-12 h-12 rounded-2xl bg-emerald-600/10 dark:bg-emerald-500/20 flex items-center justify-center animate-pulse">
+          <div className="w-6 h-6 rounded-full border-2 border-emerald-700 dark:border-emerald-400 border-t-transparent animate-spin" />
         </div>
         <div className="w-full space-y-2 text-center">
           <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded-md w-3/4 mx-auto animate-pulse" />

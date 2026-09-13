@@ -104,16 +104,16 @@ export default function BookingPropertyDetailView({
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex-1 min-w-0">
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-tight">
-              {property.name || 'Properti KOSMO'}
+              {property.name || 'Properti juragankost'}
             </h2>
             <div className="property-location flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 mt-1.5">
-              <MapPin size={16} className="text-blue-500 flex-shrink-0" />
+              <MapPin size={16} className="text-emerald-600 flex-shrink-0" />
               <span>{property.address || property.district || 'Bali'}</span>
             </div>
           </div>
 
-          <div className="sm:text-right flex-shrink-0 bg-blue-50/70 dark:bg-blue-950/40 sm:bg-transparent p-3 sm:p-0 rounded-xl border border-blue-100 dark:border-blue-900/50 sm:border-0">
-            <div className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight property-price">
+          <div className="sm:text-right flex-shrink-0 bg-emerald-50/70 dark:bg-emerald-950/40 sm:bg-transparent p-3 sm:p-0 rounded-xl border border-emerald-100 dark:border-emerald-900/50 sm:border-0">
+            <div className="text-2xl sm:text-3xl font-black text-emerald-700 dark:text-emerald-400 tracking-tight property-price">
               {formatRupiah(displayPrice)}
             </div>
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5 flex items-center sm:justify-end gap-1">
@@ -170,8 +170,8 @@ export default function BookingPropertyDetailView({
               {property.document}
             </span>
           )}
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800 text-xs font-semibold">
-            <CheckCircle2 size={13} className="text-blue-500" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800 text-xs font-semibold">
+            <CheckCircle2 size={13} className="text-emerald-600" />
             Kontrak Digital KUHPerdata
           </span>
         </div>
@@ -195,7 +195,7 @@ export default function BookingPropertyDetailView({
         {/* Property Description / Co-Living Overview */}
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <FileText size={15} className="text-blue-500" />
+            <FileText size={15} className="text-emerald-600" />
             <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
               {t('modal.description')}
             </h4>
@@ -223,9 +223,9 @@ export default function BookingPropertyDetailView({
             {facilities.map((fac, idx) => (
               <div
                 key={idx}
-                className="facility-pill flex items-center gap-2.5 p-2.5 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 shadow-sm transition-all duration-200 group"
+                className="facility-pill flex items-center gap-2.5 p-2.5 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-600 shadow-sm transition-all duration-200 group"
               >
-                <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
                   {renderFacilityIcon(fac)}
                 </div>
                 <div className="flex flex-col min-w-0">
@@ -256,7 +256,7 @@ export default function BookingPropertyDetailView({
         <div>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <MapPin size={15} className="text-blue-500" />
+              <MapPin size={15} className="text-emerald-600" />
               <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
                 {t('modal.interactiveMap')}
               </h4>

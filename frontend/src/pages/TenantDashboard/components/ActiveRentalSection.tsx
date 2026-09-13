@@ -97,7 +97,7 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
             {activeRental.nextPaymentDate && (
               <div className="mt-3 p-2.5 px-3.5 bg-white/90 dark:bg-slate-800/90 border border-emerald-300 dark:border-emerald-700/50 rounded-lg inline-flex items-center gap-3 flex-wrap">
                 <div className="text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                  <Calendar size={14} className="text-blue-600 dark:text-blue-400" />
+                  <Calendar size={14} className="text-emerald-600 dark:text-emerald-400" />
                   <span className="text-slate-500 dark:text-slate-400 font-medium">{t('tenant.nextDue')}:</span>{' '}
                   <strong className="text-slate-900 dark:text-slate-100">{activeRental.nextPaymentDate}</strong>
                 </div>
@@ -107,7 +107,7 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
                       ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800' 
                       : activeRental.daysRemaining <= 3 
                         ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800' 
-                        : 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                        : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                   }`}>
                     {t('tenant.daysLeft', { days: activeRental.daysRemaining })}
                   </span>
