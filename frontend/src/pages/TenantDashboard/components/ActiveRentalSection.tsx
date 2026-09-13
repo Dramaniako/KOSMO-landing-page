@@ -2,6 +2,7 @@ import React from 'react';
 import { Home, Calendar, FileText, Compass, DoorOpen } from 'lucide-react';
 import { Rental } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
+import { formatRupiah } from '../../../utils/format';
 
 export interface ActiveRentalSectionProps {
   activeRental?: Rental;
@@ -130,7 +131,8 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
           </div>
           <div style={{ textAlign: 'right' }}>
             <strong style={{ fontSize: '20px', color: 'var(--primary)', display: 'block' }}>
-              Rp {activeRental.price ? activeRental.price.toLocaleString('id-ID') : '0'}/bln
+              {/* ⚡ Bolt: Using cached formatRupiah to avoid expensive Intl.NumberFormat instantiation in render loop */}
+              {activeRental.price ? formatRupiah(activeRental.price) : 'Rp 0'}/bln
             </strong>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px', flexWrap: 'wrap' }}>
               {onViewContractDetails && (
