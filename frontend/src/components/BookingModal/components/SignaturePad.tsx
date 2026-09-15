@@ -76,7 +76,7 @@ export default function SignaturePad({
         }}
       >
         <canvas
-          ref={canvasRef}
+          ref={canvasRef as React.RefObject<HTMLCanvasElement>}
           width={480}
           height={120}
           onPointerDown={onPointerDown}

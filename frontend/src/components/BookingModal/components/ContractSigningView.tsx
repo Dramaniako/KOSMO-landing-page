@@ -366,7 +366,7 @@ export default function ContractSigningView({
 
         {/* Scrollable Terms Container */}
         <div
-          ref={termsContainerRef}
+          ref={termsContainerRef as React.RefObject<HTMLDivElement>}
           onScroll={handleTermsScroll}
           tabIndex={0}
           role="region"
