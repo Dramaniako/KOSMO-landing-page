@@ -19,8 +19,8 @@ export function getJwtSecret(): string {
   }
   if (!defaultSecret) {
     if (process.env.NODE_ENV === 'production') {
-      console.warn('⚠️ [Auth Warning] JWT_SECRET environment variable is missing in production. Using fallback secret.');
-      defaultSecret = process.env.JWT_FALLBACK_SECRET || 'kosmo-bali-production-jwt-default-secret-key-2026';
+      console.warn('⚠️ [Auth Warning] JWT_SECRET environment variable is missing in production. Using random fallback secret. Sessions will not persist across server restarts.');
+      defaultSecret = process.env.JWT_FALLBACK_SECRET || randomBytes(32).toString('hex');
     } else {
       defaultSecret = randomBytes(32).toString('hex');
     }
