@@ -3,7 +3,7 @@ import { Eraser, Check, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useTranslation } from '../../../context/LanguageContext';
 
 export interface SignaturePadProps {
-  canvasRef?: React.RefObject<HTMLCanvasElement>;
+  canvasRef?: React.RefObject<HTMLCanvasElement | null>;
   hasDrawnSignature: boolean;
   signatureConfirmed: boolean;
   signatureError: string | null;

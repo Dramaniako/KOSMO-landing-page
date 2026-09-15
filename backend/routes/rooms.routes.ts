@@ -122,16 +122,17 @@ export function registerRoomRoutes(router: Router): void {
       }
       sql += ' ORDER BY floor ASC, CAST(roomNumber AS UNSIGNED) ASC, roomNumber ASC';
 
-      const [roomRows] = await pool.query<RoomRow[]>(sql, params);
-
-      // Fetch room photos
-      const [photoRows] = await pool.query<PropertyPhotoRow[]>(
-        `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt
-         FROM property_photos
-         WHERE propertyId = ? AND roomId IS NOT NULL
-         ORDER BY orderIndex ASC`,
-        [id]
-      );
+      // Fetch rooms and discrete room photos concurrently (Issue #78 & #79)
+      const [[roomRows], [photoRows]] = await Promise.all([
+        pool.query<RoomRow[]>(sql, params),
+        pool.query<PropertyPhotoRow[]>(
+          `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+           FROM property_photos
+           WHERE propertyId = ? AND roomId IS NOT NULL
+           ORDER BY orderIndex ASC`,
+          [id]
+        )
+      ]);
 
       const photosByRoomId = new Map<string, PropertyPhoto[]>();
       for (const p of photoRows) {
@@ -171,6 +172,13 @@ export function registerRoomRoutes(router: Router): void {
   // -------------------------------------------------------------------------
   router.get('/rooms/:roomId', async (req: Request<{ roomId: string }>, res: Response) => {
     const { roomId } = req.params;
+    const cacheKey = `rooms:detail:${roomId}`;
+    const cached = apiCache.get<Room>(cacheKey);
+    if (cached) {
+      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      return res.json(cached);
+    }
+
     try {
       const [rows] = await pool.query<RoomWithPropertyRow[]>(
         `SELECT r.*, p.ownerId, p.price as propertyPrice
@@ -185,28 +193,33 @@ export function registerRoomRoutes(router: Router): void {
       const room = rows[0];
 
       const [photos] = await pool.query<PropertyPhotoRow[]>(
-        'SELECT * FROM property_photos WHERE roomId = ? ORDER BY orderIndex ASC',
+        `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+         FROM property_photos
+         WHERE roomId = ?
+         ORDER BY orderIndex ASC`,
         [roomId]
       );
 
-      return res.json(
-        formatRoomResponse(
-          room,
-          room.propertyPrice,
-          photos.map((p) => ({
-            id: p.id,
-            propertyId: p.propertyId,
-            roomId: p.roomId,
-            url: p.url,
-            publicId: p.publicId,
-            category: p.category,
-            caption: p.caption,
-            orderIndex: Number(p.orderIndex),
-            createdAt: p.createdAt,
-            updatedAt: p.updatedAt
-          }))
-        )
+      const formattedRoom = formatRoomResponse(
+        room,
+        room.propertyPrice,
+        photos.map((p) => ({
+          id: p.id,
+          propertyId: p.propertyId,
+          roomId: p.roomId,
+          url: p.url,
+          publicId: p.publicId,
+          category: p.category,
+          caption: p.caption,
+          orderIndex: Number(p.orderIndex),
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt || p.createdAt
+        }))
       );
+
+      apiCache.set(cacheKey, formattedRoom, 30);
+      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      return res.json(formattedRoom);
     } catch (err: unknown) {
       console.error('GET /api/rooms/:roomId error:', err);
       return res.status(500).json({ message: 'Gagal mengambil detail kamar.' });
@@ -268,6 +281,7 @@ export function registerRoomRoutes(router: Router): void {
 
         await connection.commit();
         apiCache.invalidatePattern('properties');
+        apiCache.invalidatePattern('rooms');
 
         const createdRoom = formatRoomResponse(
           {
@@ -381,9 +395,13 @@ export function registerRoomRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('rooms');
 
       const [photos] = await pool.query<PropertyPhotoRow[]>(
-        'SELECT * FROM property_photos WHERE roomId = ? ORDER BY orderIndex ASC',
+        `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+         FROM property_photos
+         WHERE roomId = ?
+         ORDER BY orderIndex ASC`,
         [targetRoomId]
       );
 
@@ -410,7 +428,7 @@ export function registerRoomRoutes(router: Router): void {
             caption: p.caption,
             orderIndex: Number(p.orderIndex),
             createdAt: p.createdAt,
-            updatedAt: p.updatedAt
+            updatedAt: p.updatedAt || p.createdAt
           }))
         ),
         counts
@@ -496,6 +514,7 @@ export function registerRoomRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('rooms');
 
       return res.json({
         message: 'Status kamar berhasil diperbarui',
@@ -610,6 +629,7 @@ export function registerRoomRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('rooms');
 
       return res.json({
         message: 'Kamar berhasil dihapus!',

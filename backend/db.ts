@@ -141,6 +141,8 @@ export async function ensureIndexes(executor: QueryExecutor = pool): Promise<voi
     "ALTER TABLE property_photos ADD INDEX idx_photos_property (propertyId, orderIndex)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_room (roomId, orderIndex)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_category (category)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_prop_cat (propertyId, category, orderIndex)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_prop_room (propertyId, roomId, orderIndex)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
@@ -332,9 +334,12 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         caption VARCHAR(255) DEFAULT '',
         orderIndex INT NOT NULL DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_photos_property (propertyId, orderIndex),
         INDEX idx_photos_room (roomId, orderIndex),
         INDEX idx_photos_category (category),
+        INDEX idx_photos_prop_cat (propertyId, category, orderIndex),
+        INDEX idx_photos_prop_room (propertyId, roomId, orderIndex),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -585,9 +590,12 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
         caption VARCHAR(255) DEFAULT '',
         orderIndex INT NOT NULL DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_photos_property (propertyId, orderIndex),
         INDEX idx_photos_room (roomId, orderIndex),
         INDEX idx_photos_category (category),
+        INDEX idx_photos_prop_cat (propertyId, category, orderIndex),
+        INDEX idx_photos_prop_room (propertyId, roomId, orderIndex),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -640,13 +648,18 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS roomId VARCHAR(50)"
   ];
 
+  const photosQueries = [
+    'ALTER TABLE property_photos ADD COLUMN IF NOT EXISTS updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+  ];
+
   // Run per-table migration pipelines in parallel
   await Promise.all([
     runTableQueries(propertiesQueries),
     runTableQueries(usersQueries),
     runTableQueries(visitorTrackingQueries),
     runTableQueries(withdrawalsQueries),
-    runTableQueries(rentalsQueries)
+    runTableQueries(rentalsQueries),
+    runTableQueries(photosQueries)
   ]);
 
   await ensureIndexes(executor);

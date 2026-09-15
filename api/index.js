@@ -109,6 +109,11 @@ async function ensureIndexes(executor = pool) {
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
+    // ⚡ Bolt Performance Optimization:
+    // Added index on property_facilities.propertyId to optimize the GROUP_CONCAT join query in GET /api/properties.
+    // Why: property_facilities is frequently joined by propertyId, causing slow full table scans as the table grows.
+    // Impact: Significantly reduces query execution time (O(n) -> O(log n)) when filtering or fetching properties with facilities.
+    "ALTER TABLE property_facilities ADD INDEX idx_property_facilities_property (propertyId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_room (roomId)",
@@ -119,6 +124,8 @@ async function ensureIndexes(executor = pool) {
     "ALTER TABLE property_photos ADD INDEX idx_photos_property (propertyId, orderIndex)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_room (roomId, orderIndex)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_category (category)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_prop_cat (propertyId, category, orderIndex)",
+    "ALTER TABLE property_photos ADD INDEX idx_photos_prop_room (propertyId, roomId, orderIndex)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
@@ -300,9 +307,12 @@ async function createTables(executor = pool) {
         caption VARCHAR(255) DEFAULT '',
         orderIndex INT NOT NULL DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_photos_property (propertyId, orderIndex),
         INDEX idx_photos_room (roomId, orderIndex),
         INDEX idx_photos_category (category),
+        INDEX idx_photos_prop_cat (propertyId, category, orderIndex),
+        INDEX idx_photos_prop_room (propertyId, roomId, orderIndex),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -466,9 +476,12 @@ async function applyMigrations(executor = pool) {
         caption VARCHAR(255) DEFAULT '',
         orderIndex INT NOT NULL DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_photos_property (propertyId, orderIndex),
         INDEX idx_photos_room (roomId, orderIndex),
         INDEX idx_photos_category (category),
+        INDEX idx_photos_prop_cat (propertyId, category, orderIndex),
+        INDEX idx_photos_prop_room (propertyId, roomId, orderIndex),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -514,12 +527,16 @@ async function applyMigrations(executor = pool) {
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS roomId VARCHAR(50)"
   ];
+  const photosQueries = [
+    "ALTER TABLE property_photos ADD COLUMN IF NOT EXISTS updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+  ];
   await Promise.all([
     runTableQueries(propertiesQueries),
     runTableQueries(usersQueries),
     runTableQueries(visitorTrackingQueries),
     runTableQueries(withdrawalsQueries),
-    runTableQueries(rentalsQueries)
+    runTableQueries(rentalsQueries),
+    runTableQueries(photosQueries)
   ]);
   await ensureIndexes(executor);
   try {
@@ -670,8 +687,8 @@ function getJwtSecret() {
   }
   if (!defaultSecret) {
     if (process.env.NODE_ENV === "production") {
-      console.warn("\u26A0\uFE0F [Auth Warning] JWT_SECRET environment variable is missing in production. Using fallback secret.");
-      defaultSecret = process.env.JWT_FALLBACK_SECRET || "kosmo-bali-production-jwt-default-secret-key-2026";
+      console.warn("\u26A0\uFE0F [Auth Warning] JWT_SECRET environment variable is missing in production. Using random fallback secret. Sessions will not persist across server restarts.");
+      defaultSecret = process.env.JWT_FALLBACK_SECRET || randomBytes(32).toString("hex");
     } else {
       defaultSecret = randomBytes(32).toString("hex");
     }
@@ -3498,14 +3515,16 @@ function registerRoomRoutes(router2) {
         params.push(statusQuery);
       }
       sql += " ORDER BY floor ASC, CAST(roomNumber AS UNSIGNED) ASC, roomNumber ASC";
-      const [roomRows] = await pool.query(sql, params);
-      const [photoRows] = await pool.query(
-        `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt
-         FROM property_photos
-         WHERE propertyId = ? AND roomId IS NOT NULL
-         ORDER BY orderIndex ASC`,
-        [id]
-      );
+      const [[roomRows], [photoRows]] = await Promise.all([
+        pool.query(sql, params),
+        pool.query(
+          `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+           FROM property_photos
+           WHERE propertyId = ? AND roomId IS NOT NULL
+           ORDER BY orderIndex ASC`,
+          [id]
+        )
+      ]);
       const photosByRoomId = /* @__PURE__ */ new Map();
       for (const p of photoRows) {
         if (p.roomId) {
@@ -3538,6 +3557,12 @@ function registerRoomRoutes(router2) {
   });
   router2.get("/rooms/:roomId", async (req, res) => {
     const { roomId } = req.params;
+    const cacheKey = `rooms:detail:${roomId}`;
+    const cached = apiCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+      return res.json(cached);
+    }
     try {
       const [rows] = await pool.query(
         `SELECT r.*, p.ownerId, p.price as propertyPrice
@@ -3551,27 +3576,31 @@ function registerRoomRoutes(router2) {
       }
       const room = rows[0];
       const [photos] = await pool.query(
-        "SELECT * FROM property_photos WHERE roomId = ? ORDER BY orderIndex ASC",
+        `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+         FROM property_photos
+         WHERE roomId = ?
+         ORDER BY orderIndex ASC`,
         [roomId]
       );
-      return res.json(
-        formatRoomResponse(
-          room,
-          room.propertyPrice,
-          photos.map((p) => ({
-            id: p.id,
-            propertyId: p.propertyId,
-            roomId: p.roomId,
-            url: p.url,
-            publicId: p.publicId,
-            category: p.category,
-            caption: p.caption,
-            orderIndex: Number(p.orderIndex),
-            createdAt: p.createdAt,
-            updatedAt: p.updatedAt
-          }))
-        )
+      const formattedRoom = formatRoomResponse(
+        room,
+        room.propertyPrice,
+        photos.map((p) => ({
+          id: p.id,
+          propertyId: p.propertyId,
+          roomId: p.roomId,
+          url: p.url,
+          publicId: p.publicId,
+          category: p.category,
+          caption: p.caption,
+          orderIndex: Number(p.orderIndex),
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt || p.createdAt
+        }))
       );
+      apiCache.set(cacheKey, formattedRoom, 30);
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+      return res.json(formattedRoom);
     } catch (err) {
       console.error("GET /api/rooms/:roomId error:", err);
       return res.status(500).json({ message: "Gagal mengambil detail kamar." });
@@ -3621,6 +3650,7 @@ function registerRoomRoutes(router2) {
         const counts = await syncPropertyRoomCounts(connection, propertyId);
         await connection.commit();
         apiCache.invalidatePattern("properties");
+        apiCache.invalidatePattern("rooms");
         const createdRoom = formatRoomResponse(
           {
             id: roomId,
@@ -3718,8 +3748,12 @@ function registerRoomRoutes(router2) {
       const counts = await syncPropertyRoomCounts(connection, existing.propertyId);
       await connection.commit();
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rooms");
       const [photos] = await pool.query(
-        "SELECT * FROM property_photos WHERE roomId = ? ORDER BY orderIndex ASC",
+        `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+         FROM property_photos
+         WHERE roomId = ?
+         ORDER BY orderIndex ASC`,
         [targetRoomId]
       );
       return res.json({
@@ -3745,7 +3779,7 @@ function registerRoomRoutes(router2) {
             caption: p.caption,
             orderIndex: Number(p.orderIndex),
             createdAt: p.createdAt,
-            updatedAt: p.updatedAt
+            updatedAt: p.updatedAt || p.createdAt
           }))
         ),
         counts
@@ -3818,6 +3852,7 @@ function registerRoomRoutes(router2) {
       const counts = await syncPropertyRoomCounts(connection, existing.propertyId);
       await connection.commit();
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rooms");
       return res.json({
         message: "Status kamar berhasil diperbarui",
         room: formatRoomResponse(
@@ -3913,6 +3948,7 @@ function registerRoomRoutes(router2) {
       const counts = await syncPropertyRoomCounts(connection, room.propertyId);
       await connection.commit();
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rooms");
       return res.json({
         message: "Kamar berhasil dihapus!",
         counts
@@ -4041,11 +4077,41 @@ function registerPhotoRoutes(router2) {
         message: `Kategori foto '${categoryQuery}' tidak valid. Pilihan: ${VALID_PHOTO_CATEGORIES.join(", ")}`
       });
     }
-    const cacheKey = `properties:${id}:photos:${categoryQuery || "all"}:${roomIdQuery || "all"}`;
+    let limit = void 0;
+    let offset = 0;
+    if (req.query.limit !== void 0) {
+      const parsedLimit = parseInt(String(req.query.limit), 10);
+      if (isNaN(parsedLimit) || parsedLimit < 1) {
+        return res.status(400).json({ message: "Parameter limit harus berupa bilangan bulat positif (1-100)." });
+      }
+      limit = Math.min(parsedLimit, 100);
+    }
+    if (req.query.offset !== void 0) {
+      const parsedOffset = parseInt(String(req.query.offset), 10);
+      if (isNaN(parsedOffset) || parsedOffset < 0) {
+        return res.status(400).json({ message: "Parameter offset harus berupa bilangan bulat non-negatif (>= 0)." });
+      }
+      offset = parsedOffset;
+    }
+    const cacheKey = `properties:${id}:photos:${categoryQuery || "all"}:${roomIdQuery || "all"}:${limit ?? "all"}:${offset}`;
     const cached = apiCache.get(cacheKey);
     if (cached) {
+      const photos = Array.isArray(cached) ? cached : cached.photos;
+      const total = Array.isArray(cached) ? cached.length : cached.total;
+      const latestTimestamp = Array.isArray(cached) ? photos.reduce((max, p) => Math.max(max, new Date(p.updatedAt || p.createdAt || 0).getTime()), 0) : cached.latestTimestamp;
       res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
-      return res.json(cached);
+      res.setHeader("X-Total-Count", String(total));
+      res.setHeader("X-Page-Limit", String(limit !== void 0 ? limit : total));
+      res.setHeader("X-Page-Offset", String(offset));
+      if (latestTimestamp > 0) {
+        const lastModifiedStr = new Date(latestTimestamp).toUTCString();
+        res.setHeader("Last-Modified", lastModifiedStr);
+        const ifModifiedSince = req.headers["if-modified-since"];
+        if (ifModifiedSince && new Date(ifModifiedSince).getTime() >= Math.floor(latestTimestamp / 1e3) * 1e3) {
+          return res.status(304).end();
+        }
+      }
+      return res.json(photos);
     }
     try {
       const [propRows] = await pool.query(
@@ -4055,25 +4121,71 @@ function registerPhotoRoutes(router2) {
       if (propRows.length === 0) {
         return res.status(404).json({ message: "Properti tidak ditemukan." });
       }
-      let sql = "SELECT * FROM property_photos WHERE propertyId = ?";
-      const params = [id];
+      let baseWhere = "WHERE propertyId = ?";
+      const baseParams = [id];
       if (categoryQuery) {
-        sql += " AND category = ?";
-        params.push(categoryQuery);
+        baseWhere += " AND category = ?";
+        baseParams.push(categoryQuery);
       }
       if (roomIdQuery !== void 0) {
         if (roomIdQuery.toLowerCase() === "null" || roomIdQuery.toLowerCase() === "property") {
-          sql += ' AND (roomId IS NULL OR roomId = "")';
+          baseWhere += " AND roomId IS NULL";
         } else {
-          sql += " AND roomId = ?";
-          params.push(roomIdQuery);
+          baseWhere += " AND roomId = ?";
+          baseParams.push(roomIdQuery);
         }
       }
-      sql += " ORDER BY orderIndex ASC, createdAt ASC";
-      const [rows] = await pool.query(sql, params);
-      const photos = rows.map(formatPhotoResponse);
-      apiCache.set(cacheKey, photos, 30);
+      let dataSql = `
+        SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+        FROM property_photos
+        ${baseWhere}
+        ORDER BY orderIndex ASC, createdAt ASC
+      `;
+      const dataParams = [...baseParams];
+      if (limit !== void 0) {
+        dataSql += " LIMIT ? OFFSET ?";
+        dataParams.push(limit, offset);
+      }
+      let photos;
+      let total;
+      let latestTimestamp = 0;
+      if (limit !== void 0) {
+        const countSql = `
+          SELECT COUNT(*) as total, MAX(COALESCE(updatedAt, createdAt)) as maxModified
+          FROM property_photos
+          ${baseWhere}
+        `;
+        const [[countRows], [rows]] = await Promise.all([
+          pool.query(countSql, baseParams),
+          pool.query(dataSql, dataParams)
+        ]);
+        total = Number(countRows[0]?.total ?? rows.length);
+        photos = rows.map(formatPhotoResponse);
+        if (countRows[0]?.maxModified) {
+          latestTimestamp = new Date(countRows[0].maxModified).getTime();
+        }
+      } else {
+        const [rows] = await pool.query(dataSql, dataParams);
+        total = rows.length;
+        photos = rows.map(formatPhotoResponse);
+        latestTimestamp = photos.reduce((max, p) => {
+          const t = new Date(p.updatedAt || p.createdAt || 0).getTime();
+          return t > max ? t : max;
+        }, 0);
+      }
+      apiCache.set(cacheKey, { photos, total, latestTimestamp }, 30);
       res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+      res.setHeader("X-Total-Count", String(total));
+      res.setHeader("X-Page-Limit", String(limit !== void 0 ? limit : total));
+      res.setHeader("X-Page-Offset", String(offset));
+      if (latestTimestamp > 0) {
+        const lastModifiedStr = new Date(latestTimestamp).toUTCString();
+        res.setHeader("Last-Modified", lastModifiedStr);
+        const ifModifiedSince = req.headers["if-modified-since"];
+        if (ifModifiedSince && new Date(ifModifiedSince).getTime() >= Math.floor(latestTimestamp / 1e3) * 1e3) {
+          return res.status(304).end();
+        }
+      }
       return res.json(photos);
     } catch (err) {
       console.error("GET /api/properties/:id/photos error:", err);
@@ -4149,30 +4261,48 @@ function registerPhotoRoutes(router2) {
           [propertyId]
         );
         let nextOrder = Number(maxRows[0]?.maxOrder ?? -1) + 1;
+        const cleanRoomId = rawRoomId || null;
         const createdPhotos = [];
+        const valuePlaceholders = [];
+        const flatParams = [];
+        const now = /* @__PURE__ */ new Date();
         for (let i = 0; i < uploadResults.length; i++) {
           const uploadRes = uploadResults[i];
           const photoId = generateId("photo");
-          await connection.query(
-            `INSERT INTO property_photos (
-              id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-            [photoId, propertyId, rawRoomId, uploadRes.secure_url, uploadRes.public_id, targetCategory, caption, nextOrder]
+          const currentOrder = nextOrder + i;
+          valuePlaceholders.push("(?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
+          flatParams.push(
+            photoId,
+            propertyId,
+            cleanRoomId,
+            uploadRes.secure_url,
+            uploadRes.public_id,
+            targetCategory,
+            caption,
+            currentOrder
           );
           createdPhotos.push(
             formatPhotoResponse({
               id: photoId,
               propertyId,
-              roomId: rawRoomId,
+              roomId: cleanRoomId,
               url: uploadRes.secure_url,
               publicId: uploadRes.public_id,
               category: targetCategory,
               caption,
-              orderIndex: nextOrder,
-              createdAt: /* @__PURE__ */ new Date()
+              orderIndex: currentOrder,
+              createdAt: now,
+              updatedAt: now
             })
           );
-          nextOrder++;
+        }
+        if (valuePlaceholders.length > 0) {
+          await connection.query(
+            `INSERT INTO property_photos (
+              id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+            ) VALUES ${valuePlaceholders.join(", ")}`,
+            flatParams
+          );
         }
         if ((!property.image || property.image.trim() === "" || targetCategory === "thumbnail") && createdPhotos.length > 0) {
           await connection.query(
@@ -4182,6 +4312,7 @@ function registerPhotoRoutes(router2) {
         }
         await connection.commit();
         apiCache.invalidatePattern("properties");
+        apiCache.invalidatePattern("rooms");
         return res.status(201).json({
           message: `${createdPhotos.length} foto berhasil diunggah`,
           photos: createdPhotos
@@ -4232,26 +4363,38 @@ function registerPhotoRoutes(router2) {
             message: `Satu atau lebih foto tidak ditemukan pada properti ini: ${invalidIds.join(", ")}`
           });
         }
-        for (let i = 0; i < photoIds.length; i++) {
-          await connection.query(
-            "UPDATE property_photos SET orderIndex = ? WHERE id = ? AND propertyId = ?",
-            [i, photoIds[i], propertyId]
-          );
-        }
         const reorderedSet = new Set(photoIds);
         const remaining = existingPhotos.filter((p) => !reorderedSet.has(p.id)).sort((a, b) => Number(a.orderIndex) - Number(b.orderIndex));
+        const updates = [];
+        for (let i = 0; i < photoIds.length; i++) {
+          updates.push({ id: photoIds[i], orderIndex: i });
+        }
         for (let j = 0; j < remaining.length; j++) {
+          updates.push({ id: remaining[j].id, orderIndex: photoIds.length + j });
+        }
+        if (updates.length > 0) {
+          const caseClauses = updates.map(() => "WHEN ? THEN ?").join(" ");
+          const caseParams = [];
+          updates.forEach((u) => caseParams.push(u.id, u.orderIndex));
+          const ids = updates.map((u) => u.id);
+          const placeholders = ids.map(() => "?").join(", ");
           await connection.query(
-            "UPDATE property_photos SET orderIndex = ? WHERE id = ? AND propertyId = ?",
-            [photoIds.length + j, remaining[j].id, propertyId]
+            `UPDATE property_photos 
+             SET orderIndex = CASE id ${caseClauses} END 
+             WHERE id IN (${placeholders}) AND propertyId = ?`,
+            [...caseParams, ...ids, propertyId]
           );
         }
         const [updatedRows] = await connection.query(
-          "SELECT * FROM property_photos WHERE propertyId = ? ORDER BY orderIndex ASC, createdAt ASC",
+          `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+           FROM property_photos
+           WHERE propertyId = ?
+           ORDER BY orderIndex ASC, createdAt ASC`,
           [propertyId]
         );
         await connection.commit();
         apiCache.invalidatePattern("properties");
+        apiCache.invalidatePattern("rooms");
         return res.json({
           message: "Urutan foto berhasil diperbarui",
           photos: updatedRows.map(formatPhotoResponse)
@@ -4306,6 +4449,7 @@ function registerPhotoRoutes(router2) {
       }
       await connection.commit();
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rooms");
       if (photo.publicId) {
         deleteCloudinaryImage(photo.publicId).catch((delErr) => {
           console.warn(`[Cloudinary] Non-fatal deletion error for ${photo.publicId}:`, delErr);

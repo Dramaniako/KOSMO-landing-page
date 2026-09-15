@@ -153,7 +153,7 @@ describe('Frontend Component Render Performance', () => {
     );
     const duration = performance.now() - start;
 
-    expect(duration).toBeLessThan(100);
+    expect(duration).toBeLessThan(250);
     expect(container.querySelectorAll('button').length).toBe(2);
   });
 

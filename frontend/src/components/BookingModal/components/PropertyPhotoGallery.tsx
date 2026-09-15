@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, X, Maximize2, Wifi, Sparkles } from 'lucide-react';
 import { Property, PropertyPhoto, PhotoCategory } from '../../../types/index';
+import { getCloudinaryThumbUrl } from '../../../utils/cloudinary';
 
 export interface PropertyPhotoGalleryProps {
   property: Property;
@@ -189,6 +190,9 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
           src={currentPhoto.url}
           alt={currentPhoto.caption || currentPhoto.category}
           className="w-full h-full object-cover cursor-pointer transition-transform duration-300 group-hover:scale-105 gallery-hero-img"
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
           onClick={() => setLightboxOpen(true)}
         />
 
@@ -267,9 +271,12 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
                 onClick={() => setActivePhotoIndex(idx)}
               >
                 <img
-                  src={photo.url}
+                  src={getCloudinaryThumbUrl(photo.url, 128, 112)}
+                  srcSet={`${getCloudinaryThumbUrl(photo.url, 256, 224)} 2x`}
                   alt={photo.caption || `Thumbnail ${idx + 1}`}
                   className="w-full h-full object-cover"
+                  loading="lazy"
+                  decoding="async"
                 />
               </button>
             );
@@ -315,6 +322,7 @@ export const PropertyPhotoGallery: React.FC<PropertyPhotoGalleryProps> = ({
               src={currentPhoto.url}
               alt={currentPhoto.caption || 'Foto Galeri'}
               className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl"
+              decoding="async"
             />
 
             {/* Lightbox Prev / Next */}

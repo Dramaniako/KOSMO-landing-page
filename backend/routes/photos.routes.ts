@@ -77,11 +77,51 @@ export function registerPhotoRoutes(router: Router): void {
       });
     }
 
-    const cacheKey = `properties:${id}:photos:${categoryQuery || 'all'}:${roomIdQuery || 'all'}`;
-    const cached = apiCache.get<PropertyPhoto[]>(cacheKey);
+    // Parse and validate pagination parameters (Issue #82)
+    let limit: number | undefined = undefined;
+    let offset = 0;
+
+    if (req.query.limit !== undefined) {
+      const parsedLimit = parseInt(String(req.query.limit), 10);
+      if (isNaN(parsedLimit) || parsedLimit < 1) {
+        return res.status(400).json({ message: 'Parameter limit harus berupa bilangan bulat positif (1-100).' });
+      }
+      limit = Math.min(parsedLimit, 100);
+    }
+
+    if (req.query.offset !== undefined) {
+      const parsedOffset = parseInt(String(req.query.offset), 10);
+      if (isNaN(parsedOffset) || parsedOffset < 0) {
+        return res.status(400).json({ message: 'Parameter offset harus berupa bilangan bulat non-negatif (>= 0).' });
+      }
+      offset = parsedOffset;
+    }
+
+    const cacheKey = `properties:${id}:photos:${categoryQuery || 'all'}:${roomIdQuery || 'all'}:${limit ?? 'all'}:${offset}`;
+    const cached = apiCache.get<{ photos: PropertyPhoto[]; total: number; latestTimestamp: number } | PropertyPhoto[]>(cacheKey);
     if (cached) {
+      const photos = Array.isArray(cached) ? cached : cached.photos;
+      const total = Array.isArray(cached) ? cached.length : cached.total;
+      const latestTimestamp = Array.isArray(cached)
+        ? photos.reduce((max, p) => Math.max(max, new Date(p.updatedAt || p.createdAt || 0).getTime()), 0)
+        : cached.latestTimestamp;
+
       res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
-      return res.json(cached);
+      res.setHeader('X-Total-Count', String(total));
+      res.setHeader('X-Page-Limit', String(limit !== undefined ? limit : total));
+      res.setHeader('X-Page-Offset', String(offset));
+
+      if (latestTimestamp > 0) {
+        const lastModifiedStr = new Date(latestTimestamp).toUTCString();
+        res.setHeader('Last-Modified', lastModifiedStr);
+
+        const ifModifiedSince = req.headers['if-modified-since'];
+        if (ifModifiedSince && new Date(ifModifiedSince).getTime() >= Math.floor(latestTimestamp / 1000) * 1000) {
+          return res.status(304).end();
+        }
+      }
+
+      return res.json(photos);
     }
 
     try {
@@ -93,30 +133,85 @@ export function registerPhotoRoutes(router: Router): void {
         return res.status(404).json({ message: 'Properti tidak ditemukan.' });
       }
 
-      let sql = 'SELECT * FROM property_photos WHERE propertyId = ?';
-      const params: (string | null)[] = [id];
+      let baseWhere = 'WHERE propertyId = ?';
+      const baseParams: (string | number | null)[] = [id];
 
       if (categoryQuery) {
-        sql += ' AND category = ?';
-        params.push(categoryQuery);
+        baseWhere += ' AND category = ?';
+        baseParams.push(categoryQuery);
       }
 
+      // Clean SQL without disjunction for roomId (Issue #90)
       if (roomIdQuery !== undefined) {
         if (roomIdQuery.toLowerCase() === 'null' || roomIdQuery.toLowerCase() === 'property') {
-          sql += ' AND (roomId IS NULL OR roomId = "")';
+          baseWhere += ' AND roomId IS NULL';
         } else {
-          sql += ' AND roomId = ?';
-          params.push(roomIdQuery);
+          baseWhere += ' AND roomId = ?';
+          baseParams.push(roomIdQuery);
         }
       }
 
-      sql += ' ORDER BY orderIndex ASC, createdAt ASC';
+      // Explicit column projection (Issue #79)
+      let dataSql = `
+        SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+        FROM property_photos
+        ${baseWhere}
+        ORDER BY orderIndex ASC, createdAt ASC
+      `;
+      const dataParams: (string | number | null)[] = [...baseParams];
 
-      const [rows] = await pool.query<PropertyPhotoRow[]>(sql, params);
-      const photos: PropertyPhoto[] = rows.map(formatPhotoResponse);
+      if (limit !== undefined) {
+        dataSql += ' LIMIT ? OFFSET ?';
+        dataParams.push(limit, offset);
+      }
 
-      apiCache.set(cacheKey, photos, 30);
+      let photos: PropertyPhoto[];
+      let total: number;
+      let latestTimestamp = 0;
+
+      if (limit !== undefined) {
+        const countSql = `
+          SELECT COUNT(*) as total, MAX(COALESCE(updatedAt, createdAt)) as maxModified
+          FROM property_photos
+          ${baseWhere}
+        `;
+        const [[countRows], [rows]] = await Promise.all([
+          pool.query<RowDataPacket[]>(countSql, baseParams),
+          pool.query<PropertyPhotoRow[]>(dataSql, dataParams)
+        ]);
+        total = Number(countRows[0]?.total ?? rows.length);
+        photos = rows.map(formatPhotoResponse);
+        if (countRows[0]?.maxModified) {
+          latestTimestamp = new Date(countRows[0].maxModified).getTime();
+        }
+      } else {
+        const [rows] = await pool.query<PropertyPhotoRow[]>(dataSql, dataParams);
+        total = rows.length;
+        photos = rows.map(formatPhotoResponse);
+        latestTimestamp = photos.reduce((max, p) => {
+          const t = new Date(p.updatedAt || p.createdAt || 0).getTime();
+          return t > max ? t : max;
+        }, 0);
+      }
+
+      apiCache.set(cacheKey, { photos, total, latestTimestamp }, 30);
+
       res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      res.setHeader('X-Total-Count', String(total));
+      res.setHeader('X-Page-Limit', String(limit !== undefined ? limit : total));
+      res.setHeader('X-Page-Offset', String(offset));
+
+      // HTTP 304 conditional caching (Issue #87)
+      if (latestTimestamp > 0) {
+        const lastModifiedStr = new Date(latestTimestamp).toUTCString();
+        res.setHeader('Last-Modified', lastModifiedStr);
+
+        const ifModifiedSince = req.headers['if-modified-since'];
+        if (ifModifiedSince && new Date(ifModifiedSince).getTime() >= Math.floor(latestTimestamp / 1000) * 1000) {
+          return res.status(304).end();
+        }
+      }
+
       return res.json(photos);
     } catch (err: unknown) {
       console.error('GET /api/properties/:id/photos error:', err);
@@ -211,34 +306,52 @@ export function registerPhotoRoutes(router: Router): void {
         );
         let nextOrder = Number(maxRows[0]?.maxOrder ?? -1) + 1;
 
+        const cleanRoomId = rawRoomId || null;
         const createdPhotos: PropertyPhoto[] = [];
+        const valuePlaceholders: string[] = [];
+        const flatParams: (string | number | null)[] = [];
+        const now = new Date();
 
         for (let i = 0; i < uploadResults.length; i++) {
           const uploadRes = uploadResults[i];
           const photoId = generateId('photo');
+          const currentOrder = nextOrder + i;
 
-          await connection.query(
-            `INSERT INTO property_photos (
-              id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-            [photoId, propertyId, rawRoomId, uploadRes.secure_url, uploadRes.public_id, targetCategory, caption, nextOrder]
+          valuePlaceholders.push('(?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
+          flatParams.push(
+            photoId,
+            propertyId,
+            cleanRoomId,
+            uploadRes.secure_url,
+            uploadRes.public_id,
+            targetCategory,
+            caption,
+            currentOrder
           );
 
           createdPhotos.push(
             formatPhotoResponse({
               id: photoId,
               propertyId,
-              roomId: rawRoomId,
+              roomId: cleanRoomId,
               url: uploadRes.secure_url,
               publicId: uploadRes.public_id,
               category: targetCategory,
               caption,
-              orderIndex: nextOrder,
-              createdAt: new Date()
+              orderIndex: currentOrder,
+              createdAt: now,
+              updatedAt: now
             })
           );
+        }
 
-          nextOrder++;
+        if (valuePlaceholders.length > 0) {
+          await connection.query(
+            `INSERT INTO property_photos (
+              id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+            ) VALUES ${valuePlaceholders.join(', ')}`,
+            flatParams
+          );
         }
 
         // If property has no image or category is 'thumbnail', update property image
@@ -251,6 +364,7 @@ export function registerPhotoRoutes(router: Router): void {
 
         await connection.commit();
         apiCache.invalidatePattern('properties');
+        apiCache.invalidatePattern('rooms');
 
         return res.status(201).json({
           message: `${createdPhotos.length} foto berhasil diunggah`,
@@ -312,32 +426,45 @@ export function registerPhotoRoutes(router: Router): void {
           });
         }
 
-        for (let i = 0; i < photoIds.length; i++) {
-          await connection.query(
-            'UPDATE property_photos SET orderIndex = ? WHERE id = ? AND propertyId = ?',
-            [i, photoIds[i], propertyId]
-          );
-        }
-
-        // Offset any remaining photos not included in photoIds
         const reorderedSet = new Set(photoIds);
         const remaining = existingPhotos
           .filter((p) => !reorderedSet.has(p.id))
           .sort((a, b) => Number(a.orderIndex) - Number(b.orderIndex));
+
+        const updates: { id: string; orderIndex: number }[] = [];
+        for (let i = 0; i < photoIds.length; i++) {
+          updates.push({ id: photoIds[i], orderIndex: i });
+        }
         for (let j = 0; j < remaining.length; j++) {
+          updates.push({ id: remaining[j].id, orderIndex: photoIds.length + j });
+        }
+
+        if (updates.length > 0) {
+          const caseClauses = updates.map(() => 'WHEN ? THEN ?').join(' ');
+          const caseParams: (string | number)[] = [];
+          updates.forEach((u) => caseParams.push(u.id, u.orderIndex));
+          const ids = updates.map((u) => u.id);
+          const placeholders = ids.map(() => '?').join(', ');
+
           await connection.query(
-            'UPDATE property_photos SET orderIndex = ? WHERE id = ? AND propertyId = ?',
-            [photoIds.length + j, remaining[j].id, propertyId]
+            `UPDATE property_photos 
+             SET orderIndex = CASE id ${caseClauses} END 
+             WHERE id IN (${placeholders}) AND propertyId = ?`,
+            [...caseParams, ...ids, propertyId]
           );
         }
 
         const [updatedRows] = await connection.query<PropertyPhotoRow[]>(
-          'SELECT * FROM property_photos WHERE propertyId = ? ORDER BY orderIndex ASC, createdAt ASC',
+          `SELECT id, propertyId, roomId, url, publicId, category, caption, orderIndex, createdAt, updatedAt
+           FROM property_photos
+           WHERE propertyId = ?
+           ORDER BY orderIndex ASC, createdAt ASC`,
           [propertyId]
         );
 
         await connection.commit();
         apiCache.invalidatePattern('properties');
+        apiCache.invalidatePattern('rooms');
 
         return res.json({
           message: 'Urutan foto berhasil diperbarui',
@@ -405,6 +532,7 @@ export function registerPhotoRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('rooms');
 
       // Async Cloudinary deletion (resilient to external CDN errors)
       if (photo.publicId) {

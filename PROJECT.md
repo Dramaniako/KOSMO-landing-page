@@ -1,87 +1,85 @@
-# Project: KOSMO Discrete Room Inventory & Multi-Photo Gallery System
+# Project: GitHub Issues & Pull Requests Triage, Defect Resolution & Integration
 
 ## Architecture
-- **Backend Architecture**: Node.js, Express, TypeScript (`backend/`). Modular domain routes in `backend/routes/` mounted through central router (`backend/routes/index.ts`). Database access via `mysql2/promise` connection pooling in `backend/db.ts`.
-- **Database Schema**: MySQL/InnoDB with ACID transaction isolation. Domain tables: `properties`, `rooms` (discrete room entities), `property_photos` (multi-photo gallery with categorized perspectives), `rentals` (extended with `roomId`), `users`, `property_facilities`, `reviews`, `withdrawals`.
-- **Concurrency & Locking Model**: Row-level locking via `SELECT ... FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE` following strict hierarchical lock order (`users` -> `properties` -> `rooms`) to serialize concurrent booking requests and eliminate deadlocks.
-- **Frontend Architecture**: React 19, TypeScript, Vite, Tailwind CSS, Lucide React (`frontend/src/`). Modular components in `components/`, subcomponents in `BookingModal/`, `TenantDashboard/`, `LandlordDashboard/`.
-- **Testing & Verification Pipeline**: 5-gate deterministic pipeline enforced by `./scripts/verify.sh` and `./scripts/verify.ps1`:
-  1. Backend TypeScript check (`npx tsc --noEmit`)
-  2. Frontend & Backend builds (`npm --prefix frontend run build && npm run build:backend`)
+- **Backend Architecture**: Node.js, Express, TypeScript (`backend/`). Domain routers in `backend/routes/` mounted through central router (`backend/routes/index.ts`). MySQL connection pooling via `mysql2/promise` in `backend/db.ts`. Standalone Node server (`backend/server.ts`) and Vercel serverless bundle (`api/index.js`).
+- **Database Schema**: MySQL/InnoDB with ACID transactions. Core domain tables: `properties`, `rooms`, `property_photos`, `rentals`, `users`, `property_facilities`, `reviews`, `withdrawals`.
+- **Frontend Architecture**: React 19, TypeScript, Vite, Tailwind CSS, Lucide React (`frontend/src/`). Central pages in `pages/`, shared components in `components/`, utilities in `utils/`.
+- **Security & Caching**: Ephemeral random bytes fallback for JWT secrets, password verification gates (`bcrypt`), in-memory `apiCache` with pattern invalidation, HTTP 304 conditional caching (`Last-Modified`), client-side TTL caching and `AbortController`.
+- **Verification Pipeline**: 5-gate deterministic pipeline enforced by `./scripts/verify.sh` / `./scripts/verify.ps1`:
+  1. Backend TypeScript type-check (`npx tsc --noEmit`)
+  2. Frontend build (`npm --prefix frontend run build`) & Backend bundle (`npm run build:backend`)
   3. Backend test suite (`npm test`)
   4. Frontend Vitest suite (`npm --prefix frontend test -- --run`)
   5. Playwright E2E browser suite (`npx playwright test`)
 
 ## Feature Inventory
-| # | Feature | Description | Milestone | Source |
-|---|---------|-------------|-----------|--------|
-| 1 | Baseline Compilation Fix | Fix missing `document` property on `rawPropertyRow` in `scripts/benchmark_all_functions.ts` to unblock Gate 1 | M1 | Survey 3 |
-| 2 | Discrete Room Data Model | Create `rooms` table (`id`, `propertyId`, `roomNumber`, `floor`, `type`, `price`, `status`, timestamps, unique key on property+roomNumber) | M1 | ORIGINAL_REQUEST §R1 |
-| 3 | Multi-Photo Gallery Data Model | Create `property_photos` table (`id`, `propertyId`, `roomId`, `url`, `publicId`, `category`, `caption`, `orderIndex`, timestamps) | M1 | ORIGINAL_REQUEST §R3 |
-| 4 | Rental Schema Extension | Add `roomId VARCHAR(50)` and index `idx_rentals_room` to `rentals` table | M1 | ORIGINAL_REQUEST §R2 |
-| 5 | Idempotent Auto-Backfill | `backfillDiscreteRooms()` seeds discrete rooms (101, 102...) for existing properties with `totalRooms > 0`, setting first `occupiedRooms` to 'occupied' and remainder to 'available', links active rentals | M1 | ORIGINAL_REQUEST §R1 |
-| 6 | Room Count Parity Sync | `syncPropertyRoomCounts(executor, propertyId)` atomically recalculates and updates `properties.totalRooms` and `properties.occupiedRooms` from `rooms` table | M1 | ORIGINAL_REQUEST §R1 |
-| 7 | Discrete Rooms API Endpoints | `GET /api/properties/:id/rooms`, `POST /api/properties/:id/rooms`, `PUT /api/properties/:id/rooms/:roomId`, `PATCH /api/properties/:id/rooms/:roomId/status`, `DELETE /api/properties/:id/rooms/:roomId` | M2 | ORIGINAL_REQUEST §R2 |
-| 8 | Room-Level Selection & Binding | Booking and contract signing require and record valid `roomId` in `rentals`; backward compatible auto-assignment if omitted | M2 | ORIGINAL_REQUEST §R2 |
-| 9 | ACID Concurrency Guard | `SELECT ... FROM rooms WHERE id = ? FOR UPDATE` prevents double-booking; returns HTTP 409 Conflict for competing requests | M2 | ORIGINAL_REQUEST §R2 |
-| 10 | Rental Lifecycle Room Release | Rental termination or cancellation atomically frees assigned room back to 'available' and recalculates occupancy | M2 | ORIGINAL_REQUEST §R2 |
-| 11 | Multi-Photo Gallery API | `GET /api/properties/:id/photos`, `POST /api/properties/:id/photos`, `PUT /api/properties/:id/photos/reorder`, `DELETE /api/properties/:id/photos/:photoId` with Cloudinary streaming | M3 | ORIGINAL_REQUEST §R3 |
-| 12 | Categorized Perspectives | Support categories: `thumbnail`, `bedroom`, `bathroom`, `kitchen`, `pool`, `living_room`, `wifi_speedtest`, `exterior`, `other` | M3 | ORIGINAL_REQUEST §R3 |
-| 13 | Interactive Photo Gallery UI | `PropertyPhotoGallery.tsx` in `BookingModal`: category filter tabs, carousel navigation, thumbnail strip, fullscreen lightbox | M4 | ORIGINAL_REQUEST §R3, §R4 |
-| 14 | Room Selection Grid UI | `RoomSelectionGrid.tsx` in `BookingModal`: floor tabs, status badges, price override tags, selection state, gating "Sewa Sekarang" | M4 | ORIGINAL_REQUEST §R2, §R4 |
-| 15 | Tenant Room Details UI | Render assigned room number, floor, and room specs in `TenantDashboard` (`ActiveRentalSection`, `RentalHistorySection`) | M4 | ORIGINAL_REQUEST §R4 |
-| 16 | Landlord Room Inventory UI | `RoomInventoryModal.tsx` in `LandlordDashboard`: manage discrete rooms, toggle status (available <-> maintenance), add/edit rooms | M4 | ORIGINAL_REQUEST §R4 |
-| 17 | Landlord Photo Gallery Manager UI | `PhotoGalleryManager.tsx` in `LandlordDashboard`: upload multiple categorized photos, set cover photo, reorder, delete | M4 | ORIGINAL_REQUEST §R3, §R4 |
-| 18 | E2E Testing Suite (Tiers 1-4) | Opaque-box requirement-driven E2E tests: Tier 1 (Feature), Tier 2 (Boundary), Tier 3 (Cross-Feature), Tier 4 (Workloads) | E2E Track | Dual Track Mandate |
-| 19 | 100% E2E Pass & Tier 5 Hardening | Pass 100% E2E test suite followed by white-box adversarial coverage hardening and full `./scripts/verify.sh` pass | M5 | Acceptance Criteria |
+| # | Feature / Item | Target Scope & Description | Milestone | Source |
+|---|---|---|---|---|
+| 1 | PR #75: JWT Secret Fallback | Replace hardcoded production fallback secret with cryptographically secure `randomBytes(32).toString('hex')` in `backend/middleware/auth.ts` and rebuild `api/index.js` | M1 | Survey 3 |
+| 2 | PR #76: Admin Password Gate Audit | Audit admin user deletion password verification gate. Verify superseded in main by commit `8905d98` and modular `backend/routes/users.routes.ts`. Mark REJECT/CLOSE | M1 | Survey 3 |
+| 3 | PR #77: property_facilities Index | Add index statement for `property_facilities.propertyId` to `backend/db.ts:ensureIndexes()` and update `.jules/bolt.md` | M1 | Survey 3 |
+| 4 | PR #91: formatRupiah Caching (Winner) | Merge optimal PR #91 replacing expensive `.toLocaleString` with cached `formatRupiah` across `ActiveRentalSection.tsx`, `PendingPaymentModal.tsx`, `RentalHistorySection.tsx` | M1 | Survey 3 |
+| 5 | PRs #92–#95: Redundant PRs Discard | Document technical disqualifications for PR #92 (scope creep), #93 (duplicate), #94 (incomplete), #95 (incomplete) | M1 | Survey 3 |
+| 6 | Issue #78: Concurrent Queries in Rooms Route | In `backend/routes/rooms.routes.ts:103-134`, run independent room and photo SQL queries concurrently using `Promise.all` | M2 | Survey 1 |
+| 7 | Issue #79: Explicit Column Projections | Replace 4 occurrences of `SELECT * FROM property_photos` in `backend/routes/rooms.routes.ts` and `backend/routes/photos.routes.ts` with explicit `PropertyPhotoRow` columns | M2 | Survey 1 |
+| 8 | Issue #80: In-Memory Single-Room Caching | Wire `GET /api/rooms/:roomId` to `apiCache` (TTL 30s) and add `apiCache.invalidatePattern('rooms')` on room mutations | M2 | Survey 1 |
+| 9 | Issue #81: Bulk UPDATE for Photo Reordering | In `backend/routes/photos.routes.ts:315-332`, collapse sequential loop of individual UPDATE queries into a single bulk `CASE WHEN` UPDATE | M2 | Survey 1 |
+| 10 | Issue #82: Safe Server-Side Photo Pagination | In `backend/routes/photos.routes.ts:69-125`, add optional sanitized `limit`/`offset` pagination params & headers while preserving array format `PropertyPhoto[]` by default | M2 | Survey 1 |
+| 11 | Issue #87: Photos updatedAt & HTTP 304 Caching | Add `updatedAt` column to `property_photos` in `backend/db.ts` and implement HTTP 304 conditional caching (`Last-Modified`/`If-Modified-Since`) in `backend/routes/photos.routes.ts` | M2 | Survey 2 |
+| 12 | Issue #88: Multi-Row Batch Photo INSERT | In `backend/routes/photos.routes.ts:216-242`, replace sequential single-row INSERT loop with a single multi-row parameterized `INSERT INTO property_photos` query | M2 | Survey 2 |
+| 13 | Issue #90: Photo Composite Index & Clean SQL Filter | Add composite indexes `idx_photos_prop_cat` and `idx_photos_prop_room` in `backend/db.ts`; clean `roomId IS NULL` lookup in `backend/routes/photos.routes.ts` | M2 | Survey 2 |
+| 14 | Issue #83: BookingModal Client-Side Cache | In `frontend/src/components/BookingModal.tsx:74-124`, add module-level cache (`Map`) with 60s TTL and initialize state with preloaded listing photos/rooms | M3 | Survey 1 |
+| 15 | Issue #84: Gallery Image Modern Loading Attributes | In `PropertyPhotoGallery.tsx`, add `loading="eager"`, `decoding="async"`, `fetchPriority="high"` on hero image, and `loading="lazy"`, `decoding="async"` on thumbnails/lightbox | M3 | Survey 1 |
+| 16 | Issue #85: Cloudinary Responsive Thumbnail Transforms | Create `getCloudinaryThumbUrl` helper in `frontend/src/utils/cloudinary.ts` and integrate into thumbnail filmstrip in `PropertyPhotoGallery.tsx` | M3 | Survey 2 |
+| 17 | Issue #86: Active Rental Fetch TTL Cache & Abort | In `frontend/src/pages/LandingPage.tsx:206-238`, wrap active rental check in 60s TTL cache with `AbortController` to stop network spam and button disability jitter | M3 | Survey 2 |
+| 18 | Issue #89: RoomSelectionGrid Memo & Windowing | Extract memoized `RoomCardItem` and implement progressive windowing/pagination for large room lists in `RoomSelectionGrid.tsx` | M3 | Survey 2 |
+| 19 | Milestone 4: Programmatic Verification & Tests | Write unit tests for new helpers/endpoints (`tests/triage_fixes.test.ts`, `frontend/src/utils/__tests__/cloudinary.test.ts`), verify all test suites, and execute Forensic Integrity Audit | M4 | Mandate |
+| 20 | Milestone 5: GitHub Resolution & Sync Report | Generate `GITHUB_TRIAGE_REPORT.md` documenting disposition of all 13 issues and 8 PRs with copy-pasteable remote sync commands | M5 | Mandate |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| E2E | E2E Testing Track | Requirement-driven test suite (Tiers 1-4), harness, and `TEST_READY.md` publication | none | DONE |
-| M1 | Database Schema & Auto-Backfill | `rooms` and `property_photos` tables, `rentals.roomId`, `backfillDiscreteRooms`, `syncPropertyRoomCounts`, baseline TS fix | none | DONE |
-| M2 | Backend Room Inventory & Concurrency Guard | Discrete room endpoints, room-level booking, `SELECT ... FOR UPDATE` double-booking guard, lifecycle release | M1 | DONE |
-| M3 | Multi-Photo Gallery API | Gallery photo CRUD endpoints, categorized perspectives validation, Cloudinary streaming, reordering | M1 | DONE |
-| M4 | Frontend UI Workflows | `PropertyPhotoGallery`, `RoomSelectionGrid`, `BookingModal` wiring, `TenantDashboard` room details, `LandlordDashboard` management | M2, M3 | PLANNED |
-| M5 | Final Milestone: 100% E2E Pass & Hardening | Verify all E2E test tiers pass, Tier 5 adversarial hardening, `./scripts/verify.sh` exit code 0 | M4, E2E | PLANNED |
+| M1 | PR Evaluation & Branch Integration | Merge PRs #75, #77, #91; document discard for #76, #92–#95; rebuild backend bundle | Survey Complete | DONE |
+| M2 | Backend & Database Defect Resolutions | Fix issues #78, #79, #80, #81, #82, #87, #88, #90 in `backend/routes/` and `backend/db.ts` | M1 | DONE |
+| M3 | Frontend Performance & Virtualization | Fix issues #83, #84, #85, #86, #89 in `frontend/src/` components and utilities | M1 | DONE |
+| M4 | Verification, Automated Tests & Forensic Audit | Write automated tests in `tests/` and frontend test suite; run full verify pipeline; run Forensic Auditor | M2, M3 | DONE |
+| M5 | GitHub Resolution & Remote Sync Report | Generate comprehensive audit markdown report with copy-pasteable closure/merge commands | M4 | DONE |
 
 ## Interface Contracts
 
-### Backend Database ↔ Services (`backend/db.ts`)
-- `backfillDiscreteRooms(executor?: QueryExecutor): Promise<void>`: Idempotent backfill of discrete rooms and initial thumbnails.
-- `syncPropertyRoomCounts(executor: QueryExecutor, propertyId: string): Promise<{ totalRooms: number; occupiedRooms: number }>`: Atomically synchronizes property aggregate counters.
+### Backend Auth Middleware (`backend/middleware/auth.ts`)
+- `getJwtSecret(): string`: If `JWT_SECRET` is unset in production, logs a warning and generates an ephemeral secret via `process.env.JWT_FALLBACK_SECRET || randomBytes(32).toString('hex')`.
 
-### Backend Rooms API ↔ Frontend Client (`/api/properties/:id/rooms`)
-- `GET /api/properties/:id/rooms?status=all|available|occupied|maintenance`: Returns `Room[]` with effective pricing and status.
-- `POST /api/properties/:id/rooms`: Body `{ roomNumber: string, floor: number, type: string, price?: number, status?: RoomStatus }`. Returns `201 Created` with `Room`.
-- `PUT /api/properties/:id/rooms/:roomId`: Body `{ roomNumber?: string, floor?: number, type?: string, price?: number, status?: RoomStatus }`. Returns `200 OK`.
-- `PATCH /api/properties/:id/rooms/:roomId/status`: Body `{ status: 'available' | 'maintenance' }`. Returns `200 OK`.
-- `DELETE /api/properties/:id/rooms/:roomId`: Returns `200 OK`. Rejects with `400` if room is occupied.
+### Backend Photos API (`backend/routes/photos.routes.ts`)
+- `GET /api/properties/:id/photos?category=&roomId=&limit=&offset=`:
+  - Returns `PropertyPhoto[]` by default.
+  - Sets HTTP headers `Last-Modified` and handles `If-Modified-Since` by returning `304 Not Modified` if unchanged.
+  - If `limit` is passed, safely paginates results and sets headers `X-Total-Count`, `X-Page-Limit`, `X-Page-Offset`.
+- `POST /api/properties/:id/photos`:
+  - Inserts up to 10 photos in a single atomic multi-row `INSERT INTO property_photos` statement.
+- `PUT /api/properties/:id/photos/reorder`:
+  - Updates photo order indices using a single bulk `CASE id WHEN ? THEN ? ... END` statement.
 
-### Backend Photos API ↔ Frontend Client (`/api/properties/:id/photos`)
-- `GET /api/properties/:id/photos?category=&roomId=`: Returns `PropertyPhoto[]` sorted by `orderIndex`.
-- `POST /api/properties/:id/photos`: Multipart form data `images` (1-10 files), `category`, `roomId?`, `caption?`. Returns `201 Created` with uploaded `PropertyPhoto[]`.
-- `PUT /api/properties/:id/photos/reorder`: Body `{ photoIds: string[] }`. Returns `200 OK`.
-- `DELETE /api/properties/:id/photos/:photoId`: Returns `200 OK`.
+### Backend Rooms API (`backend/routes/rooms.routes.ts`)
+- `GET /api/properties/:id/rooms`: Queries rooms and room photos concurrently via `Promise.all`.
+- `GET /api/rooms/:roomId`: Uses `apiCache` with 30s TTL, invalidated via `apiCache.invalidatePattern('rooms')`.
 
-### Concurrency Lock Contract (`backend/routes/contracts.routes.ts`, `backend/routes/payment.routes.ts`, `backend/routes/rentals.routes.ts`)
-- Strict lock order: `SELECT ... FROM users WHERE id = ? FOR UPDATE` -> `SELECT ... FROM properties WHERE id = ? FOR UPDATE` -> `SELECT ... FROM rooms WHERE id = ? FOR UPDATE`.
-- Competing concurrent transactions for same `roomId` will block until lock release; subsequent transaction sees `room.status === 'occupied'` and returns `HTTP 409 Conflict` `{ message: 'Kamar sudah terisi atau tidak tersedia.' }`.
+### Frontend Utilities (`frontend/src/utils/cloudinary.ts`)
+- `getCloudinaryThumbUrl(url: string, width?: number, height?: number): string`: Injects Cloudinary on-the-fly transformations (`w_{width},h_{height},c_fill,q_auto,f_auto`) into valid Cloudinary asset URLs.
 
 ## Code Layout
-- `backend/db.ts`: Tables creation, migrations, seed, `backfillDiscreteRooms`, `syncPropertyRoomCounts`.
-- `backend/types/index.ts`: `Room`, `DiscreteRoomStatus`, `PropertyPhoto`, `PhotoCategory`.
-- `backend/routes/rooms.routes.ts`: Discrete rooms CRUD & status management.
-- `backend/routes/photos.routes.ts`: Multi-photo gallery & categorized media management.
-- `backend/routes/contracts.routes.ts`: `roomId` integration, contract signing concurrency lock.
-- `backend/routes/payment.routes.ts`: Payment settlement, room status transition to 'occupied'.
-- `backend/routes/rentals.routes.ts`: Rental creation, termination freeing room to 'available'.
-- `frontend/src/types/index.ts`: Frontend domain interfaces.
-- `frontend/src/components/BookingModal/components/PropertyPhotoGallery.tsx`: Interactive gallery.
-- `frontend/src/components/BookingModal/components/RoomSelectionGrid.tsx`: Discrete room selection.
-- `frontend/src/pages/TenantDashboard/components/ActiveRentalSection.tsx`: Room number badge.
-- `frontend/src/pages/LandlordDashboard/components/RoomInventoryModal.tsx`: Landlord room inventory.
-- `frontend/src/pages/LandlordDashboard/components/PhotoGalleryManager.tsx`: Landlord photo manager.
-- `tests/rooms.test.ts`: Backend room schema, backfill, and API tests.
-- `tests/gallery.test.ts`: Backend photo gallery API tests.
-- `tests/room_concurrency.test.ts`: High-concurrency storm testing double-booking rejection.
+- `backend/middleware/auth.ts`: Authentication middleware & JWT secret handling.
+- `backend/db.ts`: Database connection, DDL, migrations, index definitions (`ensureIndexes`).
+- `backend/routes/photos.routes.ts`: Property and room photo gallery endpoints.
+- `backend/routes/rooms.routes.ts`: Discrete room endpoints and caching.
+- `frontend/src/utils/cloudinary.ts`: Cloudinary thumbnail transformation helper.
+- `frontend/src/utils/format.ts`: Central currency and date formatting (`formatRupiah`).
+- `frontend/src/pages/LandingPage.tsx`: Property detail open handler & active rental status check.
+- `frontend/src/components/BookingModal.tsx`: Booking modal lifecycle & client data cache.
+- `frontend/src/components/BookingModal/components/PropertyPhotoGallery.tsx`: Gallery hero, filmstrip thumbnails, lightbox.
+- `frontend/src/components/BookingModal/components/RoomSelectionGrid.tsx`: Memoized room card items and windowed rendering.
+- `frontend/src/pages/TenantDashboard/components/ActiveRentalSection.tsx`: Formatted rental prices.
+- `frontend/src/pages/TenantDashboard/components/PendingPaymentModal.tsx`: Formatted breakdown prices.
+- `frontend/src/pages/TenantDashboard/components/RentalHistorySection.tsx`: Formatted history prices.
+- `tests/triage_fixes.test.ts`: Automated tests for triage fixes and PR integrations.
+- `api/index.js`: Compiled backend serverless bundle.

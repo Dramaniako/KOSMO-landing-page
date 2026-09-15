@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Wifi, Tv, Wind, Shield, Droplet, Check, ShieldCheck, Heart,
@@ -13,6 +13,15 @@ import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
+
+interface RentalStatusCacheEntry {
+  tenantId: string;
+  hasActive: boolean;
+  cachedAt: number;
+}
+
+let rentalStatusCache: RentalStatusCacheEntry | null = null;
+const RENTAL_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -198,6 +207,17 @@ export default function LandingPage() {
     fetchProperties('');
   }, [fetchProperties]);
 
+  const activeRentalAbortRef = useRef<AbortController | null>(null);
+
+  // Clean up in-flight abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (activeRentalAbortRef.current) {
+        activeRentalAbortRef.current.abort();
+      }
+    };
+  }, []);
+
   // ⚡ Bolt Performance Optimization:
   // Wrapped in useCallback to provide a stable reference.
   // This prevents the KosCard components from re-rendering unnecessarily
@@ -212,11 +232,35 @@ export default function LandingPage() {
     setShowMap(false);
     setActiveRentalError(null);
 
+    // Abort previous in-flight active rental check
+    if (activeRentalAbortRef.current) {
+      activeRentalAbortRef.current.abort();
+      activeRentalAbortRef.current = null;
+    }
+
     // If tenant is logged in, check if they already have an active tenancy
     if (currentUser) {
+      const now = Date.now();
+      // Check 60s TTL client-side cache
+      if (
+        rentalStatusCache &&
+        rentalStatusCache.tenantId === currentUser.id &&
+        now - rentalStatusCache.cachedAt < RENTAL_CACHE_TTL_MS
+      ) {
+        setHasActiveRental(rentalStatusCache.hasActive);
+        if (rentalStatusCache.hasActive) {
+          setActiveRentalError(t('modal.activeRentalAlert'));
+        }
+        return;
+      }
+
+      const controller = new AbortController();
+      activeRentalAbortRef.current = controller;
       const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+
       fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(currentUser.id)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal
       })
         .then(async (res) => {
           if (!res.ok) return [];
@@ -225,13 +269,28 @@ export default function LandingPage() {
         .then((data: unknown) => {
           if (Array.isArray(data)) {
             const hasActive = data.some((r: { status?: string }) => r.status === 'active');
+            rentalStatusCache = {
+              tenantId: currentUser.id,
+              hasActive,
+              cachedAt: Date.now()
+            };
             setHasActiveRental(hasActive);
             if (hasActive) {
               setActiveRentalError(t('modal.activeRentalAlert'));
             }
           }
         })
-        .catch((err) => console.error("Error checking tenant active rentals:", err));
+        .catch((err: unknown) => {
+          if (err instanceof Error && err.name === 'AbortError') {
+            return;
+          }
+          console.error("Error checking tenant active rentals:", err);
+        })
+        .finally(() => {
+          if (activeRentalAbortRef.current === controller) {
+            activeRentalAbortRef.current = null;
+          }
+        });
     } else {
       setHasActiveRental(false);
     }
@@ -291,6 +350,7 @@ export default function LandingPage() {
       setContractSigned(true);
       setShowContract(false);
       setShowPayment(true);
+      rentalStatusCache = null;
       return true;
     } catch (err: unknown) {
       console.error("Contract signing exception:", err);
@@ -363,6 +423,7 @@ export default function LandingPage() {
       window.snap.pay(snapToken, {
         onSuccess: async (result: unknown) => {
           console.log("Midtrans payment success:", result);
+          rentalStatusCache = null;
           try {
             await fetch(`${API_BASE}/payment/finish`, {
               method: 'POST',
@@ -378,6 +439,7 @@ export default function LandingPage() {
         },
         onPending: (result: unknown) => {
           console.log("Midtrans payment pending:", result);
+          rentalStatusCache = null;
           setShowPayment(false);
           setSelectedProperty(null);
           navigate('/tenant');

@@ -1,7 +1,112 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { DoorOpen, CheckCircle, Lock, Wrench, Sparkles } from 'lucide-react';
 import { Room } from '../../../types/index';
 import { formatRupiah } from '../../../utils/format';
+
+export interface RoomCardItemProps {
+  room: Room;
+  isSelected: boolean;
+  basePrice: number;
+  onSelect: (room: Room) => void;
+}
+
+/**
+ * Isolated, memoized room card item to prevent re-rendering all cards
+ * when an individual room is selected or toggled.
+ */
+export const RoomCardItem = React.memo<RoomCardItemProps>(({
+  room,
+  isSelected,
+  basePrice,
+  onSelect
+}) => {
+  const isAvailable = room.status === 'available';
+  const isOccupied = room.status === 'occupied';
+  const isMaintenance = room.status === 'maintenance';
+  const effectivePrice =
+    room.effectivePrice ?? (room.price ? room.price : basePrice);
+  const hasCustomPrice =
+    Boolean(room.price) && room.price !== basePrice;
+
+  return (
+    <button
+      type="button"
+      data-testid={`room-card-${room.roomNumber}`}
+      data-status={room.status}
+      disabled={!isAvailable}
+      aria-disabled={!isAvailable}
+      className={`room-card room-item text-left p-3 rounded-xl border transition-all relative flex flex-col justify-between ${
+        isSelected
+          ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/40 ring-2 ring-blue-500/30'
+          : isAvailable
+          ? 'border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-850 hover:border-blue-400 cursor-pointer shadow-sm hover:shadow'
+          : 'border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/60 opacity-60 cursor-not-allowed'
+      }`}
+      onClick={() => {
+        if (isAvailable) {
+          onSelect(room);
+        }
+      }}
+    >
+      {/* Header: Room Number & Status Badge */}
+      <div className="flex items-start justify-between gap-1 mb-1">
+        <div>
+          <span className="font-extrabold text-sm text-slate-900 dark:text-slate-100 block">
+            {room.roomNumber}
+          </span>
+          <span className="text-[11px] text-slate-500 block truncate">
+            {room.type || 'Standard'} &bull; Lt {room.floor}
+          </span>
+        </div>
+
+        {isAvailable && (
+          <span
+            data-status="available"
+            className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+          >
+            Tersedia
+          </span>
+        )}
+        {isOccupied && (
+          <span
+            data-status="occupied"
+            className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400 flex items-center gap-0.5"
+          >
+            <Lock size={9} /> Terisi
+          </span>
+        )}
+        {isMaintenance && (
+          <span
+            data-status="maintenance"
+            className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 flex items-center gap-0.5"
+          >
+            <Wrench size={9} /> Pemeliharaan
+          </span>
+        )}
+      </div>
+
+      {/* Pricing & Selection Indicator */}
+      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <div>
+          <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+            {formatRupiah(effectivePrice)}
+          </span>
+          <span className="text-[10px] text-slate-400 ml-0.5">/bln</span>
+          {hasCustomPrice && (
+            <span className="ml-1 px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              Kustom
+            </span>
+          )}
+        </div>
+
+        {isSelected && (
+          <CheckCircle size={15} className="text-blue-600 flex-shrink-0" />
+        )}
+      </div>
+    </button>
+  );
+});
+RoomCardItem.displayName = 'RoomCardItem';
 
 export interface RoomSelectionGridProps {
   rooms: Room[];
@@ -10,6 +115,8 @@ export interface RoomSelectionGridProps {
   basePrice: number;
   loading?: boolean;
 }
+
+const PAGE_SIZE = 18;
 
 export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
   rooms,
@@ -46,6 +153,29 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
     }
     return rooms.filter((r) => r.floor === Number(activeFloor));
   }, [rooms, activeFloor]);
+
+  // Progressive windowing / pagination for large inventories (>18 rooms)
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
+
+  // Reset pagination window whenever floor changes
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [activeFloor]);
+
+  // Ensure selected room is always visible in the DOM
+  const effectiveVisibleCount = useMemo(() => {
+    if (selectedRoom) {
+      const selectedIdx = displayedRooms.findIndex((r) => r.id === selectedRoom.id);
+      if (selectedIdx >= visibleCount) {
+        return Math.ceil((selectedIdx + 1) / PAGE_SIZE) * PAGE_SIZE;
+      }
+    }
+    return visibleCount;
+  }, [selectedRoom, displayedRooms, visibleCount]);
+
+  const visibleRooms = useMemo(() => {
+    return displayedRooms.slice(0, effectiveVisibleCount);
+  }, [displayedRooms, effectiveVisibleCount]);
 
   if (loading) {
     return (
@@ -130,96 +260,30 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
         data-testid="room-selection-grid"
         className="room-grid-container grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-64 overflow-y-auto pr-1 scrollbar-thin"
       >
-        {displayedRooms.map((room) => {
-          const isSelected = selectedRoom?.id === room.id;
-          const isAvailable = room.status === 'available';
-          const isOccupied = room.status === 'occupied';
-          const isMaintenance = room.status === 'maintenance';
-          const effectivePrice =
-            room.effectivePrice ?? (room.price ? room.price : basePrice);
-          const hasCustomPrice =
-            Boolean(room.price) && room.price !== basePrice;
-
-          return (
-            <button
-              key={room.id}
-              type="button"
-              data-testid={`room-card-${room.roomNumber}`}
-              data-status={room.status}
-              disabled={!isAvailable}
-              aria-disabled={!isAvailable}
-              className={`room-card room-item text-left p-3 rounded-xl border transition-all relative flex flex-col justify-between ${
-                isSelected
-                  ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/40 ring-2 ring-blue-500/30'
-                  : isAvailable
-                  ? 'border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-850 hover:border-blue-400 cursor-pointer shadow-sm hover:shadow'
-                  : 'border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/60 opacity-60 cursor-not-allowed'
-              }`}
-              onClick={() => {
-                if (isAvailable) {
-                  onSelectRoom(room);
-                }
-              }}
-            >
-              {/* Header: Room Number & Status Badge */}
-              <div className="flex items-start justify-between gap-1 mb-1">
-                <div>
-                  <span className="font-extrabold text-sm text-slate-900 dark:text-slate-100 block">
-                    {room.roomNumber}
-                  </span>
-                  <span className="text-[11px] text-slate-500 block truncate">
-                    {room.type || 'Standard'} &bull; Lt {room.floor}
-                  </span>
-                </div>
-
-                {isAvailable && (
-                  <span
-                    data-status="available"
-                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                  >
-                    Tersedia
-                  </span>
-                )}
-                {isOccupied && (
-                  <span
-                    data-status="occupied"
-                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400 flex items-center gap-0.5"
-                  >
-                    <Lock size={9} /> Terisi
-                  </span>
-                )}
-                {isMaintenance && (
-                  <span
-                    data-status="maintenance"
-                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 flex items-center gap-0.5"
-                  >
-                    <Wrench size={9} /> Pemeliharaan
-                  </span>
-                )}
-              </div>
-
-              {/* Pricing & Selection Indicator */}
-              <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
-                    {formatRupiah(effectivePrice)}
-                  </span>
-                  <span className="text-[10px] text-slate-400 ml-0.5">/bln</span>
-                  {hasCustomPrice && (
-                    <span className="ml-1 px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                      Kustom
-                    </span>
-                  )}
-                </div>
-
-                {isSelected && (
-                  <CheckCircle size={15} className="text-blue-600 flex-shrink-0" />
-                )}
-              </div>
-            </button>
-          );
-        })}
+        {visibleRooms.map((room) => (
+          <RoomCardItem
+            key={room.id}
+            room={room}
+            isSelected={selectedRoom?.id === room.id}
+            basePrice={basePrice}
+            onSelect={onSelectRoom}
+          />
+        ))}
       </div>
+
+      {/* Progressive Windowing / Load More Button for Large Inventories */}
+      {displayedRooms.length > effectiveVisibleCount && (
+        <div className="text-center pt-1">
+          <button
+            type="button"
+            data-testid="load-more-rooms-btn"
+            className="px-4 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg border border-blue-200 dark:border-blue-800 transition-colors"
+            onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+          >
+            Tampilkan Lebih Banyak ({displayedRooms.length - effectiveVisibleCount} kamar lagi)
+          </button>
+        </div>
+      )}
 
       {/* Selected Room Notification Banner */}
       {selectedRoom && (

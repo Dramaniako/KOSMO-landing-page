@@ -13,6 +13,15 @@ import ContractPreviewModal from './BookingModal/components/ContractPreviewModal
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
+export interface PropertyDetailCacheEntry {
+  photos: PropertyPhoto[];
+  rooms: Room[];
+  timestamp: number;
+}
+
+export const modalClientCache = new Map<string, PropertyDetailCacheEntry>();
+export const CLIENT_CACHE_TTL_MS = 60 * 1000; // 60s TTL
+
 export interface Props {
   property: Property | null;
   showContract: boolean;
@@ -64,10 +73,26 @@ export default function BookingModal({
   const [durationMonths, setDurationMonths] = useState<number>(1);
   const [startDate, setStartDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
 
-  // Discrete Rooms & Photos State
-  const [photos, setPhotos] = useState<PropertyPhoto[]>([]);
+  // Discrete Rooms & Photos State with module-level cache & fallback to property props
+  const [photos, setPhotos] = useState<PropertyPhoto[]>(() => {
+    if (property?.id) {
+      const cached = modalClientCache.get(property.id);
+      if (cached && Date.now() - cached.timestamp < CLIENT_CACHE_TTL_MS) {
+        return cached.photos;
+      }
+    }
+    return property?.photos || [];
+  });
   const [photosLoading, setPhotosLoading] = useState<boolean>(false);
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const [rooms, setRooms] = useState<Room[]>(() => {
+    if (property?.id) {
+      const cached = modalClientCache.get(property.id);
+      if (cached && Date.now() - cached.timestamp < CLIENT_CACHE_TTL_MS) {
+        return cached.rooms;
+      }
+    }
+    return property?.rooms || [];
+  });
   const [roomsLoading, setRoomsLoading] = useState<boolean>(false);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
 
@@ -80,6 +105,21 @@ export default function BookingModal({
     }
 
     setSelectedRoom(null);
+
+    // Check module-level in-memory cache before fetching
+    const cached = modalClientCache.get(property.id);
+    if (cached && Date.now() - cached.timestamp < CLIENT_CACHE_TTL_MS) {
+      setPhotos(cached.photos);
+      setRooms(cached.rooms);
+      setPhotosLoading(false);
+      setRoomsLoading(false);
+      return;
+    }
+
+    // Default to property.photos / property.rooms while loading if present to prevent layout shift
+    setPhotos(property.photos || []);
+    setRooms(property.rooms || []);
+
     let isCancelled = false;
 
     const fetchDetails = async () => {
@@ -92,19 +132,27 @@ export default function BookingModal({
         ]);
 
         if (!isCancelled) {
+          let fetchedPhotos: PropertyPhoto[] = property.photos || [];
+          let fetchedRooms: Room[] = property.rooms || [];
+
           if (photosRes && photosRes.ok) {
             const photosData = await photosRes.json().catch(() => []);
-            setPhotos(Array.isArray(photosData) ? photosData : []);
-          } else {
-            setPhotos(property.photos || []);
+            fetchedPhotos = Array.isArray(photosData) ? photosData : (property.photos || []);
           }
+          setPhotos(fetchedPhotos);
 
           if (roomsRes && roomsRes.ok) {
             const roomsData = await roomsRes.json().catch(() => []);
-            setRooms(Array.isArray(roomsData) ? roomsData : []);
-          } else {
-            setRooms(property.rooms || []);
+            fetchedRooms = Array.isArray(roomsData) ? roomsData : (property.rooms || []);
           }
+          setRooms(fetchedRooms);
+
+          // Populate cache on successful fetch
+          modalClientCache.set(property.id, {
+            photos: fetchedPhotos,
+            rooms: fetchedRooms,
+            timestamp: Date.now()
+          });
         }
       } catch (err) {
         console.warn('Failed to fetch property details:', err);
@@ -121,7 +169,7 @@ export default function BookingModal({
     return () => {
       isCancelled = true;
     };
-  }, [property?.id]);
+  }, [property?.id, property?.photos, property?.rooms]);
 
   // Profile completeness check
   const profileStatus = isUserProfileComplete(currentUser);
