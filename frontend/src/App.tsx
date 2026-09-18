@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider } from './context/LanguageContext';
 
+import ProtectedRoute from './components/ProtectedRoute';
+
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const Login = lazy(() => import('./pages/Login'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
@@ -34,9 +36,30 @@ export default function App() {
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<Login />} />
-              <Route path="/admin" element={<AdminDashboard />} />
-              <Route path="/landlord" element={<LandlordDashboard />} />
-              <Route path="/tenant" element={<TenantDashboard />} />
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <AdminDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/landlord"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <LandlordDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/tenant"
+                element={
+                  <ProtectedRoute allowedRoles={['tenant', 'landlord']}>
+                    <TenantDashboard />
+                  </ProtectedRoute>
+                }
+              />
               {/* Fallback to landing page */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
