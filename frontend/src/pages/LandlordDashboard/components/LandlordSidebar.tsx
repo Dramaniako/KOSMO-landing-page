@@ -1,9 +1,9 @@
 import React from 'react';
-import { Building, LayoutDashboard, MessageSquare, Users, LogOut } from 'lucide-react';
+import { Building, LayoutDashboard, MessageSquare, Users, LogOut, Wrench } from 'lucide-react';
 
 export interface LandlordSidebarProps {
-  activeTab: 'overview' | 'properties' | 'reviews' | 'tenants';
-  setActiveTab: (tab: 'overview' | 'properties' | 'reviews' | 'tenants') => void;
+  activeTab: 'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance';
+  setActiveTab: (tab: 'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance') => void;
   onLogout: () => void;
 }
 
@@ -55,6 +55,15 @@ export default function LandlordSidebar({
             >
               <Users size={18} />
               Sesi Penyewa
+            </button>
+          </li>
+          <li>
+            <button
+              className={`sidebar-link ${activeTab === 'maintenance' ? 'active' : ''}`}
+              onClick={() => setActiveTab('maintenance')}
+            >
+              <Wrench size={18} />
+              Pemeliharaan Unit
             </button>
           </li>
         </ul>

@@ -843,3 +843,100 @@ export function validatePropertyPhoto(data: unknown): { valid: boolean; errors: 
   return { valid: errors.length === 0, errors };
 }
 
+export type TicketCategory = 'ac' | 'plumbing' | 'wifi' | 'electricity' | 'cleaning' | 'other';
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'cancelled';
+
+export const VALID_TICKET_CATEGORIES: readonly TicketCategory[] = [
+  'ac',
+  'plumbing',
+  'wifi',
+  'electricity',
+  'cleaning',
+  'other'
+] as const;
+
+export const VALID_TICKET_STATUSES: readonly TicketStatus[] = [
+  'open',
+  'in_progress',
+  'resolved',
+  'cancelled'
+] as const;
+
+export interface MaintenanceTicket {
+  id: string;
+  rentalId: string;
+  tenantId: string;
+  propertyId: string;
+  roomId?: string | null;
+  category: TicketCategory;
+  title: string;
+  description: string;
+  photoUrl?: string | null;
+  status: TicketStatus;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  resolvedAt?: string | Date | null;
+  propertyName?: string;
+  tenantName?: string;
+  roomNumber?: string;
+}
+
+export interface MaintenanceTicketRow extends RowDataPacket {
+  id: string;
+  rentalId: string;
+  tenantId: string;
+  propertyId: string;
+  roomId: string | null;
+  category: TicketCategory;
+  title: string;
+  description: string;
+  photoUrl: string | null;
+  status: TicketStatus;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  resolvedAt: string | Date | null;
+  propertyName?: string;
+  tenantName?: string;
+  roomNumber?: string;
+}
+
+/**
+ * Validation helper for MaintenanceTicket schema
+ */
+export function validateMaintenanceTicket(data: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['MaintenanceTicket must be a non-null object'] };
+  }
+
+  const ticket = data as Record<string, unknown>;
+
+  if (typeof ticket.id !== 'string' || !ticket.id.trim()) {
+    errors.push('id must be a non-empty string');
+  }
+  if (typeof ticket.rentalId !== 'string' || !ticket.rentalId.trim()) {
+    errors.push('rentalId must be a non-empty string');
+  }
+  if (typeof ticket.tenantId !== 'string' || !ticket.tenantId.trim()) {
+    errors.push('tenantId must be a non-empty string');
+  }
+  if (typeof ticket.propertyId !== 'string' || !ticket.propertyId.trim()) {
+    errors.push('propertyId must be a non-empty string');
+  }
+  if (typeof ticket.category !== 'string' || !VALID_TICKET_CATEGORIES.includes(ticket.category as TicketCategory)) {
+    errors.push(`category must be one of: ${VALID_TICKET_CATEGORIES.join(', ')}`);
+  }
+  if (typeof ticket.title !== 'string' || ticket.title.trim().length < 3 || ticket.title.length > 150) {
+    errors.push('title must be a string between 3 and 150 characters');
+  }
+  if (typeof ticket.description !== 'string' || ticket.description.trim().length < 5) {
+    errors.push('description must be a string with at least 5 characters');
+  }
+  if (typeof ticket.status !== 'string' || !VALID_TICKET_STATUSES.includes(ticket.status as TicketStatus)) {
+    errors.push(`status must be one of: ${VALID_TICKET_STATUSES.join(', ')}`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+

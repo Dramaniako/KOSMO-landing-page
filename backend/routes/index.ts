@@ -10,3 +10,4 @@ export { registerRentalRoutes } from './rentals.routes';
 export { registerPaymentRoutes } from './payment.routes';
 export { registerRoomRoutes } from './rooms.routes';
 export { registerPhotoRoutes } from './photos.routes';
+export { registerTicketRoutes } from './tickets.routes';

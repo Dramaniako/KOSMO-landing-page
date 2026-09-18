@@ -1,12 +1,12 @@
 import React from 'react';
-import { User as UserIcon, Building, FileText, MessageSquare, LogOut } from 'lucide-react';
+import { User as UserIcon, Building, FileText, MessageSquare, LogOut, Wrench } from 'lucide-react';
 import { User } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
 
 interface TenantSidebarProps {
   currentUser: User;
-  activeTab: 'profile' | 'rentals' | 'bills' | 'reviews';
-  onSelectTab: (tab: 'profile' | 'rentals' | 'bills' | 'reviews') => void;
+  activeTab: 'profile' | 'rentals' | 'bills' | 'reviews' | 'maintenance';
+  onSelectTab: (tab: 'profile' | 'rentals' | 'bills' | 'reviews' | 'maintenance') => void;
   onLogout: () => void;
   onNavigateLandlord: () => void;
 }
@@ -72,6 +72,15 @@ export const TenantSidebar: React.FC<TenantSidebarProps> = ({
             >
               <MessageSquare size={18} />
               {t('tenant.tab.reviews')}
+            </button>
+          </li>
+          <li>
+            <button 
+              className={`sidebar-link ${activeTab === 'maintenance' ? 'active' : ''}`}
+              onClick={() => onSelectTab('maintenance')}
+            >
+              <Wrench size={18} />
+              Perbaikan Unit
             </button>
           </li>
           {currentUser.role === 'landlord' && (

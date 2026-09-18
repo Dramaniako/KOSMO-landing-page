@@ -147,7 +147,10 @@ export async function ensureIndexes(executor: QueryExecutor = pool): Promise<voi
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
-    "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)"
+    "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_tenant (tenantId)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_property (propertyId)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_status (status)"
   ];
 
   await Promise.allSettled(
@@ -342,6 +345,28 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         INDEX idx_photos_prop_room (propertyId, roomId, orderIndex),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS maintenance_tickets (
+        id VARCHAR(50) PRIMARY KEY,
+        rentalId VARCHAR(50) NOT NULL,
+        tenantId VARCHAR(50) NOT NULL,
+        propertyId VARCHAR(50) NOT NULL,
+        roomId VARCHAR(50) NULL,
+        category ENUM('ac', 'plumbing', 'wifi', 'electricity', 'cleaning', 'other') NOT NULL,
+        title VARCHAR(150) NOT NULL,
+        description TEXT NOT NULL,
+        photoUrl VARCHAR(500) NULL,
+        status ENUM('open', 'in_progress', 'resolved', 'cancelled') NOT NULL DEFAULT 'open',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        resolvedAt DATETIME NULL,
+        INDEX idx_tickets_tenant (tenantId),
+        INDEX idx_tickets_property (propertyId),
+        INDEX idx_tickets_status (status),
+        FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
   ]);
@@ -600,6 +625,28 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS maintenance_tickets (
+        id VARCHAR(50) PRIMARY KEY,
+        rentalId VARCHAR(50) NOT NULL,
+        tenantId VARCHAR(50) NOT NULL,
+        propertyId VARCHAR(50) NOT NULL,
+        roomId VARCHAR(50) NULL,
+        category ENUM('ac', 'plumbing', 'wifi', 'electricity', 'cleaning', 'other') NOT NULL,
+        title VARCHAR(150) NOT NULL,
+        description TEXT NOT NULL,
+        photoUrl VARCHAR(500) NULL,
+        status ENUM('open', 'in_progress', 'resolved', 'cancelled') NOT NULL DEFAULT 'open',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        resolvedAt DATETIME NULL,
+        INDEX idx_tickets_tenant (tenantId),
+        INDEX idx_tickets_property (propertyId),
+        INDEX idx_tickets_status (status),
+        FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
   } catch {
     // Safe ignore if tables already exist
   }
@@ -795,7 +842,8 @@ export async function initDb(): Promise<void> {
         'visitor_tracking',
         'rentals',
         'rooms',
-        'property_photos'
+        'property_photos',
+        'maintenance_tickets'
       ];
       
       const missingTables = requiredTables.filter(t => !existingTables.includes(t));

@@ -22,6 +22,7 @@ import { ReviewModal } from './TenantDashboard/components/ReviewModal';
 import { TerminateRentalModal } from './TenantDashboard/components/TerminateRentalModal';
 import { PendingPaymentModal } from './TenantDashboard/components/PendingPaymentModal';
 import { ContractViewerModal } from './TenantDashboard/components/ContractViewerModal';
+import { MaintenanceSection } from './TenantDashboard/components/MaintenanceSection';
 
 export default function TenantDashboard() {
   const navigate = useNavigate();
@@ -212,6 +213,12 @@ export default function TenantDashboard() {
             }}
             onEditReview={handleEditReview}
             onDeleteReview={handleDeleteReview}
+          />
+        )}
+
+        {activeTab === 'maintenance' && (
+          <MaintenanceSection
+            activeRentals={myRentals.filter(r => r.status === 'active')}
           />
         )}
       </main>

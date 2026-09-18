@@ -52,6 +52,7 @@ import {
   verifyMidtransSignature,
   settleRentalPayment
 } from './routes/payment.routes';
+import { registerTicketRoutes } from './routes/tickets.routes';
 
 export {
   authLimiter,
@@ -65,7 +66,8 @@ export {
   isMidtransConfigured,
   snap,
   verifyMidtransSignature,
-  settleRentalPayment
+  settleRentalPayment,
+  registerTicketRoutes
 };
 
 const router: Router = express.Router();
@@ -82,5 +84,6 @@ registerPhotoRoutes(router);
 registerContractRoutes(router);
 registerRentalRoutes(router);
 registerPaymentRoutes(router);
+registerTicketRoutes(router);
 
 export default router;

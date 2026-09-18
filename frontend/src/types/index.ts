@@ -413,3 +413,26 @@ export interface Room {
   photos?: PropertyPhoto[];
 }
 
+export type TicketCategory = 'ac' | 'plumbing' | 'wifi' | 'electricity' | 'cleaning' | 'other';
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'cancelled';
+
+export interface MaintenanceTicket {
+  id: string;
+  rentalId: string;
+  tenantId: string;
+  propertyId: string;
+  roomId?: string | null;
+  category: TicketCategory;
+  title: string;
+  description: string;
+  photoUrl?: string | null;
+  status: TicketStatus;
+  createdAt?: string;
+  updatedAt?: string;
+  resolvedAt?: string | null;
+  propertyName?: string;
+  tenantName?: string;
+  roomNumber?: string;
+}
+
+

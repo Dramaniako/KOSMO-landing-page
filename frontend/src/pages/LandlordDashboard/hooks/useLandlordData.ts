@@ -6,7 +6,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
 export function useLandlordData() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'reviews' | 'tenants'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance'>('overview');
 
   const [landlordUser, setLandlordUser] = useState<User | null>(() => {
     const raw = localStorage.getItem('user');

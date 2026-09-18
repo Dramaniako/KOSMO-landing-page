@@ -16,6 +16,7 @@ import PropertyFormModal from './LandlordDashboard/components/PropertyFormModal'
 import DeletePropertyModal from './LandlordDashboard/components/DeletePropertyModal';
 import RoomInventoryModal from './LandlordDashboard/components/RoomInventoryModal';
 import PhotoGalleryManager from './LandlordDashboard/components/PhotoGalleryManager';
+import MaintenanceTab from './LandlordDashboard/components/MaintenanceTab';
 
 export default function LandlordDashboard() {
   const {
@@ -146,6 +147,11 @@ export default function LandlordDashboard() {
             contractDownloading={contractDownloading}
             onDownloadContract={handleLandlordContractDownload}
           />
+        )}
+
+        {/* Tab 5: Maintenance & Facility Reports */}
+        {activeTab === 'maintenance' && (
+          <MaintenanceTab />
         )}
       </main>
 

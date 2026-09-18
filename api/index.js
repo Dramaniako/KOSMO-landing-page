@@ -130,7 +130,10 @@ async function ensureIndexes(executor = pool) {
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
-    "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)"
+    "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_tenant (tenantId)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_property (propertyId)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_status (status)"
   ];
   await Promise.allSettled(
     indexStatements.map(async (sql) => {
@@ -316,6 +319,28 @@ async function createTables(executor = pool) {
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS maintenance_tickets (
+        id VARCHAR(50) PRIMARY KEY,
+        rentalId VARCHAR(50) NOT NULL,
+        tenantId VARCHAR(50) NOT NULL,
+        propertyId VARCHAR(50) NOT NULL,
+        roomId VARCHAR(50) NULL,
+        category ENUM('ac', 'plumbing', 'wifi', 'electricity', 'cleaning', 'other') NOT NULL,
+        title VARCHAR(150) NOT NULL,
+        description TEXT NOT NULL,
+        photoUrl VARCHAR(500) NULL,
+        status ENUM('open', 'in_progress', 'resolved', 'cancelled') NOT NULL DEFAULT 'open',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        resolvedAt DATETIME NULL,
+        INDEX idx_tickets_tenant (tenantId),
+        INDEX idx_tickets_property (propertyId),
+        INDEX idx_tickets_status (status),
+        FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
   ]);
 }
@@ -486,6 +511,28 @@ async function applyMigrations(executor = pool) {
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS maintenance_tickets (
+        id VARCHAR(50) PRIMARY KEY,
+        rentalId VARCHAR(50) NOT NULL,
+        tenantId VARCHAR(50) NOT NULL,
+        propertyId VARCHAR(50) NOT NULL,
+        roomId VARCHAR(50) NULL,
+        category ENUM('ac', 'plumbing', 'wifi', 'electricity', 'cleaning', 'other') NOT NULL,
+        title VARCHAR(150) NOT NULL,
+        description TEXT NOT NULL,
+        photoUrl VARCHAR(500) NULL,
+        status ENUM('open', 'in_progress', 'resolved', 'cancelled') NOT NULL DEFAULT 'open',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        resolvedAt DATETIME NULL,
+        INDEX idx_tickets_tenant (tenantId),
+        INDEX idx_tickets_property (propertyId),
+        INDEX idx_tickets_status (status),
+        FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
   } catch {
   }
   const propertiesQueries = [
@@ -651,7 +698,8 @@ async function initDb() {
         "visitor_tracking",
         "rentals",
         "rooms",
-        "property_photos"
+        "property_photos",
+        "maintenance_tickets"
       ];
       const missingTables = requiredTables.filter((t) => !existingTables.includes(t));
       if (missingTables.length === 0) {
@@ -1173,6 +1221,20 @@ var reorderPhotosSchema = z.object({
     (ids) => new Set(ids).size === ids.length,
     "Daftar ID foto tidak boleh mengandung duplikasi"
   )
+});
+var createTicketSchema = z.object({
+  rentalId: z.string().trim().min(1, "rentalId wajib diisi"),
+  category: z.enum(["ac", "plumbing", "wifi", "electricity", "cleaning", "other"], {
+    message: "Kategori tiket tidak valid"
+  }),
+  title: z.string().trim().min(3, "Judul minimal 3 karakter").max(150, "Judul maksimal 150 karakter"),
+  description: z.string().trim().min(5, "Deskripsi minimal 5 karakter"),
+  photoUrl: z.string().url("Format URL foto tidak valid").optional().nullable().or(z.literal(""))
+});
+var updateTicketStatusSchema = z.object({
+  status: z.enum(["open", "in_progress", "resolved", "cancelled"], {
+    message: "Status tiket harus salah satu dari: 'open', 'in_progress', 'resolved', 'cancelled'"
+  })
 });
 
 // backend/types/index.ts
@@ -5340,6 +5402,193 @@ function registerRentalRoutes(router2) {
   });
 }
 
+// backend/routes/tickets.routes.ts
+function registerTicketRoutes(router2) {
+  router2.post(
+    "/tickets",
+    authenticateToken,
+    validateBody(createTicketSchema),
+    async (req, res) => {
+      const authUser = req.user;
+      if (!authUser) {
+        return res.status(401).json({ message: "Otentikasi diperlukan." });
+      }
+      if (authUser.role !== "tenant" && authUser.role !== "admin") {
+        return res.status(403).json({
+          message: "Hanya penyewa yang dapat mengajukan tiket pemeliharaan."
+        });
+      }
+      const { rentalId, category, title, description, photoUrl } = req.body;
+      try {
+        const [rentalRows] = await pool.query(
+          `SELECT r.id, r.tenantId, r.propertyId, r.roomId, r.status, p.ownerId
+           FROM rentals r
+           INNER JOIN properties p ON r.propertyId = p.id
+           WHERE r.id = ?`,
+          [rentalId]
+        );
+        if (rentalRows.length === 0) {
+          return res.status(404).json({ message: "Data sewa tidak ditemukan." });
+        }
+        const rental = rentalRows[0];
+        if (authUser.role === "tenant" && rental.tenantId !== authUser.id) {
+          return res.status(403).json({
+            message: "Akses ditolak. Anda hanya dapat mengajukan tiket untuk sewa milik Anda sendiri."
+          });
+        }
+        if (rental.status !== "active") {
+          return res.status(400).json({
+            message: "Tiket hanya dapat diajukan untuk sewa yang berstatus aktif."
+          });
+        }
+        const ticketId = generateId("ticket");
+        const tenantId = authUser.role === "admin" ? rental.tenantId : authUser.id;
+        const propertyId = rental.propertyId;
+        const roomId = rental.roomId || null;
+        const cleanPhotoUrl = photoUrl && typeof photoUrl === "string" && photoUrl.trim().length > 0 ? photoUrl.trim() : null;
+        await pool.execute(
+          `INSERT INTO maintenance_tickets 
+            (id, rentalId, tenantId, propertyId, roomId, category, title, description, photoUrl, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
+          [ticketId, rental.id, tenantId, propertyId, roomId, category, title.trim(), description.trim(), cleanPhotoUrl]
+        );
+        const [createdRows] = await pool.query(
+          `SELECT 
+            t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId,
+            t.category, t.title, t.description, t.photoUrl, t.status,
+            t.createdAt, t.updatedAt, t.resolvedAt,
+            p.name AS propertyName,
+            u.name AS tenantName,
+            rm.roomNumber
+           FROM maintenance_tickets t
+           LEFT JOIN properties p ON t.propertyId = p.id
+           LEFT JOIN users u ON t.tenantId = u.id
+           LEFT JOIN rooms rm ON t.roomId = rm.id
+           WHERE t.id = ?`,
+          [ticketId]
+        );
+        return res.status(201).json(createdRows[0]);
+      } catch (err) {
+        console.error("Submit maintenance ticket error:", err);
+        return res.status(500).json({ message: "Gagal mengajukan tiket pemeliharaan." });
+      }
+    }
+  );
+  router2.get("/tickets", authenticateToken, async (req, res) => {
+    const authUser = req.user;
+    if (!authUser) {
+      return res.status(401).json({ message: "Otentikasi diperlukan." });
+    }
+    const { status, propertyId } = req.query;
+    try {
+      let query = `
+        SELECT 
+          t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId,
+          t.category, t.title, t.description, t.photoUrl, t.status,
+          t.createdAt, t.updatedAt, t.resolvedAt,
+          p.name AS propertyName,
+          u.name AS tenantName,
+          rm.roomNumber
+        FROM maintenance_tickets t
+        LEFT JOIN properties p ON t.propertyId = p.id
+        LEFT JOIN users u ON t.tenantId = u.id
+        LEFT JOIN rooms rm ON t.roomId = rm.id
+      `;
+      const conditions = [];
+      const params = [];
+      if (authUser.role === "tenant") {
+        conditions.push("t.tenantId = ?");
+        params.push(authUser.id);
+      } else if (authUser.role === "landlord") {
+        conditions.push("p.ownerId = ?");
+        params.push(authUser.id);
+      } else if (authUser.role === "admin") {
+      } else {
+        return res.status(403).json({ message: "Peran pengguna tidak memiliki akses ke tiket." });
+      }
+      if (status && typeof status === "string") {
+        conditions.push("t.status = ?");
+        params.push(status);
+      }
+      if (propertyId && typeof propertyId === "string") {
+        conditions.push("t.propertyId = ?");
+        params.push(propertyId);
+      }
+      if (conditions.length > 0) {
+        query += " WHERE " + conditions.join(" AND ");
+      }
+      query += " ORDER BY t.createdAt DESC";
+      const [rows] = await pool.query(query, params);
+      return res.json(rows);
+    } catch (err) {
+      console.error("Get maintenance tickets error:", err);
+      return res.status(500).json({ message: "Gagal memuat daftar tiket pemeliharaan." });
+    }
+  });
+  router2.patch(
+    "/tickets/:id/status",
+    authenticateToken,
+    validateBody(updateTicketStatusSchema),
+    async (req, res) => {
+      const authUser = req.user;
+      if (!authUser) {
+        return res.status(401).json({ message: "Otentikasi diperlukan." });
+      }
+      if (authUser.role !== "landlord" && authUser.role !== "admin") {
+        return res.status(403).json({
+          message: "Hanya pemilik properti atau admin yang dapat memperbarui status tiket."
+        });
+      }
+      const ticketId = req.params.id;
+      const { status } = req.body;
+      try {
+        const [ticketRows] = await pool.query(
+          `SELECT t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId, t.status, p.ownerId
+           FROM maintenance_tickets t
+           LEFT JOIN properties p ON t.propertyId = p.id
+           WHERE t.id = ?`,
+          [ticketId]
+        );
+        if (ticketRows.length === 0) {
+          return res.status(404).json({ message: "Tiket pemeliharaan tidak ditemukan." });
+        }
+        const ticket = ticketRows[0];
+        if (authUser.role === "landlord" && ticket.ownerId !== authUser.id) {
+          return res.status(403).json({
+            message: "Akses ditolak. Tiket ini bukan milik properti yang Anda kelola."
+          });
+        }
+        const resolvedAt = status === "resolved" ? /* @__PURE__ */ new Date() : null;
+        await pool.execute(
+          `UPDATE maintenance_tickets 
+           SET status = ?, resolvedAt = ?, updatedAt = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [status, resolvedAt, ticketId]
+        );
+        const [updatedRows] = await pool.query(
+          `SELECT 
+            t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId,
+            t.category, t.title, t.description, t.photoUrl, t.status,
+            t.createdAt, t.updatedAt, t.resolvedAt,
+            p.name AS propertyName,
+            u.name AS tenantName,
+            rm.roomNumber
+           FROM maintenance_tickets t
+           LEFT JOIN properties p ON t.propertyId = p.id
+           LEFT JOIN users u ON t.tenantId = u.id
+           LEFT JOIN rooms rm ON t.roomId = rm.id
+           WHERE t.id = ?`,
+          [ticketId]
+        );
+        return res.json(updatedRows[0]);
+      } catch (err) {
+        console.error("Update maintenance ticket status error:", err);
+        return res.status(500).json({ message: "Gagal memperbarui status tiket pemeliharaan." });
+      }
+    }
+  );
+}
+
 // backend/router.ts
 var router = express.Router();
 registerSystemRoutes(router);
@@ -5354,6 +5603,7 @@ registerPhotoRoutes(router);
 registerContractRoutes(router);
 registerRentalRoutes(router);
 registerPaymentRoutes(router);
+registerTicketRoutes(router);
 var router_default = router;
 
 // backend/server.ts

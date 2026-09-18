@@ -2,7 +2,7 @@ import React from 'react';
 import { MapPin, Star, Sparkles, ShieldCheck, Download, CheckCircle2, FileText, Eye, AlertCircle, AlertTriangle, ArrowRight } from 'lucide-react';
 import { Property, User, PropertyPhoto, Room } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
-import { formatRupiah } from '../../../utils/format';
+import { formatRupiah, formatUSD } from '../../../utils/format';
 import { PropertyPhotoGallery } from './PropertyPhotoGallery';
 import { RoomSelectionGrid } from './RoomSelectionGrid';
 
@@ -116,8 +116,11 @@ export default function BookingPropertyDetailView({
             <div className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight property-price">
               {formatRupiah(displayPrice)}
             </div>
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5 flex items-center sm:justify-end gap-1">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5 flex items-center sm:justify-end gap-1 flex-wrap">
               <span>{t('prop.perMonth')}</span>
+              <span className="text-slate-400 dark:text-slate-500 property-usd-approx">
+                (~{formatUSD(displayPrice)} USD)
+              </span>
               <span className="text-emerald-600 dark:text-emerald-400 font-semibold">• Bebas Biaya Utilitas</span>
             </div>
           </div>

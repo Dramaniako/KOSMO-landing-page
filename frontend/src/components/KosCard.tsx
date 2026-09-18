@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { MapPin, Star, Sparkles } from 'lucide-react';
 import { Property } from '../types/index';
-import { formatRupiah } from '../utils/format';
+import { formatRupiah, formatUSD } from '../utils/format';
 
 export interface Props {
   property: Property;
@@ -100,11 +100,14 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
         {/* Price & Detail Button */}
         <div className="flex items-center justify-between pt-3 border-t border-slate-100 property-footer">
           <div>
-            <div className="flex items-baseline gap-1">
+            <div className="flex items-baseline gap-1 flex-wrap">
               <span className="text-blue-600 font-extrabold text-base sm:text-lg property-price">
                 {formatRupiah(price)}
               </span>
               <span className="text-slate-400 text-xs font-normal property-period">/bulan</span>
+              <span className="text-slate-400 dark:text-slate-500 text-xs font-normal property-usd-approx">
+                (~{formatUSD(price)} USD)
+              </span>
             </div>
             <div className="flex items-center gap-1 text-emerald-600 text-[11px] font-semibold mt-0.5">
               <Sparkles size={11} />
