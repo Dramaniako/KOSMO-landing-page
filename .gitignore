@@ -101,4 +101,11 @@ temp/
 *.patch
 *.diff
 
+# Testing & Linting cache
+vitest-results/
+.vitest/
+frontend/.vitest/
+.eslintcache
+
+
 
