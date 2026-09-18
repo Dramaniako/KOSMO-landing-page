@@ -76,7 +76,7 @@ export function registerUserRoutes(router: Router): void {
         }
 
         const userId = generateId("user");
-        const hashedPassword = bcrypt.hashSync(password, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
         await pool.query(
           `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -107,7 +107,7 @@ export function registerUserRoutes(router: Router): void {
         }
 
         if (password) {
-          const hashedPassword = bcrypt.hashSync(password, 10);
+          const hashedPassword = await bcrypt.hash(password, 10);
           await pool.query(
             `UPDATE users SET name = ?, email = ?, role = ?, phone = ?, paymentMethod = ?, password = ? WHERE id = ?`,
             [name, email, role, phone || '', paymentMethod || '', hashedPassword, id]
@@ -147,7 +147,8 @@ export function registerUserRoutes(router: Router): void {
     try {
       const [adminRows] = await pool.query<UserRow[]>('SELECT password FROM users WHERE id = ?', [authUser?.id]);
       const admin = adminRows[0];
-      if (!admin || !admin.password || !bcrypt.compareSync(password, admin.password)) {
+      const isMatch = (admin && admin.password) ? await bcrypt.compare(password, admin.password) : false;
+      if (!admin || !admin.password || !isMatch) {
         return res.status(401).json({ message: "Password administrator salah." });
       }
 

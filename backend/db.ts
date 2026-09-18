@@ -673,9 +673,11 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
 export async function seedUsers(executor: QueryExecutor = pool): Promise<void> {
   const [userRows] = await executor.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM users');
   if (userRows[0].count === 0) {
-    const adminHash = bcrypt.hashSync('admin', 10);
-    const landlordHash = bcrypt.hashSync('landlord', 10);
-    const tenantHash = bcrypt.hashSync('tenant', 10);
+    const [adminHash, landlordHash, tenantHash] = await Promise.all([
+      bcrypt.hash('admin', 10),
+      bcrypt.hash('landlord', 10),
+      bcrypt.hash('tenant', 10)
+    ]);
 
     await executor.query(`
       INSERT INTO users (
@@ -701,7 +703,7 @@ export async function seedUsers(executor: QueryExecutor = pool): Promise<void> {
       if (u.password) {
         const isHashed = u.password.startsWith('$2a$') || u.password.startsWith('$2b$') || u.password.startsWith('$2y$');
         if (!isHashed) {
-          const hashed = bcrypt.hashSync(u.password, 10);
+          const hashed = await bcrypt.hash(u.password, 10);
           updatePromises.push(executor.query('UPDATE users SET password = ? WHERE id = ?', [hashed, u.id]));
         }
       }

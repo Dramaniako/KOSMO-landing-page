@@ -32,6 +32,15 @@ test('Authentication logic, password security gates & JWT', async (t) => {
     assert.ok(hashedPassword.startsWith('$2a$') || hashedPassword.startsWith('$2b$'));
   });
 
+  await t.test('bcrypt asynchronously hashes and validates matching password', async () => {
+    const asyncHash = await bcrypt.hash(plainPassword, 10);
+    assert.ok(asyncHash.startsWith('$2a$') || asyncHash.startsWith('$2b$'));
+    const isMatch = await bcrypt.compare(plainPassword, asyncHash);
+    assert.equal(isMatch, true);
+    const isWrong = await bcrypt.compare('WrongPassword!', asyncHash);
+    assert.equal(isWrong, false);
+  });
+
   await t.test('bcrypt correctly validates matching password', () => {
     const isValid = bcrypt.compareSync(plainPassword, hashedPassword);
     assert.equal(isValid, true);
@@ -270,5 +279,37 @@ test('Authentication logic, password security gates & JWT', async (t) => {
     assert.equal(isProfileAccessPermitted({ id: 'user-admin-1', role: 'admin' }, 'user-tenant-1'), true);
     assert.equal(isProfileAccessPermitted({ id: 'user-landlord-1', role: 'landlord' }, 'user-tenant-1'), false);
     assert.equal(isProfileAccessPermitted({ id: 'user-tenant-2', role: 'tenant' }, 'user-tenant-1'), false);
+  });
+
+  await t.test('short-lived download token generates valid token with 60s expiration and authenticates via query param', () => {
+    const downloadToken = generateJwtToken(mockPayload, secret, '60s');
+    assert.ok(downloadToken);
+
+    // Verify token can be decoded with expected payload
+    const decoded = verifyJwtToken(downloadToken, secret);
+    assert.equal(decoded.id, mockPayload.id);
+    assert.equal(decoded.role, mockPayload.role);
+
+    // Verify authenticateToken accepts downloadToken from req.query
+    let nextCalled = false;
+    const mockReq = {
+      headers: {},
+      query: { downloadToken }
+    } as unknown as Request;
+    const mockRes = {
+      status: () => mockRes,
+      json: () => mockRes
+    } as unknown as Response;
+
+    // Use default secret consistent with authenticateToken
+    const validToken = generateJwtToken(mockPayload, undefined, '60s');
+    (mockReq as unknown as { query: { downloadToken: string } }).query.downloadToken = validToken;
+
+    authenticateToken(mockReq, mockRes, () => {
+      nextCalled = true;
+    });
+
+    assert.equal(nextCalled, true);
+    assert.equal((mockReq as AuthenticatedRequest).user?.id, mockPayload.id);
   });
 });

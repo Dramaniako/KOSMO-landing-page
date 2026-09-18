@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 import XLSX from 'xlsx';
 import type { RowDataPacket } from 'mysql2/promise';
 import { pool } from '../db';
-import { authenticateToken, requireRole } from '../middleware/auth';
+import { authenticateToken, requireRole, generateJwtToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { PropertyRow } from '../services/transformers';
 import type { UserRow } from './auth.routes';
@@ -262,58 +262,79 @@ export function registerTrackingRoutes(router: Router): void {
     }
   });
 
-  router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
+  // Support short-lived download token generation (valid 60 seconds)
+  router.post('/reports/download-token', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
     const authUser = req.user;
-    if (!authUser) return res.status(401).json({ message: 'Otentikasi diperlukan.' });
-
-    const landlordId = authUser.role === 'admin' && req.query.landlordId
-      ? String(req.query.landlordId)
-      : authUser.id;
-
-    if (!landlordId) return res.status(400).json({ message: 'landlordId diperlukan.' });
-    try {
-      const [landlords] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlordId]);
-      const landlord = landlords[0];
-      if (!landlord) return res.status(404).json({ message: 'Landlord tidak ditemukan.' });
-
-      const [properties] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ?', [landlord.id]);
-      const [transactions] = await pool.query<RentalRow[]>(
-        `SELECT r.*, p.name as propertyName FROM rentals r 
-         JOIN properties p ON r.propertyId = p.id 
-         WHERE p.ownerId = ? ORDER BY r.id DESC`, [landlord.id]
-      );
-
-      const wb = XLSX.utils.book_new();
-
-      // Financial Summary sheet
-      const summaryData: (string | number)[][] = [
-        ['Laporan Keuangan Landlord'],
-        ['Nama', landlord.name],
-        ['Email', landlord.email],
-        ['Total Pendapatan', landlord.totalRevenue || 0],
-        ['Total Penarikan', landlord.totalWithdrawn || 0],
-        ['Saldo', landlord.balance || 0],
-        [''],
-        ['Ringkasan Properti'],
-        ['Nama Properti', 'Lokasi', 'Harga', 'Total Kamar', 'Kamar Tersedia']
-      ];
-      properties.forEach(p => summaryData.push([p.name, p.district, p.price, p.totalRooms, p.totalRooms - p.occupiedRooms]));
-      const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-      XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan Keuangan');
-
-      // Transactions sheet
-      const txData: (string | number)[][] = [['ID Transaksi', 'Properti', 'Tanggal', 'Jumlah', 'Status']];
-      transactions.forEach(t => txData.push([t.id, t.propertyName || '', t.startDate || '', t.price || 0, t.status === 'active' ? 'Aktif' : 'Selesai']));
-      const txSheet = XLSX.utils.aoa_to_sheet(txData);
-      XLSX.utils.book_append_sheet(wb, txSheet, 'Transaksi');
-
-      const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-      res.setHeader('Content-Disposition', `attachment; filename=laporan_keuangan_${landlord.name.replace(/\s+/g, '_')}.xlsx`);
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.send(Buffer.from(buf));
-    } catch (err) {
-      console.error('Excel landlord report error:', err);
-      res.status(500).json({ message: 'Gagal menghasilkan laporan Excel.' });
+    if (!authUser) {
+      return res.status(401).json({ message: 'Otentikasi diperlukan.' });
     }
+    const downloadToken = generateJwtToken(authUser, undefined, '60s');
+    res.json({ downloadToken, expiresInSeconds: 60 });
   });
+
+  router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordExcelReport);
 }
+
+export const handleLandlordExcelReport = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const authUser = req.user;
+  if (!authUser) {
+    res.status(401).json({ message: 'Otentikasi diperlukan.' });
+    return;
+  }
+
+  const landlordId = authUser.role === 'admin' && req.query.landlordId
+    ? String(req.query.landlordId)
+    : authUser.id;
+
+  if (!landlordId) {
+    res.status(400).json({ message: 'landlordId diperlukan.' });
+    return;
+  }
+  try {
+    const [landlords] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [landlordId]);
+    const landlord = landlords[0];
+    if (!landlord) {
+      res.status(404).json({ message: 'Landlord tidak ditemukan.' });
+      return;
+    }
+
+    const [properties] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ?', [landlord.id]);
+    const [transactions] = await pool.query<RentalRow[]>(
+      `SELECT r.*, p.name as propertyName FROM rentals r 
+       JOIN properties p ON r.propertyId = p.id 
+       WHERE p.ownerId = ? ORDER BY r.id DESC`, [landlord.id]
+    );
+
+    const wb = XLSX.utils.book_new();
+
+    // Financial Summary sheet
+    const summaryData: (string | number)[][] = [
+      ['Laporan Keuangan Landlord'],
+      ['Nama', landlord.name],
+      ['Email', landlord.email],
+      ['Total Pendapatan', landlord.totalRevenue || 0],
+      ['Total Penarikan', landlord.totalWithdrawn || 0],
+      ['Saldo', landlord.balance || 0],
+      [''],
+      ['Ringkasan Properti'],
+      ['Nama Properti', 'Lokasi', 'Harga', 'Total Kamar', 'Kamar Tersedia']
+    ];
+    properties.forEach(p => summaryData.push([p.name, p.district, p.price, p.totalRooms, p.totalRooms - p.occupiedRooms]));
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan Keuangan');
+
+    // Transactions sheet
+    const txData: (string | number)[][] = [['ID Transaksi', 'Properti', 'Tanggal', 'Jumlah', 'Status']];
+    transactions.forEach(t => txData.push([t.id, t.propertyName || '', t.startDate || '', t.price || 0, t.status === 'active' ? 'Aktif' : 'Selesai']));
+    const txSheet = XLSX.utils.aoa_to_sheet(txData);
+    XLSX.utils.book_append_sheet(wb, txSheet, 'Transaksi');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename=laporan_keuangan_${landlord.name.replace(/\s+/g, '_')}.xlsx`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    console.error('Excel landlord report error:', err);
+    res.status(500).json({ message: 'Gagal menghasilkan laporan Excel.' });
+  }
+};

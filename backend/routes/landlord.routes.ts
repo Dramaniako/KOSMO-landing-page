@@ -6,6 +6,7 @@ import { authenticateToken, requireRole } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { generateId } from '../utils/id';
 import type { UserRow } from './auth.routes';
+import { handleLandlordExcelReport } from './tracking.routes';
 
 export interface WithdrawalRow extends RowDataPacket {
   id: string;
@@ -131,6 +132,7 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
 export function registerLandlordRoutes(router: Router): void {
   router.get('/stats', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordStats);
   router.get('/landlord/stats', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordStats);
+  router.get('/landlord/reports/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordExcelReport);
 
   router.get('/landlord/financials', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
     const authUser = req.user;

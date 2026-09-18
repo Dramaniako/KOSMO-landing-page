@@ -65,7 +65,9 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
   const authHeader = req.headers['authorization'];
   let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
 
-  if (!token && typeof req.query?.token === 'string') {
+  if (!token && typeof req.query?.downloadToken === 'string') {
+    token = req.query.downloadToken.trim();
+  } else if (!token && typeof req.query?.token === 'string') {
     token = req.query.token.trim();
   }
 

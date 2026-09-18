@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Eye, Users, Key, Building, LayoutDashboard, Download } from 'lucide-react';
 import { AdminStats, TrackingHistory } from '../../../types/index';
 import VisitorChart from './VisitorChart';
@@ -22,17 +22,61 @@ export default function TrackingTab({
   loading,
   authToken
 }: TrackingTabProps) {
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownloadExcel = async () => {
+    try {
+      setDownloading(true);
+      const res = await fetch(`${API_BASE}/reports/tracking/excel`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${authToken}`
+        }
+      });
+
+      if (!res.ok) {
+        throw new Error(`Gagal mengunduh laporan (${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition');
+      let filename = 'laporan_tracking_kosmo.xlsx';
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (match && match[1]) {
+          filename = match[1].replace(/['"]/g, '');
+        }
+      }
+
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('Gagal mengunduh laporan Excel. Silakan coba lagi.');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
       <div className="flex-between" style={{ marginBottom: '24px' }}>
         <h3 style={{ fontSize: '20px' }}>Tracking Pengunjung Website</h3>
-        <a
-          href={`${API_BASE}/reports/tracking/excel?token=${encodeURIComponent(authToken)}`}
+        <button
+          type="button"
+          onClick={handleDownloadExcel}
+          disabled={downloading}
           className="btn btn-primary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
         >
-          <Download size={16} /> Unduh Laporan Excel
-        </a>
+          <Download size={16} /> {downloading ? 'Mengunduh...' : 'Unduh Laporan Excel'}
+        </button>
       </div>
 
       {loading ? (

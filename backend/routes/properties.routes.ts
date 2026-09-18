@@ -291,7 +291,8 @@ export function registerPropertyRoutes(router: Router): void {
       // Verify caller's own password
       const [userRows] = await connection.query<UserRow[]>('SELECT password FROM users WHERE id = ?', [callerId]);
       const caller = userRows[0];
-      if (!caller || !caller.password || !bcrypt.compareSync(password, caller.password)) {
+      const isMatch = (caller && caller.password) ? await bcrypt.compare(password, caller.password) : false;
+      if (!caller || !caller.password || !isMatch) {
         await connection.rollback();
         return res.status(401).json({ message: "Password salah." });
       }

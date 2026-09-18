@@ -548,9 +548,11 @@ async function applyMigrations(executor = pool) {
 async function seedUsers(executor = pool) {
   const [userRows] = await executor.query("SELECT COUNT(*) as count FROM users");
   if (userRows[0].count === 0) {
-    const adminHash = bcrypt.hashSync("admin", 10);
-    const landlordHash = bcrypt.hashSync("landlord", 10);
-    const tenantHash = bcrypt.hashSync("tenant", 10);
+    const [adminHash, landlordHash, tenantHash] = await Promise.all([
+      bcrypt.hash("admin", 10),
+      bcrypt.hash("landlord", 10),
+      bcrypt.hash("tenant", 10)
+    ]);
     await executor.query(`
       INSERT INTO users (
         id, email, password, name, role, phone, paymentMethod, avatar, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder,
@@ -572,7 +574,7 @@ async function seedUsers(executor = pool) {
       if (u.password) {
         const isHashed = u.password.startsWith("$2a$") || u.password.startsWith("$2b$") || u.password.startsWith("$2y$");
         if (!isHashed) {
-          const hashed = bcrypt.hashSync(u.password, 10);
+          const hashed = await bcrypt.hash(u.password, 10);
           updatePromises.push(executor.query("UPDATE users SET password = ? WHERE id = ?", [hashed, u.id]));
         }
       }
@@ -718,7 +720,9 @@ function verifyJwtToken(token, secret = getJwtSecret()) {
 var authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   let token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7).trim() : null;
-  if (!token && typeof req.query?.token === "string") {
+  if (!token && typeof req.query?.downloadToken === "string") {
+    token = req.query.downloadToken.trim();
+  } else if (!token && typeof req.query?.token === "string") {
     token = req.query.token.trim();
   }
   if (!token) {
@@ -1282,7 +1286,8 @@ function registerAuthRoutes(router2) {
       try {
         const [rows] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
         const user = rows[0];
-        if (!user || !user.password || !bcrypt2.compareSync(password, user.password)) {
+        const isMatch = user && user.password ? await bcrypt2.compare(password, user.password) : false;
+        if (!user || !user.password || !isMatch) {
           return res.status(401).json({ message: "Email atau password salah." });
         }
         const safeUser = formatSafeUser(user);
@@ -1317,7 +1322,7 @@ function registerAuthRoutes(router2) {
           return res.status(400).json({ message: "Email sudah terdaftar." });
         }
         const userId = generateId("user");
-        const hashedPassword = bcrypt2.hashSync(password, 10);
+        const hashedPassword = await bcrypt2.hash(password, 10);
         await pool.query(
           `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
            VALUES (?, ?, ?, ?, 'tenant', ?, 'Virtual Account')`,
@@ -1542,7 +1547,7 @@ function registerAuthRoutes(router2) {
         if (!user || !user.password) {
           return res.status(404).json({ message: "User tidak ditemukan." });
         }
-        const valid = bcrypt2.compareSync(password, user.password);
+        const valid = await bcrypt2.compare(password, user.password);
         res.json({ valid });
       } catch (err) {
         console.error("Password verification error:", err);
@@ -1593,7 +1598,7 @@ function registerUserRoutes(router2) {
           return res.status(400).json({ message: "Email sudah terdaftar." });
         }
         const userId = generateId("user");
-        const hashedPassword = bcrypt3.hashSync(password, 10);
+        const hashedPassword = await bcrypt3.hash(password, 10);
         await pool.query(
           `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -1619,7 +1624,7 @@ function registerUserRoutes(router2) {
           return res.status(404).json({ message: "User tidak ditemukan." });
         }
         if (password) {
-          const hashedPassword = bcrypt3.hashSync(password, 10);
+          const hashedPassword = await bcrypt3.hash(password, 10);
           await pool.query(
             `UPDATE users SET name = ?, email = ?, role = ?, phone = ?, paymentMethod = ?, password = ? WHERE id = ?`,
             [name, email, role, phone || "", paymentMethod || "", hashedPassword, id]
@@ -1652,7 +1657,8 @@ function registerUserRoutes(router2) {
     try {
       const [adminRows] = await pool.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
       const admin = adminRows[0];
-      if (!admin || !admin.password || !bcrypt3.compareSync(password, admin.password)) {
+      const isMatch = admin && admin.password ? await bcrypt3.compare(password, admin.password) : false;
+      if (!admin || !admin.password || !isMatch) {
         return res.status(401).json({ message: "Password administrator salah." });
       }
       const [activeRentals] = await pool.query(
@@ -1992,7 +1998,8 @@ function registerPropertyRoutes(router2) {
       }
       const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [callerId]);
       const caller = userRows[0];
-      if (!caller || !caller.password || !bcrypt4.compareSync(password, caller.password)) {
+      const isMatch = caller && caller.password ? await bcrypt4.compare(password, caller.password) : false;
+      if (!caller || !caller.password || !isMatch) {
         await connection.rollback();
         return res.status(401).json({ message: "Password salah." });
       }
@@ -2175,6 +2182,261 @@ function registerReviewRoutes(router2) {
   });
 }
 
+// backend/routes/tracking.routes.ts
+import rateLimit3 from "express-rate-limit";
+import XLSX from "xlsx";
+var trackingLimiter = rateLimit3({
+  windowMs: 60 * 1e3,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Terlalu banyak permintaan pelacakan." }
+});
+function registerTrackingRoutes(router2) {
+  router2.post("/tracking/visit", trackingLimiter, async (req, res) => {
+    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+    const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+    const ip = firstIp.split(",")[0].trim().substring(0, 255);
+    const userAgent = String(req.headers["user-agent"] || "").substring(0, 1e3);
+    try {
+      await pool.query(
+        "INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)",
+        [ip, userAgent]
+      );
+      apiCache.del("admin:stats");
+      res.status(201).json({ message: "Kunjungan berhasil dilacak." });
+    } catch (err) {
+      console.error("Error in POST /api/tracking/visit:", err);
+      res.status(500).json({ error: "Internal Server Error", message: "Gagal melacak kunjungan." });
+    }
+  });
+  router2.get("/admin/stats", authenticateToken, requireRole(["admin"]), async (_req, res) => {
+    try {
+      const cacheKey = "admin:stats";
+      const cached = apiCache.get(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+      const [
+        [visitorRows],
+        [userRows],
+        [landlordRows],
+        [propertyRows],
+        [roomsRows]
+      ] = await Promise.all([
+        pool.query("SELECT COUNT(*) as count FROM visitor_tracking"),
+        pool.query("SELECT COUNT(*) as count FROM users"),
+        pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
+        pool.query("SELECT COUNT(*) as count FROM properties"),
+        pool.query("SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties")
+      ]);
+      const totalVisitors = visitorRows[0]?.count || 0;
+      const totalUsers = userRows[0]?.count || 0;
+      const totalLandlords = landlordRows[0]?.count || 0;
+      const totalProperties = propertyRows[0]?.count || 0;
+      const totalRooms = Number(roomsRows[0]?.sum) || 0;
+      const statsData = {
+        totalVisitors,
+        totalUsers,
+        totalLandlords,
+        totalProperties,
+        totalRooms
+      };
+      apiCache.set(cacheKey, statsData, 15e3);
+      res.json(statsData);
+    } catch (err) {
+      console.error("Admin stats error:", err);
+      res.status(500).json({ message: "Gagal mengambil statistik admin." });
+    }
+  });
+  router2.get("/admin/tracking-history", authenticateToken, requireRole(["admin"]), async (_req, res) => {
+    try {
+      const [rows24h] = await pool.query(`
+        SELECT 
+          DATE_FORMAT(visited_at, '%Y-%m-%d %H:00:00') as label_time,
+          COUNT(*) as count
+        FROM visitor_tracking
+        WHERE visited_at >= NOW() - INTERVAL 24 HOUR
+        GROUP BY label_time
+        ORDER BY label_time ASC
+      `);
+      const [rows7d] = await pool.query(`
+        SELECT 
+          DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
+          COUNT(*) as count
+        FROM visitor_tracking
+        WHERE visited_at >= DATE(NOW() - INTERVAL 6 DAY)
+        GROUP BY label_date
+        ORDER BY label_date ASC
+      `);
+      const [rows30d] = await pool.query(`
+        SELECT 
+          DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
+          COUNT(*) as count
+        FROM visitor_tracking
+        WHERE visited_at >= DATE(NOW() - INTERVAL 29 DAY)
+        GROUP BY label_date
+        ORDER BY label_date ASC
+      `);
+      const now = /* @__PURE__ */ new Date();
+      const data24h = [];
+      for (let i = 23; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 60 * 60 * 1e3);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const date = String(d.getDate()).padStart(2, "0");
+        const hour = String(d.getHours()).padStart(2, "0");
+        const labelKey = `${year}-${month}-${date} ${hour}:00:00`;
+        const hourLabel = `${hour}:00`;
+        const match = rows24h.find((r) => r.label_time === labelKey);
+        data24h.push({
+          label: hourLabel,
+          count: match ? match.count : 0
+        });
+      }
+      const data7d = [];
+      const daysName = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1e3);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const date = String(d.getDate()).padStart(2, "0");
+        const labelKey = `${year}-${month}-${date}`;
+        const dayLabel = daysName[d.getDay()] + ` (${date}/${month})`;
+        const match = rows7d.find((r) => r.label_date === labelKey);
+        data7d.push({
+          label: dayLabel,
+          count: match ? match.count : 0
+        });
+      }
+      const data30d = [];
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1e3);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const date = String(d.getDate()).padStart(2, "0");
+        const labelKey = `${year}-${month}-${date}`;
+        const dayLabel = `${date}/${month}`;
+        const match = rows30d.find((r) => r.label_date === labelKey);
+        data30d.push({
+          label: dayLabel,
+          count: match ? match.count : 0
+        });
+      }
+      res.json({
+        history24h: data24h,
+        history7d: data7d,
+        history30d: data30d
+      });
+    } catch (err) {
+      console.error("Error fetching tracking history:", err);
+      res.status(500).json({ message: "Gagal mengambil riwayat tracking." });
+    }
+  });
+  router2.get("/reports/tracking/excel", authenticateToken, requireRole(["admin"]), async (_req, res) => {
+    try {
+      const [visitorRows] = await pool.query("SELECT COUNT(*) as count FROM visitor_tracking");
+      const [userRows] = await pool.query("SELECT COUNT(*) as count FROM users");
+      const [landlordRows] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
+      const totalLandlords = landlordRows[0].count;
+      const [propertyRows] = await pool.query("SELECT COUNT(*) as count FROM properties");
+      const totalProperties = propertyRows[0].count;
+      const [roomsRows] = await pool.query("SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties");
+      const totalRooms = roomsRows[0].sum || 0;
+      const [visitors] = await pool.query("SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000");
+      const [users] = await pool.query("SELECT id, email, name, role, phone FROM users ORDER BY id DESC");
+      const wb = XLSX.utils.book_new();
+      const summaryData = [
+        ["Metrik", "Jumlah"],
+        ["Total Pengunjung Website", visitorRows[0].count],
+        ["Total Pengguna Terdaftar", userRows[0].count],
+        ["Total Landlord", totalLandlords],
+        ["Total Properti", totalProperties],
+        ["Total Kamar", totalRooms]
+      ];
+      const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan");
+      const visitorData = [["IP Address", "User Agent", "Waktu Kunjungan"]];
+      visitors.forEach((v) => visitorData.push([v.ip_address, v.user_agent, v.visited_at ? new Date(v.visited_at).toLocaleString("id-ID") : ""]));
+      const visitorSheet = XLSX.utils.aoa_to_sheet(visitorData);
+      XLSX.utils.book_append_sheet(wb, visitorSheet, "Pengunjung");
+      const userData = [["ID", "Email", "Nama", "Role", "Telepon"]];
+      users.forEach((u) => userData.push([u.id, u.email, u.name, u.role, u.phone]));
+      const userSheet = XLSX.utils.aoa_to_sheet(userData);
+      XLSX.utils.book_append_sheet(wb, userSheet, "Pengguna");
+      const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+      res.setHeader("Content-Disposition", "attachment; filename=laporan_tracking_kosmo.xlsx");
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.send(Buffer.from(buf));
+    } catch (err) {
+      console.error("Excel tracking report error:", err);
+      res.status(500).json({ message: "Gagal menghasilkan laporan Excel." });
+    }
+  });
+  router2.post("/reports/download-token", authenticateToken, (req, res) => {
+    const authUser = req.user;
+    if (!authUser) {
+      return res.status(401).json({ message: "Otentikasi diperlukan." });
+    }
+    const downloadToken = generateJwtToken(authUser, void 0, "60s");
+    res.json({ downloadToken, expiresInSeconds: 60 });
+  });
+  router2.get("/reports/landlord/excel", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordExcelReport);
+}
+var handleLandlordExcelReport = async (req, res) => {
+  const authUser = req.user;
+  if (!authUser) {
+    res.status(401).json({ message: "Otentikasi diperlukan." });
+    return;
+  }
+  const landlordId = authUser.role === "admin" && req.query.landlordId ? String(req.query.landlordId) : authUser.id;
+  if (!landlordId) {
+    res.status(400).json({ message: "landlordId diperlukan." });
+    return;
+  }
+  try {
+    const [landlords] = await pool.query("SELECT * FROM users WHERE id = ?", [landlordId]);
+    const landlord = landlords[0];
+    if (!landlord) {
+      res.status(404).json({ message: "Landlord tidak ditemukan." });
+      return;
+    }
+    const [properties] = await pool.query("SELECT * FROM properties WHERE ownerId = ?", [landlord.id]);
+    const [transactions] = await pool.query(
+      `SELECT r.*, p.name as propertyName FROM rentals r 
+       JOIN properties p ON r.propertyId = p.id 
+       WHERE p.ownerId = ? ORDER BY r.id DESC`,
+      [landlord.id]
+    );
+    const wb = XLSX.utils.book_new();
+    const summaryData = [
+      ["Laporan Keuangan Landlord"],
+      ["Nama", landlord.name],
+      ["Email", landlord.email],
+      ["Total Pendapatan", landlord.totalRevenue || 0],
+      ["Total Penarikan", landlord.totalWithdrawn || 0],
+      ["Saldo", landlord.balance || 0],
+      [""],
+      ["Ringkasan Properti"],
+      ["Nama Properti", "Lokasi", "Harga", "Total Kamar", "Kamar Tersedia"]
+    ];
+    properties.forEach((p) => summaryData.push([p.name, p.district, p.price, p.totalRooms, p.totalRooms - p.occupiedRooms]));
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan Keuangan");
+    const txData = [["ID Transaksi", "Properti", "Tanggal", "Jumlah", "Status"]];
+    transactions.forEach((t) => txData.push([t.id, t.propertyName || "", t.startDate || "", t.price || 0, t.status === "active" ? "Aktif" : "Selesai"]));
+    const txSheet = XLSX.utils.aoa_to_sheet(txData);
+    XLSX.utils.book_append_sheet(wb, txSheet, "Transaksi");
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    res.setHeader("Content-Disposition", `attachment; filename=laporan_keuangan_${landlord.name.replace(/\s+/g, "_")}.xlsx`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    console.error("Excel landlord report error:", err);
+    res.status(500).json({ message: "Gagal menghasilkan laporan Excel." });
+  }
+};
+
 // backend/routes/landlord.routes.ts
 var handleLandlordStats = async (req, res) => {
   const authUser = req.user;
@@ -2247,6 +2509,7 @@ var handleLandlordStats = async (req, res) => {
 function registerLandlordRoutes(router2) {
   router2.get("/stats", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordStats);
   router2.get("/landlord/stats", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordStats);
+  router2.get("/landlord/reports/excel", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordExcelReport);
   router2.get("/landlord/financials", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
     const authUser = req.user;
     if (!authUser) {
@@ -2551,243 +2814,6 @@ function registerLandlordRoutes(router2) {
       res.status(500).json({ message: "Gagal menolak penarikan dana." });
     } finally {
       connection.release();
-    }
-  });
-}
-
-// backend/routes/tracking.routes.ts
-import rateLimit3 from "express-rate-limit";
-import XLSX from "xlsx";
-var trackingLimiter = rateLimit3({
-  windowMs: 60 * 1e3,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: "Terlalu banyak permintaan pelacakan." }
-});
-function registerTrackingRoutes(router2) {
-  router2.post("/tracking/visit", trackingLimiter, async (req, res) => {
-    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
-    const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
-    const ip = firstIp.split(",")[0].trim().substring(0, 255);
-    const userAgent = String(req.headers["user-agent"] || "").substring(0, 1e3);
-    try {
-      await pool.query(
-        "INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)",
-        [ip, userAgent]
-      );
-      apiCache.del("admin:stats");
-      res.status(201).json({ message: "Kunjungan berhasil dilacak." });
-    } catch (err) {
-      console.error("Error in POST /api/tracking/visit:", err);
-      res.status(500).json({ error: "Internal Server Error", message: "Gagal melacak kunjungan." });
-    }
-  });
-  router2.get("/admin/stats", authenticateToken, requireRole(["admin"]), async (_req, res) => {
-    try {
-      const cacheKey = "admin:stats";
-      const cached = apiCache.get(cacheKey);
-      if (cached) {
-        return res.json(cached);
-      }
-      const [
-        [visitorRows],
-        [userRows],
-        [landlordRows],
-        [propertyRows],
-        [roomsRows]
-      ] = await Promise.all([
-        pool.query("SELECT COUNT(*) as count FROM visitor_tracking"),
-        pool.query("SELECT COUNT(*) as count FROM users"),
-        pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
-        pool.query("SELECT COUNT(*) as count FROM properties"),
-        pool.query("SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties")
-      ]);
-      const totalVisitors = visitorRows[0]?.count || 0;
-      const totalUsers = userRows[0]?.count || 0;
-      const totalLandlords = landlordRows[0]?.count || 0;
-      const totalProperties = propertyRows[0]?.count || 0;
-      const totalRooms = Number(roomsRows[0]?.sum) || 0;
-      const statsData = {
-        totalVisitors,
-        totalUsers,
-        totalLandlords,
-        totalProperties,
-        totalRooms
-      };
-      apiCache.set(cacheKey, statsData, 15e3);
-      res.json(statsData);
-    } catch (err) {
-      console.error("Admin stats error:", err);
-      res.status(500).json({ message: "Gagal mengambil statistik admin." });
-    }
-  });
-  router2.get("/admin/tracking-history", authenticateToken, requireRole(["admin"]), async (_req, res) => {
-    try {
-      const [rows24h] = await pool.query(`
-        SELECT 
-          DATE_FORMAT(visited_at, '%Y-%m-%d %H:00:00') as label_time,
-          COUNT(*) as count
-        FROM visitor_tracking
-        WHERE visited_at >= NOW() - INTERVAL 24 HOUR
-        GROUP BY label_time
-        ORDER BY label_time ASC
-      `);
-      const [rows7d] = await pool.query(`
-        SELECT 
-          DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
-          COUNT(*) as count
-        FROM visitor_tracking
-        WHERE visited_at >= DATE(NOW() - INTERVAL 6 DAY)
-        GROUP BY label_date
-        ORDER BY label_date ASC
-      `);
-      const [rows30d] = await pool.query(`
-        SELECT 
-          DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
-          COUNT(*) as count
-        FROM visitor_tracking
-        WHERE visited_at >= DATE(NOW() - INTERVAL 29 DAY)
-        GROUP BY label_date
-        ORDER BY label_date ASC
-      `);
-      const now = /* @__PURE__ */ new Date();
-      const data24h = [];
-      for (let i = 23; i >= 0; i--) {
-        const d = new Date(now.getTime() - i * 60 * 60 * 1e3);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, "0");
-        const date = String(d.getDate()).padStart(2, "0");
-        const hour = String(d.getHours()).padStart(2, "0");
-        const labelKey = `${year}-${month}-${date} ${hour}:00:00`;
-        const hourLabel = `${hour}:00`;
-        const match = rows24h.find((r) => r.label_time === labelKey);
-        data24h.push({
-          label: hourLabel,
-          count: match ? match.count : 0
-        });
-      }
-      const data7d = [];
-      const daysName = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1e3);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, "0");
-        const date = String(d.getDate()).padStart(2, "0");
-        const labelKey = `${year}-${month}-${date}`;
-        const dayLabel = daysName[d.getDay()] + ` (${date}/${month})`;
-        const match = rows7d.find((r) => r.label_date === labelKey);
-        data7d.push({
-          label: dayLabel,
-          count: match ? match.count : 0
-        });
-      }
-      const data30d = [];
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1e3);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, "0");
-        const date = String(d.getDate()).padStart(2, "0");
-        const labelKey = `${year}-${month}-${date}`;
-        const dayLabel = `${date}/${month}`;
-        const match = rows30d.find((r) => r.label_date === labelKey);
-        data30d.push({
-          label: dayLabel,
-          count: match ? match.count : 0
-        });
-      }
-      res.json({
-        history24h: data24h,
-        history7d: data7d,
-        history30d: data30d
-      });
-    } catch (err) {
-      console.error("Error fetching tracking history:", err);
-      res.status(500).json({ message: "Gagal mengambil riwayat tracking." });
-    }
-  });
-  router2.get("/reports/tracking/excel", authenticateToken, requireRole(["admin"]), async (_req, res) => {
-    try {
-      const [visitorRows] = await pool.query("SELECT COUNT(*) as count FROM visitor_tracking");
-      const [userRows] = await pool.query("SELECT COUNT(*) as count FROM users");
-      const [landlordRows] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
-      const totalLandlords = landlordRows[0].count;
-      const [propertyRows] = await pool.query("SELECT COUNT(*) as count FROM properties");
-      const totalProperties = propertyRows[0].count;
-      const [roomsRows] = await pool.query("SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties");
-      const totalRooms = roomsRows[0].sum || 0;
-      const [visitors] = await pool.query("SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000");
-      const [users] = await pool.query("SELECT id, email, name, role, phone FROM users ORDER BY id DESC");
-      const wb = XLSX.utils.book_new();
-      const summaryData = [
-        ["Metrik", "Jumlah"],
-        ["Total Pengunjung Website", visitorRows[0].count],
-        ["Total Pengguna Terdaftar", userRows[0].count],
-        ["Total Landlord", totalLandlords],
-        ["Total Properti", totalProperties],
-        ["Total Kamar", totalRooms]
-      ];
-      const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-      XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan");
-      const visitorData = [["IP Address", "User Agent", "Waktu Kunjungan"]];
-      visitors.forEach((v) => visitorData.push([v.ip_address, v.user_agent, v.visited_at ? new Date(v.visited_at).toLocaleString("id-ID") : ""]));
-      const visitorSheet = XLSX.utils.aoa_to_sheet(visitorData);
-      XLSX.utils.book_append_sheet(wb, visitorSheet, "Pengunjung");
-      const userData = [["ID", "Email", "Nama", "Role", "Telepon"]];
-      users.forEach((u) => userData.push([u.id, u.email, u.name, u.role, u.phone]));
-      const userSheet = XLSX.utils.aoa_to_sheet(userData);
-      XLSX.utils.book_append_sheet(wb, userSheet, "Pengguna");
-      const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-      res.setHeader("Content-Disposition", "attachment; filename=laporan_tracking_kosmo.xlsx");
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.send(Buffer.from(buf));
-    } catch (err) {
-      console.error("Excel tracking report error:", err);
-      res.status(500).json({ message: "Gagal menghasilkan laporan Excel." });
-    }
-  });
-  router2.get("/reports/landlord/excel", authenticateToken, requireRole(["admin", "landlord", "owner"]), async (req, res) => {
-    const authUser = req.user;
-    if (!authUser) return res.status(401).json({ message: "Otentikasi diperlukan." });
-    const landlordId = authUser.role === "admin" && req.query.landlordId ? String(req.query.landlordId) : authUser.id;
-    if (!landlordId) return res.status(400).json({ message: "landlordId diperlukan." });
-    try {
-      const [landlords] = await pool.query("SELECT * FROM users WHERE id = ?", [landlordId]);
-      const landlord = landlords[0];
-      if (!landlord) return res.status(404).json({ message: "Landlord tidak ditemukan." });
-      const [properties] = await pool.query("SELECT * FROM properties WHERE ownerId = ?", [landlord.id]);
-      const [transactions] = await pool.query(
-        `SELECT r.*, p.name as propertyName FROM rentals r 
-         JOIN properties p ON r.propertyId = p.id 
-         WHERE p.ownerId = ? ORDER BY r.id DESC`,
-        [landlord.id]
-      );
-      const wb = XLSX.utils.book_new();
-      const summaryData = [
-        ["Laporan Keuangan Landlord"],
-        ["Nama", landlord.name],
-        ["Email", landlord.email],
-        ["Total Pendapatan", landlord.totalRevenue || 0],
-        ["Total Penarikan", landlord.totalWithdrawn || 0],
-        ["Saldo", landlord.balance || 0],
-        [""],
-        ["Ringkasan Properti"],
-        ["Nama Properti", "Lokasi", "Harga", "Total Kamar", "Kamar Tersedia"]
-      ];
-      properties.forEach((p) => summaryData.push([p.name, p.district, p.price, p.totalRooms, p.totalRooms - p.occupiedRooms]));
-      const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-      XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan Keuangan");
-      const txData = [["ID Transaksi", "Properti", "Tanggal", "Jumlah", "Status"]];
-      transactions.forEach((t) => txData.push([t.id, t.propertyName || "", t.startDate || "", t.price || 0, t.status === "active" ? "Aktif" : "Selesai"]));
-      const txSheet = XLSX.utils.aoa_to_sheet(txData);
-      XLSX.utils.book_append_sheet(wb, txSheet, "Transaksi");
-      const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-      res.setHeader("Content-Disposition", `attachment; filename=laporan_keuangan_${landlord.name.replace(/\s+/g, "_")}.xlsx`);
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.send(Buffer.from(buf));
-    } catch (err) {
-      console.error("Excel landlord report error:", err);
-      res.status(500).json({ message: "Gagal menghasilkan laporan Excel." });
     }
   });
 }
@@ -3924,7 +3950,8 @@ function registerRoomRoutes(router2) {
       }
       const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
       const caller = userRows[0];
-      if (!caller || !caller.password || !bcrypt5.compareSync(password, caller.password)) {
+      const isMatch = caller && caller.password ? await bcrypt5.compare(password, caller.password) : false;
+      if (!caller || !caller.password || !isMatch) {
         await connection.rollback();
         return res.status(401).json({ message: "Password salah." });
       }
@@ -5253,7 +5280,8 @@ function registerRentalRoutes(router2) {
       }
       const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
       const caller = userRows[0];
-      if (!caller || !caller.password || !bcrypt6.compareSync(password, caller.password)) {
+      const isMatch = caller && caller.password ? await bcrypt6.compare(password, caller.password) : false;
+      if (!caller || !caller.password || !isMatch) {
         await connection.rollback();
         return res.status(401).json({ message: "Password salah." });
       }
@@ -5389,6 +5417,7 @@ var corsOptions = {
   },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  exposedHeaders: ["Content-Disposition"],
   credentials: true,
   maxAge: 86400
 };

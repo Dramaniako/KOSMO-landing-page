@@ -113,7 +113,8 @@ export function registerAuthRoutes(router: Router): void {
         const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE email = ?', [email]);
         const user = rows[0];
 
-        if (!user || !user.password || !bcrypt.compareSync(password, user.password)) {
+        const isMatch = (user && user.password) ? await bcrypt.compare(password, user.password) : false;
+        if (!user || !user.password || !isMatch) {
           return res.status(401).json({ message: "Email atau password salah." });
         }
 
@@ -153,7 +154,7 @@ export function registerAuthRoutes(router: Router): void {
         }
 
         const userId = generateId("user");
-        const hashedPassword = bcrypt.hashSync(password, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
         await pool.query(
           `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
            VALUES (?, ?, ?, ?, 'tenant', ?, 'Virtual Account')`,
@@ -399,7 +400,7 @@ export function registerAuthRoutes(router: Router): void {
         if (!user || !user.password) {
           return res.status(404).json({ message: "User tidak ditemukan." });
         }
-        const valid = bcrypt.compareSync(password, user.password);
+        const valid = await bcrypt.compare(password, user.password);
         res.json({ valid });
       } catch (err) {
         console.error("Password verification error:", err);
