@@ -227,6 +227,7 @@ export async function seedDatabase(): Promise<void> {
     console.log('🧹 Clearing transactional data while preserving user accounts...');
     await connection.query('SET FOREIGN_KEY_CHECKS = 0');
 
+    await connection.query('DELETE FROM maintenance_tickets');
     await connection.query('DELETE FROM property_photos');
     await connection.query('DELETE FROM rooms');
     await connection.query('DELETE FROM rentals');

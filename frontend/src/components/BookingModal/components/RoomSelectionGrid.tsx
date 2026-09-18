@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { DoorOpen, CheckCircle, Lock, Wrench, Sparkles } from 'lucide-react';
 import { Room } from '../../../types/index';
-import { formatRupiah } from '../../../utils/format';
+import { formatRupiah, formatUSD } from '../../../utils/format';
 
 export interface RoomCardItemProps {
   room: Room;
@@ -88,15 +88,20 @@ export const RoomCardItem = React.memo<RoomCardItemProps>(({
       {/* Pricing & Selection Indicator */}
       <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
         <div>
-          <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
-            {formatRupiah(effectivePrice)}
-          </span>
-          <span className="text-[10px] text-slate-400 ml-0.5">/bln</span>
-          {hasCustomPrice && (
-            <span className="ml-1 px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-              Kustom
+          <div className="flex items-baseline gap-1 flex-wrap">
+            <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+              {formatRupiah(effectivePrice)}
             </span>
-          )}
+            <span className="text-[10px] text-slate-400">/bln</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 property-usd-approx">
+              (~{formatUSD(effectivePrice)} USD)
+            </span>
+            {hasCustomPrice && (
+              <span className="ml-1 px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                Kustom
+              </span>
+            )}
+          </div>
         </div>
 
         {isSelected && (

@@ -24,6 +24,7 @@ interface TicketLookupRow extends RowDataPacket {
   roomId: string | null;
   ownerId: string | null;
   status: string;
+  resolvedAt: Date | string | null;
 }
 
 export function registerTicketRoutes(router: Router): void {
@@ -47,7 +48,7 @@ export function registerTicketRoutes(router: Router): void {
         });
       }
 
-      const { rentalId, category, title, description, photoUrl } = req.body;
+      const { rentalId, roomId: explicitRoomId, category, title, description, photoUrl } = req.body;
 
       try {
         const [rentalRows] = await pool.query<RentalLookupRow[]>(
@@ -80,7 +81,10 @@ export function registerTicketRoutes(router: Router): void {
         const ticketId = generateId('ticket');
         const tenantId = authUser.role === 'admin' ? rental.tenantId : authUser.id;
         const propertyId = rental.propertyId;
-        const roomId = rental.roomId || null;
+        const roomId =
+          typeof explicitRoomId === 'string' && explicitRoomId.trim().length > 0
+            ? explicitRoomId.trim()
+            : rental.roomId || null;
         const cleanPhotoUrl =
           photoUrl && typeof photoUrl === 'string' && photoUrl.trim().length > 0
             ? photoUrl.trim()
@@ -208,35 +212,47 @@ export function registerTicketRoutes(router: Router): void {
       const ticketId = req.params.id;
       const { status } = req.body;
 
+      const connection = await pool.getConnection();
       try {
-        const [ticketRows] = await pool.query<TicketLookupRow[]>(
-          `SELECT t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId, t.status, p.ownerId
+        await connection.beginTransaction();
+
+        const [ticketRows] = await connection.query<TicketLookupRow[]>(
+          `SELECT t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId, t.status, t.resolvedAt, p.ownerId
            FROM maintenance_tickets t
            LEFT JOIN properties p ON t.propertyId = p.id
-           WHERE t.id = ?`,
+           WHERE t.id = ? FOR UPDATE`,
           [ticketId]
         );
 
         if (ticketRows.length === 0) {
+          await connection.rollback();
           return res.status(404).json({ message: 'Tiket pemeliharaan tidak ditemukan.' });
         }
 
         const ticket = ticketRows[0];
 
         if (authUser.role === 'landlord' && ticket.ownerId !== authUser.id) {
+          await connection.rollback();
           return res.status(403).json({
             message: 'Akses ditolak. Tiket ini bukan milik properti yang Anda kelola.'
           });
         }
 
-        const resolvedAt = status === 'resolved' ? new Date() : null;
+        const resolvedAt =
+          status === 'resolved'
+            ? ticket.status === 'resolved' && ticket.resolvedAt
+              ? new Date(ticket.resolvedAt)
+              : new Date()
+            : null;
 
-        await pool.execute(
+        await connection.execute(
           `UPDATE maintenance_tickets 
            SET status = ?, resolvedAt = ?, updatedAt = CURRENT_TIMESTAMP
            WHERE id = ?`,
           [status, resolvedAt, ticketId]
         );
+
+        await connection.commit();
 
         const [updatedRows] = await pool.query<MaintenanceTicketRow[]>(
           `SELECT 
@@ -256,8 +272,11 @@ export function registerTicketRoutes(router: Router): void {
 
         return res.json(updatedRows[0]);
       } catch (err) {
+        await connection.rollback();
         console.error('Update maintenance ticket status error:', err);
         return res.status(500).json({ message: 'Gagal memperbarui status tiket pemeliharaan.' });
+      } finally {
+        connection.release();
       }
     }
   );

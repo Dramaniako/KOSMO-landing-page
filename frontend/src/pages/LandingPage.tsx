@@ -517,7 +517,7 @@ export default function LandingPage() {
               <a href="#reviews" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.testimonials')}</a>
             </div>
 
-            <ThemeLanguageToggle />
+            <ThemeLanguageToggle showCurrencyToggle={true} />
 
             {currentUser ? (
               <button

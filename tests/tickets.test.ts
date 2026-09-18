@@ -398,5 +398,126 @@ test('Tenant Maintenance Ticket System & RBAC Test Suite', async (t) => {
       assert.equal(updated.status, 'resolved');
       assert.ok(updated.resolvedAt !== null && updated.resolvedAt !== undefined);
     });
+
+    await t2.test('2.11 allows property landlord to transition ticket to "cancelled"', async () => {
+      const res = await fetch(`${baseUrl}/tickets/${createdTicketId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${landlordToken}`
+        },
+        body: JSON.stringify({ status: 'cancelled' })
+      });
+
+      assert.equal(res.status, 200);
+      const updated = (await res.json()) as MaintenanceTicket;
+      assert.equal(updated.status, 'cancelled');
+      assert.equal(updated.resolvedAt, null);
+    });
+
+    await t2.test('2.12 allows super admin to update any ticket status to "in_progress"', async () => {
+      const res = await fetch(`${baseUrl}/tickets/${createdTicketId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`
+        },
+        body: JSON.stringify({ status: 'in_progress' })
+      });
+
+      assert.equal(res.status, 200);
+      const updated = (await res.json()) as MaintenanceTicket;
+      assert.equal(updated.status, 'in_progress');
+    });
+
+    await t2.test('2.13 returns 404 for status update on non-existent ticket', async () => {
+      const res = await fetch(`${baseUrl}/tickets/ticket-does-not-exist/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${landlordToken}`
+        },
+        body: JSON.stringify({ status: 'in_progress' })
+      });
+
+      assert.equal(res.status, 404);
+    });
+
+    await t2.test('2.14 accepts root-relative /uploads/... photo path and explicit roomId', async () => {
+      const res = await fetch(`${baseUrl}/tickets`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tenantToken}`
+        },
+        body: JSON.stringify({
+          rentalId: activeRentalId,
+          roomId: roomId,
+          category: 'plumbing',
+          title: 'Wastafel mampet',
+          description: 'Saluran pembuangan air di wastafel kamar mandi tersumbat.',
+          photoUrl: '/uploads/maintenance-plumbing-issue.jpg'
+        })
+      });
+
+      assert.equal(res.status, 201);
+      const data = (await res.json()) as MaintenanceTicket;
+      assert.equal(data.photoUrl, '/uploads/maintenance-plumbing-issue.jpg');
+      assert.equal(data.roomId, roomId);
+      assert.equal(data.status, 'open');
+    });
+
+    await t2.test('2.15 GET /api/tickets supports ?status and ?propertyId query filters', async () => {
+      // Filter by status=open
+      const resOpen = await fetch(`${baseUrl}/tickets?status=open`, {
+        headers: { Authorization: `Bearer ${landlordToken}` }
+      });
+      assert.equal(resOpen.status, 200);
+      const openTickets = (await resOpen.json()) as MaintenanceTicket[];
+      assert.ok(openTickets.length > 0);
+      assert.ok(openTickets.every(t => t.status === 'open'));
+
+      // Filter by propertyId
+      const resProp = await fetch(`${baseUrl}/tickets?propertyId=${propId}`, {
+        headers: { Authorization: `Bearer ${landlordToken}` }
+      });
+      assert.equal(resProp.status, 200);
+      const propTickets = (await resProp.json()) as MaintenanceTicket[];
+      assert.ok(propTickets.length > 0);
+      assert.ok(propTickets.every(t => t.propertyId === propId));
+    });
+
+    await t2.test('2.16 handles concurrent status transitions gracefully under row locking', async () => {
+      const [res1, res2] = await Promise.all([
+        fetch(`${baseUrl}/tickets/${createdTicketId}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${landlordToken}`
+          },
+          body: JSON.stringify({ status: 'resolved' })
+        }),
+        fetch(`${baseUrl}/tickets/${createdTicketId}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${adminToken}`
+          },
+          body: JSON.stringify({ status: 'in_progress' })
+        })
+      ]);
+
+      assert.equal(res1.status, 200);
+      assert.equal(res2.status, 200);
+
+      // Verify the final state is one of the valid outcomes
+      const finalRes = await fetch(`${baseUrl}/tickets?propertyId=${propId}`, {
+        headers: { Authorization: `Bearer ${landlordToken}` }
+      });
+      const tickets = (await finalRes.json()) as MaintenanceTicket[];
+      const target = tickets.find(t => t.id === createdTicketId);
+      assert.ok(target);
+      assert.ok(target.status === 'resolved' || target.status === 'in_progress');
+    });
   });
 });

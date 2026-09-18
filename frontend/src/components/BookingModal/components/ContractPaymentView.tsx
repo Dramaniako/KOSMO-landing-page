@@ -2,7 +2,7 @@ import React from 'react';
 import { CreditCard, ShieldCheck, Hash, FileText, AlertCircle } from 'lucide-react';
 import { Property, User, SignedContractData } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
-import { formatRupiah } from '../../../utils/format';
+import { formatRupiah, formatUSD } from '../../../utils/format';
 
 export interface ContractPaymentViewProps {
   property: Property;
@@ -138,9 +138,14 @@ export default function ContractPaymentView({
           }}
         >
           <span>{t('modal.totalPay')}</span>
-          <span style={{ color: 'var(--primary)' }}>
-            {formatRupiah(signedContractData?.totalAmount || calculatedTotalAmount)}
-          </span>
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ color: 'var(--primary)' }}>
+              {formatRupiah(signedContractData?.totalAmount || calculatedTotalAmount)}
+            </span>
+            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginLeft: '6px' }} className="property-usd-approx">
+              (~{formatUSD(signedContractData?.totalAmount || calculatedTotalAmount)} USD)
+            </span>
+          </div>
         </div>
       </div>
 

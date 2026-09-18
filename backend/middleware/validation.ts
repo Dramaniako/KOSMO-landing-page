@@ -247,12 +247,23 @@ export const reorderPhotosSchema = z.object({
 
 export const createTicketSchema = z.object({
   rentalId: z.string().trim().min(1, 'rentalId wajib diisi'),
+  roomId: z.string().trim().optional().nullable(),
   category: z.enum(['ac', 'plumbing', 'wifi', 'electricity', 'cleaning', 'other'], {
     message: 'Kategori tiket tidak valid'
   }),
   title: z.string().trim().min(3, 'Judul minimal 3 karakter').max(150, 'Judul maksimal 150 karakter'),
   description: z.string().trim().min(5, 'Deskripsi minimal 5 karakter'),
-  photoUrl: z.string().url('Format URL foto tidak valid').optional().nullable().or(z.literal(''))
+  photoUrl: z
+    .string()
+    .trim()
+    .max(500, 'URL foto maksimal 500 karakter')
+    .refine(
+      (val) => !val || val.startsWith('/') || /^https?:\/\//i.test(val),
+      'Format URL atau path foto tidak valid'
+    )
+    .optional()
+    .nullable()
+    .or(z.literal(''))
 });
 
 export const updateTicketStatusSchema = z.object({

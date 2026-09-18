@@ -1224,12 +1224,16 @@ var reorderPhotosSchema = z.object({
 });
 var createTicketSchema = z.object({
   rentalId: z.string().trim().min(1, "rentalId wajib diisi"),
+  roomId: z.string().trim().optional().nullable(),
   category: z.enum(["ac", "plumbing", "wifi", "electricity", "cleaning", "other"], {
     message: "Kategori tiket tidak valid"
   }),
   title: z.string().trim().min(3, "Judul minimal 3 karakter").max(150, "Judul maksimal 150 karakter"),
   description: z.string().trim().min(5, "Deskripsi minimal 5 karakter"),
-  photoUrl: z.string().url("Format URL foto tidak valid").optional().nullable().or(z.literal(""))
+  photoUrl: z.string().trim().max(500, "URL foto maksimal 500 karakter").refine(
+    (val) => !val || val.startsWith("/") || /^https?:\/\//i.test(val),
+    "Format URL atau path foto tidak valid"
+  ).optional().nullable().or(z.literal(""))
 });
 var updateTicketStatusSchema = z.object({
   status: z.enum(["open", "in_progress", "resolved", "cancelled"], {
@@ -5418,7 +5422,7 @@ function registerTicketRoutes(router2) {
           message: "Hanya penyewa yang dapat mengajukan tiket pemeliharaan."
         });
       }
-      const { rentalId, category, title, description, photoUrl } = req.body;
+      const { rentalId, roomId: explicitRoomId, category, title, description, photoUrl } = req.body;
       try {
         const [rentalRows] = await pool.query(
           `SELECT r.id, r.tenantId, r.propertyId, r.roomId, r.status, p.ownerId
@@ -5444,7 +5448,7 @@ function registerTicketRoutes(router2) {
         const ticketId = generateId("ticket");
         const tenantId = authUser.role === "admin" ? rental.tenantId : authUser.id;
         const propertyId = rental.propertyId;
-        const roomId = rental.roomId || null;
+        const roomId = typeof explicitRoomId === "string" && explicitRoomId.trim().length > 0 ? explicitRoomId.trim() : rental.roomId || null;
         const cleanPhotoUrl = photoUrl && typeof photoUrl === "string" && photoUrl.trim().length > 0 ? photoUrl.trim() : null;
         await pool.execute(
           `INSERT INTO maintenance_tickets 
@@ -5541,30 +5545,35 @@ function registerTicketRoutes(router2) {
       }
       const ticketId = req.params.id;
       const { status } = req.body;
+      const connection = await pool.getConnection();
       try {
-        const [ticketRows] = await pool.query(
-          `SELECT t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId, t.status, p.ownerId
+        await connection.beginTransaction();
+        const [ticketRows] = await connection.query(
+          `SELECT t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId, t.status, t.resolvedAt, p.ownerId
            FROM maintenance_tickets t
            LEFT JOIN properties p ON t.propertyId = p.id
-           WHERE t.id = ?`,
+           WHERE t.id = ? FOR UPDATE`,
           [ticketId]
         );
         if (ticketRows.length === 0) {
+          await connection.rollback();
           return res.status(404).json({ message: "Tiket pemeliharaan tidak ditemukan." });
         }
         const ticket = ticketRows[0];
         if (authUser.role === "landlord" && ticket.ownerId !== authUser.id) {
+          await connection.rollback();
           return res.status(403).json({
             message: "Akses ditolak. Tiket ini bukan milik properti yang Anda kelola."
           });
         }
-        const resolvedAt = status === "resolved" ? /* @__PURE__ */ new Date() : null;
-        await pool.execute(
+        const resolvedAt = status === "resolved" ? ticket.status === "resolved" && ticket.resolvedAt ? new Date(ticket.resolvedAt) : /* @__PURE__ */ new Date() : null;
+        await connection.execute(
           `UPDATE maintenance_tickets 
            SET status = ?, resolvedAt = ?, updatedAt = CURRENT_TIMESTAMP
            WHERE id = ?`,
           [status, resolvedAt, ticketId]
         );
+        await connection.commit();
         const [updatedRows] = await pool.query(
           `SELECT 
             t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId,
@@ -5582,8 +5591,11 @@ function registerTicketRoutes(router2) {
         );
         return res.json(updatedRows[0]);
       } catch (err) {
+        await connection.rollback();
         console.error("Update maintenance ticket status error:", err);
         return res.status(500).json({ message: "Gagal memperbarui status tiket pemeliharaan." });
+      } finally {
+        connection.release();
       }
     }
   );
