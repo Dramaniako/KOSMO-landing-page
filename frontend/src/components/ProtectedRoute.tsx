@@ -22,16 +22,26 @@ export default function ProtectedRoute({
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  let user: User | null = null;
-  try {
-    user = JSON.parse(rawUser) as User;
-  } catch {
+  const clearAuthStorage = () => {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
+    localStorage.removeItem('kosmo_token');
+  };
+
+  let user: User | null = null;
+  try {
+    const parsed = JSON.parse(rawUser);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      user = parsed as User;
+    }
+  } catch {
+    clearAuthStorage();
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (!user || !user.role) {
+  const validRoles: UserRole[] = ['admin', 'landlord', 'tenant'];
+  if (!user || !user.role || !validRoles.includes(user.role)) {
+    clearAuthStorage();
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
@@ -41,13 +51,11 @@ export default function ProtectedRoute({
     }
 
     // Smart role-based fallback navigation to prevent unauthorized layout mount
-    if (user.role === 'admin') {
-      return <Navigate to="/admin" replace />;
-    } else if (user.role === 'landlord') {
-      return <Navigate to="/landlord" replace />;
-    } else {
-      return <Navigate to="/tenant" replace />;
+    const fallbackTarget = user.role === 'admin' ? '/admin' : user.role === 'landlord' ? '/landlord' : '/tenant';
+    if (location.pathname === fallbackTarget) {
+      return <Navigate to="/" replace />;
     }
+    return <Navigate to={fallbackTarget} replace />;
   }
 
   return <>{children}</>;

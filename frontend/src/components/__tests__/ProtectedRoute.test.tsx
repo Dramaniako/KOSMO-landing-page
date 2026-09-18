@@ -96,4 +96,72 @@ describe('ProtectedRoute Guard Component', () => {
     expect(screen.getByTestId('login-page')).toBeInTheDocument();
     expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
   });
+
+  it('supports kosmo_token when token is not present', () => {
+    localStorage.setItem('kosmo_token', 'valid-kosmo-token');
+    localStorage.setItem('user', JSON.stringify({ id: 'u1', role: 'tenant', name: 'Tenant User' }));
+
+    renderWithRouter('/protected', ['tenant']);
+
+    expect(screen.getByTestId('protected-content')).toBeInTheDocument();
+  });
+
+  it('clears all storage including kosmo_token on malformed user', () => {
+    localStorage.setItem('kosmo_token', 'valid-kosmo-token');
+    localStorage.setItem('token', 'valid-token');
+    localStorage.setItem('user', 'not-a-valid-json-string');
+
+    renderWithRouter();
+
+    expect(screen.getByTestId('login-page')).toBeInTheDocument();
+    expect(localStorage.getItem('token')).toBeNull();
+    expect(localStorage.getItem('kosmo_token')).toBeNull();
+    expect(localStorage.getItem('user')).toBeNull();
+  });
+
+  it('clears storage and redirects to /login if user JSON is a primitive or array', () => {
+    localStorage.setItem('token', 'valid-token');
+    localStorage.setItem('user', '12345');
+
+    renderWithRouter();
+
+    expect(screen.getByTestId('login-page')).toBeInTheDocument();
+    expect(localStorage.getItem('user')).toBeNull();
+  });
+
+  it('clears storage and redirects to /login if user role is unrecognized/corrupted', () => {
+    localStorage.setItem('token', 'valid-token');
+    localStorage.setItem('user', JSON.stringify({ id: 'u1', role: 'super-hacker', name: 'Bad Role' }));
+
+    renderWithRouter('/protected', ['admin']);
+
+    expect(screen.getByTestId('login-page')).toBeInTheDocument();
+    expect(localStorage.getItem('user')).toBeNull();
+    expect(localStorage.getItem('token')).toBeNull();
+  });
+
+  it('redirects to root / if current path matches fallback target to prevent infinite redirect loops', () => {
+    localStorage.setItem('token', 'valid-jwt-token');
+    localStorage.setItem('user', JSON.stringify({ id: 'u1', role: 'tenant', name: 'Tenant User' }));
+
+    // Simulating accessing /tenant when allowedRoles requires 'admin'
+    render(
+      <MemoryRouter initialEntries={['/tenant']}>
+        <Routes>
+          <Route path="/" element={<div data-testid="home-page">Landing Page</div>} />
+          <Route
+            path="/tenant"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <div data-testid="admin-only-content">Admin Only</div>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId('home-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('admin-only-content')).not.toBeInTheDocument();
+  });
 });

@@ -244,9 +244,11 @@ export async function seedDatabase(): Promise<void> {
     `);
 
     // Ensure core test users exist
-    const adminHash = bcrypt.hashSync('admin', 10);
-    const landlordHash = bcrypt.hashSync('landlord', 10);
-    const tenantHash = bcrypt.hashSync('tenant', 10);
+    const [adminHash, landlordHash, tenantHash] = await Promise.all([
+      bcrypt.hash('admin', 10),
+      bcrypt.hash('landlord', 10),
+      bcrypt.hash('tenant', 10)
+    ]);
 
     await connection.query(`
       INSERT INTO users (id, email, password, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder)

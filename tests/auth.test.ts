@@ -41,6 +41,14 @@ test('Authentication logic, password security gates & JWT', async (t) => {
     assert.equal(isWrong, false);
   });
 
+  await t.test('bcrypt asynchronously rejects mismatched and empty passwords', async () => {
+    const asyncHash = await bcrypt.hash(plainPassword, 10);
+    const isWrong = await bcrypt.compare('WrongPassword456!', asyncHash);
+    assert.equal(isWrong, false);
+    const isEmpty = await bcrypt.compare('', asyncHash);
+    assert.equal(isEmpty, false);
+  });
+
   await t.test('bcrypt correctly validates matching password', () => {
     const isValid = bcrypt.compareSync(plainPassword, hashedPassword);
     assert.equal(isValid, true);

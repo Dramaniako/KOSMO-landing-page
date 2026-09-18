@@ -27,10 +27,14 @@ export default function TrackingTab({
   const handleDownloadExcel = async () => {
     try {
       setDownloading(true);
+      const token = authToken || localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
+      if (!token) {
+        throw new Error('Token otentikasi tidak ditemukan.');
+      }
       const res = await fetch(`${API_BASE}/reports/tracking/excel`, {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${authToken}`
+          Authorization: `Bearer ${token}`
         }
       });
 

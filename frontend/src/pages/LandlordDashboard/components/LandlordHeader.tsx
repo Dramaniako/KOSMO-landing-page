@@ -22,6 +22,9 @@ export default function LandlordHeader({
     try {
       setDownloading(true);
       const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
+      if (!token) {
+        throw new Error('Token otentikasi tidak ditemukan.');
+      }
       const landlordId = landlordUser?.id || '';
       const url = `${API_BASE}/reports/landlord/excel?landlordId=${encodeURIComponent(landlordId)}`;
 
