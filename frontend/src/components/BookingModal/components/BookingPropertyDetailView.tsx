@@ -100,6 +100,42 @@ export default function BookingPropertyDetailView({
 
       {/* Modal Body Container */}
       <div className="p-5 sm:p-6 flex flex-col gap-5">
+        {/* Booking Journey Stepper (Step 1 of 3) */}
+        <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-750">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shadow-xs">
+              1
+            </span>
+            <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+              {t('modal.stepDetail')}
+            </span>
+          </div>
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 font-medium">
+            <span>&rarr;</span>
+            <span>{t('modal.stepContract')}</span>
+            <span>&rarr;</span>
+            <span>{t('modal.stepPayment')}</span>
+          </div>
+          <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-0.5 rounded-md border border-blue-200/60 dark:border-blue-800">
+            Langkah 1 / 3
+          </span>
+        </div>
+
+        {/* Selected Room Confirmation Banner (if room chosen) */}
+        {selectedRoom && (
+          <div className="p-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-blue-600 dark:text-blue-400 shrink-0" />
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                {t('prop.selectedRoomBanner', { room: selectedRoom.roomNumber })} &bull; Lt {selectedRoom.floor} ({selectedRoom.type || 'Standard'})
+              </span>
+            </div>
+            <span className="text-xs font-extrabold text-blue-600 dark:text-blue-400 shrink-0">
+              {formatRupiah(displayPrice)}/bln
+            </span>
+          </div>
+        )}
+
         {/* Header Title & Pricing Row */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex-1 min-w-0">
@@ -317,41 +353,56 @@ export default function BookingPropertyDetailView({
           </div>
         )}
 
-        {/* Action Buttons Footer */}
-        <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md pt-3 pb-1 border-t border-slate-100 dark:border-slate-800 flex items-center gap-3 z-10">
-          <button
-            type="button"
-            className="btn btn-secondary flex-1 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-200 dark:hover:bg-slate-800 transition"
-            onClick={onClose}
-          >
-            {t('modal.close')}
-          </button>
-          {currentUser ? (
+        {/* Action Buttons Footer with Mobile-Optimized Sticky Bar */}
+        <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md pt-3 pb-2 border-t border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 z-20 shadow-lg">
+          {/* Mobile Price Summary inside sticky bar */}
+          <div className="flex sm:hidden items-center justify-between px-1">
+            <div className="flex flex-col">
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-bold tracking-wider">Total Sewa</span>
+              <span className="text-sm font-extrabold text-blue-600 dark:text-blue-400 leading-tight">
+                Total: {formatRupiah(displayPrice)}/bln
+              </span>
+            </div>
+            <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200/60 dark:border-emerald-800">
+              All-Inclusive
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3 flex-1">
             <button
               type="button"
-              className="btn btn-primary flex-[2] py-2.5 rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={isBookDisabled}
-              onClick={onBookNow}
+              className="btn btn-secondary flex-1 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-200 dark:hover:bg-slate-800 transition min-h-[44px]"
+              onClick={onClose}
             >
-              {!profileStatus.complete
-                ? 'Lengkapi Profil untuk Menyewa'
-                : (hasActiveRental || activeRentalError)
-                ? t('modal.activeRentalFound')
-                : isFull
-                ? t('modal.roomFull')
-                : t('modal.bookNow')}
-              <ArrowRight size={16} />
+              {t('modal.close')}
             </button>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-primary flex-[2] py-2.5 rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition flex items-center justify-center gap-2"
-              onClick={onNavigateToLogin}
-            >
-              {t('modal.loginToBook')}
-              <ArrowRight size={16} />
-            </button>
-          )}
+            {currentUser ? (
+              <button
+                type="button"
+                className="btn btn-primary flex-[2] py-2.5 rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
+                disabled={isBookDisabled}
+                onClick={onBookNow}
+              >
+                {!profileStatus.complete
+                  ? 'Lengkapi Profil untuk Menyewa'
+                  : (hasActiveRental || activeRentalError)
+                  ? t('modal.activeRentalFound')
+                  : isFull
+                  ? t('modal.roomFull')
+                  : t('modal.bookNow')}
+                <ArrowRight size={16} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary flex-[2] py-2.5 rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 min-h-[44px]"
+                onClick={onNavigateToLogin}
+              >
+                {t('modal.loginToBook')}
+                <ArrowRight size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

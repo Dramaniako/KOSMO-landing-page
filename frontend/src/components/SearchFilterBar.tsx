@@ -57,9 +57,44 @@ const SearchFilterBar = memo(function SearchFilterBar({
     setPriceMax(digits ? parseInt(digits, 10) : 0);
   };
 
+  const activeFacilityCount = Object.values(facilities).filter(Boolean).length;
+  const isDistrictActive = Boolean(district && district !== 'Semua');
+  const isPriceActive = priceMin > 0 || (priceMax > 0 && priceMax < 10000000);
+  const totalActiveFilters = (isDistrictActive ? 1 : 0) + (isPriceActive ? 1 : 0) + activeFacilityCount;
+
+  const handlePricePreset = (min: number, max: number) => {
+    setPriceMin(min);
+    setPriceMax(max);
+  };
+
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-200/80 dark:border-slate-800 -mt-8 relative z-10 max-w-5xl mx-auto filter-wrapper transition-all duration-200">
       <form onSubmit={handleSearch}>
+        {/* Top Active Filter Pill Bar (if any filters active) */}
+        {totalActiveFilters > 0 && (
+          <div className="flex items-center justify-between mb-3.5 pb-2.5 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/70 dark:border-blue-800">
+                <SlidersHorizontal size={12} />
+                <span>{t('filter.activeCount', { count: totalActiveFilters })}</span>
+              </span>
+              {isDistrictActive && (
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                  {district}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors flex items-center gap-1"
+            >
+              <RotateCcw size={12} />
+              <span>{t('filter.clearAll')}</span>
+            </button>
+          </div>
+        )}
+
         {/* Top Row: Responsive 12-Column Grid */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-end">
           {/* District Selector (md:col-span-3) */}
@@ -156,12 +191,63 @@ const SearchFilterBar = memo(function SearchFilterBar({
           </div>
         </div>
 
+        {/* Quick Price Preset Chips */}
+        <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2.5 border-t border-slate-100/80 dark:border-slate-800/80">
+          <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mr-1">
+            {t('filter.pricePresets')}:
+          </span>
+          <button
+            type="button"
+            onClick={() => handlePricePreset(0, 3000000)}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              priceMin === 0 && priceMax === 3000000
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            {t('filter.presetUnder3')}
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePricePreset(3000000, 5000000)}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              priceMin === 3000000 && priceMax === 5000000
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            {t('filter.preset3to5')}
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePricePreset(5000000, 10000000)}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              priceMin === 5000000 && priceMax === 10000000
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            {t('filter.presetAbove5')}
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePricePreset(0, 10000000)}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              priceMin === 0 && priceMax === 10000000
+                ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
+                : 'bg-slate-50 dark:bg-slate-850 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            {t('filter.presetAll')}
+          </button>
+        </div>
+
         {/* Bottom Row: Amenities Toggle Pills */}
-        <div className="flex flex-wrap items-center gap-2 pt-3.5 border-t border-slate-100 dark:border-slate-800 mt-3.5">
+        <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800 mt-2.5">
           <div className="flex items-center gap-1.5 mr-1 text-slate-400 dark:text-slate-500 select-none">
             <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              {t('filter.facilities')}:
+              {t('filter.facilities')}{activeFacilityCount > 0 ? ` (${activeFacilityCount})` : ''}:
             </span>
           </div>
           {Object.keys(facilities).map((fac) => {

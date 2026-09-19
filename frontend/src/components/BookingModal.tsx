@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, ChevronLeft } from 'lucide-react';
 import { Property, User, ContractSignPayload, SignedContractData, isUserProfileComplete, PropertyPhoto, Room } from '../types/index';
 import { useTranslation } from '../context/LanguageContext';
 import { useIdentityValidation } from './BookingModal/hooks/useIdentityValidation';
@@ -346,6 +346,100 @@ export default function BookingModal({
         >
           <X size={18} />
         </button>
+
+        {/* Stepper Progress Bar & Breadcrumb (when in Contract or Payment phase) */}
+        {(showContract || showPayment) && (
+          <div className="bg-slate-50/90 dark:bg-slate-850/90 border-b border-slate-200/80 dark:border-slate-800 px-5 sm:px-6 py-3.5 pt-4">
+            <div className="flex items-center justify-between mb-3 pr-10">
+              <button
+                type="button"
+                onClick={() => {
+                  if (showPayment) {
+                    setShowPayment(false);
+                    setShowContract(true);
+                  } else {
+                    setShowContract(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors cursor-pointer"
+              >
+                <ChevronLeft size={16} />
+                <span>{t('modal.stepBack')}</span>
+              </button>
+              <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                {showPayment ? 'Langkah 3 dari 3' : 'Langkah 2 dari 3'}
+              </span>
+            </div>
+
+            {/* Stepper Dots & Labels */}
+            <div className="flex items-center justify-between gap-1 sm:gap-2 max-w-md mx-auto">
+              {/* Step 1: Detail & Kamar */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowContract(false);
+                  setShowPayment(false);
+                }}
+                className="flex items-center gap-1.5 group cursor-pointer"
+              >
+                <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[11px] sm:text-xs font-bold shadow-xs">
+                  ✓
+                </span>
+                <span className="text-[11px] sm:text-xs font-bold text-slate-700 dark:text-slate-300 group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                  {t('modal.stepDetail')}
+                </span>
+              </button>
+
+              <div className="flex-1 h-0.5 bg-slate-300 dark:bg-slate-700 mx-1 sm:mx-2" />
+
+              {/* Step 2: Kontrak Digital */}
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-[11px] sm:text-xs font-bold shadow-xs ${
+                    showPayment
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-blue-600 text-white ring-4 ring-blue-500/20'
+                  }`}
+                >
+                  {showPayment ? '✓' : '2'}
+                </span>
+                <span
+                  className={`text-[11px] sm:text-xs font-bold ${
+                    showPayment
+                      ? 'text-slate-700 dark:text-slate-300'
+                      : 'text-blue-600 dark:text-blue-400'
+                  }`}
+                >
+                  {t('modal.stepContract')}
+                </span>
+              </div>
+
+              <div className="flex-1 h-0.5 bg-slate-300 dark:bg-slate-700 mx-1 sm:mx-2" />
+
+              {/* Step 3: Pembayaran */}
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-[11px] sm:text-xs font-bold shadow-xs ${
+                    showPayment
+                      ? 'bg-blue-600 text-white ring-4 ring-blue-500/20'
+                      : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                  }`}
+                >
+                  3
+                </span>
+                <span
+                  className={`text-[11px] sm:text-xs font-bold ${
+                    showPayment
+                      ? 'text-blue-600 dark:text-blue-400'
+                      : 'text-slate-400 dark:text-slate-500'
+                  }`}
+                >
+                  {t('modal.stepPayment')}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showContract ? (
           <ContractSigningView

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Wifi, Tv, Wind, Shield, Droplet, Check, ShieldCheck, Heart,
-  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal
+  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal, RotateCcw
 } from 'lucide-react';
 import { Property, Review, User, FacilityFilterState, ContractSignPayload, SignedContractData } from '../types/index';
 import KosCard from '../components/KosCard';
@@ -593,14 +593,36 @@ export default function LandingPage() {
             ))}
           </div>
         ) : properties.length === 0 ? (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-12 text-center shadow-sm">
-            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-2">Tidak Ada Properti Ditemukan</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6">
-              Coba sesuaikan filter wilayah atau turunkan fasilitas pencarian Anda.
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-10 sm:p-14 text-center shadow-sm max-w-2xl mx-auto my-6">
+            <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-4 border border-blue-100 dark:border-blue-900/50 shadow-xs">
+              <Search size={28} />
+            </div>
+            <h3 className="text-xl font-extrabold text-slate-900 dark:text-slate-100 mb-2">
+              {t('filter.emptyTitle')}
+            </h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6 leading-relaxed">
+              {t('filter.emptyDesc')}
             </p>
-            <button className="btn btn-primary bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl min-h-[44px]" onClick={resetFilters}>
-              {t('filter.resetBtn')}
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                className="btn btn-primary bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold px-5 py-2.5 rounded-xl min-h-[44px] shadow-sm hover:shadow flex items-center gap-2"
+                onClick={resetFilters}
+              >
+                <RotateCcw size={14} />
+                <span>{t('filter.resetBtn')}</span>
+              </button>
+              {district !== 'Semua' && (
+                <button
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 min-h-[44px] transition"
+                  onClick={() => {
+                    setDistrict('Semua');
+                    fetchProperties('');
+                  }}
+                >
+                  Coba: Semua Wilayah
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 property-grid">
