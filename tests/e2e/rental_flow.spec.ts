@@ -468,7 +468,7 @@ test.describe('End-to-End Real Rental & Tenancy Flow', () => {
     await rentalsTab.click();
 
     // 5. Verify pending rental is listed with "Menunggu Pembayaran" badge
-    await expect(page.locator('body')).toContainText('KOSMO Seminyak Tropical Villa Living');
+    await expect(page.locator('body')).toContainText('Kawaii Home Jimbaran');
     await expect(page.locator('body')).toContainText('Menunggu Pembayaran');
 
     // 6. Click 'Bayar Sekarang' to open pending payment modal
