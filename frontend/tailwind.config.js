@@ -13,6 +13,10 @@ export default {
           hover: '#1d4ed8',
           light: '#eff6ff',
         },
+        slate: {
+          750: '#243044',
+          850: '#162032',
+        },
       },
     },
   },

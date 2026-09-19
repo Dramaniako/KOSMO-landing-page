@@ -367,7 +367,7 @@ export default function BookingModal({
                 <span>{t('modal.stepBack')}</span>
               </button>
               <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
-                {showPayment ? 'Langkah 3 dari 3' : 'Langkah 2 dari 3'}
+                {t('modal.stepProgress', { current: showPayment ? 3 : 2, total: 3 })}
               </span>
             </div>
 

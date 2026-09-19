@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import { MapPin, Star, Sparkles } from 'lucide-react';
 import { Property } from '../types/index';
 import { formatRupiah, formatUSD } from '../utils/format';
+import { useTranslation } from '../context/LanguageContext';
 
 export interface Props {
   property: Property;
@@ -15,6 +16,7 @@ export interface Props {
 // Impact: Saves up to ~50-100ms of render time by skipping reconciliation of all cards
 // when unrelated state changes.
 const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIcon }: Props) {
+  const { t } = useTranslation();
   const price = Number(property.price) || 0;
   const rating = Number(property.rating) || 0;
   const totalRooms = Number(property.totalRooms) || 0;
@@ -65,13 +67,13 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
           }`}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${isFull ? 'bg-rose-200' : 'bg-emerald-200'} animate-pulse`} />
-          <span>{isFull ? 'Penuh' : `Sisa ${availableRooms} Kamar`}</span>
+          <span>{isFull ? t('prop.fullTag') : t('prop.remaining', { count: availableRooms })}</span>
         </div>
 
         {/* Floating Rating Chip (Top-Right) */}
         <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold backdrop-blur-md bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-100 shadow-sm property-badge border border-slate-100 dark:border-slate-800">
           <Star size={13} className="text-amber-500 fill-amber-500" />
-          <span>{rating > 0 ? rating.toFixed(1) : 'Baru'}</span>
+          <span>{rating > 0 ? rating.toFixed(1) : t('prop.newTag')}</span>
         </div>
 
         {/* Bottom subtle gradient on image */}
@@ -93,12 +95,12 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
           {/* Mamikos-Inspired Kost Metadata: Gender tag, Room Specs */}
           <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-2 font-medium flex-wrap">
             <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold border border-blue-100 dark:border-blue-900/50">
-              Campur
+              {t('prop.genderTag')}
             </span>
             <span className="text-slate-300 dark:text-slate-600">•</span>
-            <span>3x4 m²</span>
+            <span>{t('prop.dimensions')}</span>
             <span className="text-slate-300 dark:text-slate-600">•</span>
-            <span>Kamar Mandi Dalam</span>
+            <span>{t('prop.ensuite')}</span>
           </div>
 
           {/* Facility Pills */}
@@ -127,7 +129,7 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
               <span className="text-blue-600 dark:text-blue-400 font-extrabold text-base sm:text-lg property-price">
                 {formatRupiah(price)}
               </span>
-              <span className="text-slate-400 text-xs font-normal property-period">/bulan</span>
+              <span className="text-slate-400 text-xs font-normal property-period">{t('prop.perMonth')}</span>
               <span className="text-slate-400 dark:text-slate-500 text-xs font-normal property-usd-approx">
                 (~{formatUSD(price)} USD)
               </span>
@@ -135,10 +137,10 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
             <div className="flex items-center gap-2 text-[11px] font-semibold mt-0.5 flex-wrap">
               <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                 <Sparkles size={11} />
-                <span>All-Inclusive</span>
+                <span>{t('prop.allInclusive')}</span>
               </div>
               <span className="text-slate-300 dark:text-slate-600">•</span>
-              <span className="text-blue-600 dark:text-blue-400">Bebas Deposit</span>
+              <span className="text-blue-600 dark:text-blue-400">{t('prop.noDeposit')}</span>
             </div>
           </div>
 
@@ -149,7 +151,7 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
               onOpenDetail(property);
             }}
           >
-            Detail
+            {t('prop.detail')}
           </button>
         </div>
       </div>

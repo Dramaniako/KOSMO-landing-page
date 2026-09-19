@@ -63,8 +63,13 @@ const SearchFilterBar = memo(function SearchFilterBar({
   const totalActiveFilters = (isDistrictActive ? 1 : 0) + (isPriceActive ? 1 : 0) + activeFacilityCount;
 
   const handlePricePreset = (min: number, max: number) => {
-    setPriceMin(min);
-    setPriceMax(max);
+    if (priceMin === min && priceMax === max) {
+      setPriceMin(0);
+      setPriceMax(10000000);
+    } else {
+      setPriceMin(min);
+      setPriceMax(max);
+    }
   };
 
   return (

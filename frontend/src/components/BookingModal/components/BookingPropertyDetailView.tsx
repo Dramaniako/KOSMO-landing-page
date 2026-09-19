@@ -117,7 +117,7 @@ export default function BookingPropertyDetailView({
             <span>{t('modal.stepPayment')}</span>
           </div>
           <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-0.5 rounded-md border border-blue-200/60 dark:border-blue-800">
-            Langkah 1 / 3
+            {t('modal.stepProgressSlash', { current: 1, total: 3 })}
           </span>
         </div>
 
@@ -157,7 +157,7 @@ export default function BookingPropertyDetailView({
               <span className="text-slate-400 dark:text-slate-500 property-usd-approx">
                 (~{formatUSD(displayPrice)} USD)
               </span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">• Bebas Biaya Utilitas</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">• {t('modal.noUtilityFee')}</span>
             </div>
           </div>
         </div>
@@ -358,13 +358,13 @@ export default function BookingPropertyDetailView({
           {/* Mobile Price Summary inside sticky bar */}
           <div className="flex sm:hidden items-center justify-between px-1">
             <div className="flex flex-col">
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-bold tracking-wider">Total Sewa</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-bold tracking-wider">{t('modal.totalRent')}</span>
               <span className="text-sm font-extrabold text-blue-600 dark:text-blue-400 leading-tight">
-                Total: {formatRupiah(displayPrice)}/bln
+                Total: {formatRupiah(displayPrice)}/bln (~{formatUSD(displayPrice)} USD)
               </span>
             </div>
             <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200/60 dark:border-emerald-800">
-              All-Inclusive
+              {t('prop.allInclusive')}
             </span>
           </div>
 

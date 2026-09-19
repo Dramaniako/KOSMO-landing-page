@@ -161,11 +161,11 @@ export default function LandingPage() {
     }));
   }, []);
 
-  const handleSearch = useCallback((e: React.FormEvent): void => {
-    e.preventDefault();
+  const executeSearch = useCallback((targetDistrict?: string): void => {
+    const activeDistrict = targetDistrict !== undefined ? targetDistrict : district;
     const params = new URLSearchParams();
-    if (district && district !== 'Semua') {
-      params.append('district', district);
+    if (activeDistrict && activeDistrict !== 'Semua') {
+      params.append('district', activeDistrict);
     }
     let effectiveMin = priceMin;
     let effectiveMax = priceMax;
@@ -191,6 +191,16 @@ export default function LandingPage() {
     const queryString = params.toString() ? `?${params.toString()}` : '';
     fetchProperties(queryString);
   }, [district, priceMin, priceMax, facilities, fetchProperties]);
+
+  const handleSearch = useCallback((e: React.FormEvent): void => {
+    e.preventDefault();
+    executeSearch();
+  }, [executeSearch]);
+
+  const handleTryAllDistricts = useCallback((): void => {
+    setDistrict('Semua');
+    executeSearch('Semua');
+  }, [executeSearch]);
 
   const resetFilters = useCallback((): void => {
     setDistrict('Semua');
@@ -613,13 +623,11 @@ export default function LandingPage() {
               </button>
               {district !== 'Semua' && (
                 <button
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 min-h-[44px] transition"
-                  onClick={() => {
-                    setDistrict('Semua');
-                    fetchProperties('');
-                  }}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 min-h-[44px] transition flex items-center gap-1.5"
+                  onClick={handleTryAllDistricts}
                 >
-                  Coba: Semua Wilayah
+                  <MapPin size={14} className="text-blue-500" />
+                  <span>{t('filter.tryAllDistricts')}</span>
                 </button>
               )}
             </div>
