@@ -3,11 +3,13 @@ import { MapPin, Star, Sparkles } from 'lucide-react';
 import { Property } from '../types/index';
 import { formatRupiah, formatUSD } from '../utils/format';
 import { useTranslation } from '../context/LanguageContext';
+import { useCurrency, CurrencyPreference } from '../context/CurrencyContext';
 
 export interface Props {
   property: Property;
   onOpenDetail: (property: Property) => void;
   renderFacilityIcon: (facility: string) => React.ReactNode;
+  currencyPreference?: CurrencyPreference;
 }
 
 // ⚡ Bolt Performance Optimization:
@@ -15,8 +17,10 @@ export interface Props {
 // Why: Parent components (like LandingPage) re-render frequently during typing in search filters.
 // Impact: Saves up to ~50-100ms of render time by skipping reconciliation of all cards
 // when unrelated state changes.
-const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIcon }: Props) {
+const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIcon, currencyPreference }: Props) {
   const { t } = useTranslation();
+  const { currency: contextCurrency } = useCurrency();
+  const activeCurrency = currencyPreference || contextCurrency;
   const price = Number(property.price) || 0;
   const rating = Number(property.rating) || 0;
   const totalRooms = Number(property.totalRooms) || 0;
@@ -126,13 +130,31 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
         <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800 property-footer">
           <div>
             <div className="flex items-baseline gap-1 flex-wrap">
-              <span className="text-blue-600 dark:text-blue-400 font-extrabold text-base sm:text-lg property-price">
-                {formatRupiah(price)}
-              </span>
-              <span className="text-slate-400 text-xs font-normal property-period">{t('prop.perMonth')}</span>
-              <span className="text-slate-400 dark:text-slate-500 text-xs font-normal property-usd-approx">
-                (~{formatUSD(price)} USD)
-              </span>
+              {activeCurrency === 'usd' ? (
+                <>
+                  <span className="text-blue-600 dark:text-blue-400 font-extrabold text-base sm:text-lg property-price">
+                    {formatUSD(price)}
+                  </span>
+                  <span className="text-slate-400 text-xs font-normal property-period">{t('prop.perMonth')}</span>
+                </>
+              ) : activeCurrency === 'idr' ? (
+                <>
+                  <span className="text-blue-600 dark:text-blue-400 font-extrabold text-base sm:text-lg property-price">
+                    {formatRupiah(price)}
+                  </span>
+                  <span className="text-slate-400 text-xs font-normal property-period">{t('prop.perMonth')}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-blue-600 dark:text-blue-400 font-extrabold text-base sm:text-lg property-price">
+                    {formatRupiah(price)}
+                  </span>
+                  <span className="text-slate-400 text-xs font-normal property-period">{t('prop.perMonth')}</span>
+                  <span className="text-slate-400 dark:text-slate-500 text-xs font-normal property-usd-approx">
+                    (~{formatUSD(price)} USD)
+                  </span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-2 text-[11px] font-semibold mt-0.5 flex-wrap">
               <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">

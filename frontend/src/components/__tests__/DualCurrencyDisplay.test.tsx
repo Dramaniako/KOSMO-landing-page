@@ -6,12 +6,15 @@ import ThemeLanguageToggle, { CurrencyToggle } from '../ThemeLanguageToggle';
 import { Property } from '../../types/index';
 import { ThemeProvider } from '../../context/ThemeContext';
 import { LanguageProvider } from '../../context/LanguageContext';
+import { CurrencyProvider } from '../../context/CurrencyContext';
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(
     <ThemeProvider>
       <LanguageProvider>
-        {ui}
+        <CurrencyProvider>
+          {ui}
+        </CurrencyProvider>
       </LanguageProvider>
     </ThemeProvider>
   );
@@ -85,5 +88,77 @@ describe('Dual-Currency Display & CurrencyToggle Components', () => {
     // Language, Theme, + Currency = 3 buttons
     expect(buttons.length).toBe(3);
     expect(screen.getByRole('button', { name: /ubah preferensi mata uang/i })).toBeInTheDocument();
+  });
+
+  it('KosCard renders only IDR price when currencyPreference is idr', () => {
+    const handleOpenDetail = vi.fn();
+    render(
+      <KosCard
+        property={mockProperty}
+        onOpenDetail={handleOpenDetail}
+        renderFacilityIcon={mockRenderIcon}
+        currencyPreference="idr"
+      />
+    );
+
+    expect(screen.getByText(/3\.200\.000/)).toBeInTheDocument();
+    expect(screen.queryByText(/USD/)).not.toBeInTheDocument();
+  });
+
+  it('KosCard renders only USD price when currencyPreference is usd', () => {
+    const handleOpenDetail = vi.fn();
+    render(
+      <KosCard
+        property={mockProperty}
+        onOpenDetail={handleOpenDetail}
+        renderFacilityIcon={mockRenderIcon}
+        currencyPreference="usd"
+      />
+    );
+
+    expect(screen.getByText(/\$200/)).toBeInTheDocument();
+    expect(screen.queryByText(/3\.200\.000/)).not.toBeInTheDocument();
+  });
+
+  it('KosCard reacts reactively when CurrencyToggle switches active currency inside CurrencyProvider', () => {
+    function IntegratedComponent() {
+      return (
+        <div>
+          <CurrencyToggle />
+          <KosCard
+            property={mockProperty}
+            onOpenDetail={vi.fn()}
+            renderFacilityIcon={mockRenderIcon}
+          />
+        </div>
+      );
+    }
+
+    render(
+      <CurrencyProvider>
+        <IntegratedComponent />
+      </CurrencyProvider>
+    );
+
+    // Initial state: both
+    expect(screen.getByText(/3\.200\.000/)).toBeInTheDocument();
+    expect(screen.getByText(/~\$200 USD/)).toBeInTheDocument();
+
+    const toggleButton = screen.getByRole('button', { name: /ubah preferensi mata uang/i });
+
+    // 1st click: switches to 'idr'
+    fireEvent.click(toggleButton);
+    expect(screen.getByText(/3\.200\.000/)).toBeInTheDocument();
+    expect(screen.queryByText(/~\$200 USD/)).not.toBeInTheDocument();
+
+    // 2nd click: switches to 'usd'
+    fireEvent.click(toggleButton);
+    expect(screen.getByText(/\$200/)).toBeInTheDocument();
+    expect(screen.queryByText(/3\.200\.000/)).not.toBeInTheDocument();
+
+    // 3rd click: switches back to 'both'
+    fireEvent.click(toggleButton);
+    expect(screen.getByText(/3\.200\.000/)).toBeInTheDocument();
+    expect(screen.getByText(/~\$200 USD/)).toBeInTheDocument();
   });
 });

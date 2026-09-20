@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { Sun, Moon, Globe, DollarSign } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from '../context/LanguageContext';
+import { useCurrency, CurrencyPreference } from '../context/CurrencyContext';
 
-export type CurrencyPreference = 'idr' | 'usd' | 'both';
+export type { CurrencyPreference };
 
 export interface CurrencyToggleProps {
   preference?: CurrencyPreference;
@@ -12,21 +13,32 @@ export interface CurrencyToggleProps {
 }
 
 export function CurrencyToggle({
-  preference = 'both',
+  preference,
   onToggle,
   className = ''
 }: CurrencyToggleProps) {
-  const [pref, setPref] = useState<CurrencyPreference>(() => {
-    try {
-      return (localStorage.getItem('kosmo_currency') as CurrencyPreference) || preference;
-    } catch {
-      return preference;
-    }
+  const { currency, setCurrency } = useCurrency();
+
+  const [internalPref, setInternalPref] = useState<CurrencyPreference>(() => {
+    if (preference !== undefined) return preference;
+    return currency;
   });
 
+  // Synchronize with external prop or context changes
+  React.useEffect(() => {
+    if (preference !== undefined) {
+      setInternalPref(preference);
+    } else {
+      setInternalPref(currency);
+    }
+  }, [preference, currency]);
+
+  const activePref = internalPref;
+
   const handleCycle = () => {
-    const next: CurrencyPreference = pref === 'idr' ? 'usd' : pref === 'usd' ? 'both' : 'idr';
-    setPref(next);
+    const next: CurrencyPreference = activePref === 'idr' ? 'usd' : activePref === 'usd' ? 'both' : 'idr';
+    setInternalPref(next);
+    setCurrency(next);
     try {
       localStorage.setItem('kosmo_currency', next);
     } catch {
@@ -35,7 +47,7 @@ export function CurrencyToggle({
     onToggle?.(next);
   };
 
-  const label = pref === 'idr' ? 'IDR' : pref === 'usd' ? 'USD' : 'IDR/USD';
+  const label = activePref === 'idr' ? 'IDR' : activePref === 'usd' ? 'USD' : 'IDR/USD';
 
   return (
     <button
@@ -63,7 +75,7 @@ export default function ThemeLanguageToggle({
   className = '',
   showLabels = false,
   showCurrencyToggle = false,
-  currencyPreference = 'both',
+  currencyPreference,
   onCurrencyToggle
 }: Props) {
   const { theme, toggleTheme } = useTheme();

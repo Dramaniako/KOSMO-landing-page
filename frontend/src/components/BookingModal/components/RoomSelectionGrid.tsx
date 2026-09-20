@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { DoorOpen, CheckCircle, Lock, Wrench, Sparkles } from 'lucide-react';
 import { Room } from '../../../types/index';
 import { formatRupiah, formatUSD } from '../../../utils/format';
+import { useCurrency } from '../../../context/CurrencyContext';
 
 export interface RoomCardItemProps {
   room: Room;
@@ -20,6 +21,7 @@ export const RoomCardItem = React.memo<RoomCardItemProps>(({
   basePrice,
   onSelect
 }) => {
+  const { currency } = useCurrency();
   const isAvailable = room.status === 'available';
   const isOccupied = room.status === 'occupied';
   const isMaintenance = room.status === 'maintenance';
@@ -90,12 +92,14 @@ export const RoomCardItem = React.memo<RoomCardItemProps>(({
         <div>
           <div className="flex items-baseline gap-1 flex-wrap">
             <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
-              {formatRupiah(effectivePrice)}
+              {currency === 'usd' ? formatUSD(effectivePrice) : formatRupiah(effectivePrice)}
             </span>
             <span className="text-[10px] text-slate-400">/bln</span>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500 property-usd-approx">
-              (~{formatUSD(effectivePrice)} USD)
-            </span>
+            {currency === 'both' && (
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 property-usd-approx">
+                (~{formatUSD(effectivePrice)} USD)
+              </span>
+            )}
             {hasCustomPrice && (
               <span className="ml-1 px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                 Kustom
@@ -130,6 +134,7 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
   basePrice,
   loading = false
 }) => {
+  const { currency } = useCurrency();
   // Extract unique floor numbers
   const uniqueFloors = useMemo(() => {
     const floorSet = new Set(rooms.map((r) => r.floor));
@@ -305,7 +310,10 @@ export const RoomSelectionGrid: React.FC<RoomSelectionGridProps> = ({
             </div>
           </div>
           <span className="font-extrabold text-blue-600 dark:text-blue-400">
-            {formatRupiah(selectedRoom.effectivePrice ?? (selectedRoom.price ? selectedRoom.price : basePrice))}/bln
+            {currency === 'usd'
+              ? `${formatUSD(selectedRoom.effectivePrice ?? (selectedRoom.price ? selectedRoom.price : basePrice))}/bln`
+              : `${formatRupiah(selectedRoom.effectivePrice ?? (selectedRoom.price ? selectedRoom.price : basePrice))}/bln`
+            }
           </span>
         </div>
       )}

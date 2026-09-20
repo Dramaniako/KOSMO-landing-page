@@ -21,6 +21,7 @@ const translations: Record<Language, Translations> = {
     'nav.dashboard': 'Dasbor',
     'nav.switchTheme': 'Ganti Tema',
     'nav.switchLang': 'Ganti Bahasa',
+    'nav.switchCurrency': 'Ubah Mata Uang (IDR / USD / Dual)',
 
     // Hero Section
     'hero.badge': 'Platform Co-Living #1 di Bali',
@@ -246,6 +247,7 @@ const translations: Record<Language, Translations> = {
     'nav.dashboard': 'Dashboard',
     'nav.switchTheme': 'Toggle Theme',
     'nav.switchLang': 'Change Language',
+    'nav.switchCurrency': 'Toggle Currency (IDR / USD / Dual)',
 
     // Hero Section
     'hero.badge': '#1 Co-Living Platform in Bali',

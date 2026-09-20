@@ -22,7 +22,7 @@ export const TenantHeader: React.FC<TenantHeaderProps> = ({
         </p>
       </div>
       <div className="flex items-center gap-3">
-        <ThemeLanguageToggle />
+        <ThemeLanguageToggle showCurrencyToggle={true} />
         <button className="btn btn-outline" onClick={onExplore}>
           {t('tenant.exploreKos')}
         </button>

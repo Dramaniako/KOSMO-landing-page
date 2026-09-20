@@ -76,7 +76,7 @@ export default function LandlordHeader({
         </p>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-        <ThemeLanguageToggle />
+        <ThemeLanguageToggle showCurrencyToggle={true} />
         <button
           type="button"
           onClick={handleDownloadExcel}

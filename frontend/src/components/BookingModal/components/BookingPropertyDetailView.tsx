@@ -2,6 +2,7 @@ import React from 'react';
 import { MapPin, Star, Sparkles, ShieldCheck, Download, CheckCircle2, FileText, Eye, AlertCircle, AlertTriangle, ArrowRight } from 'lucide-react';
 import { Property, User, PropertyPhoto, Room } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
+import { useCurrency } from '../../../context/CurrencyContext';
 import { formatRupiah, formatUSD } from '../../../utils/format';
 import { PropertyPhotoGallery } from './PropertyPhotoGallery';
 import { RoomSelectionGrid } from './RoomSelectionGrid';
@@ -63,6 +64,7 @@ export default function BookingPropertyDetailView({
   onNavigateToLogin
 }: BookingPropertyDetailViewProps) {
   const { t } = useTranslation();
+  const { currency } = useCurrency();
 
   const displayPrice =
     selectedRoom && typeof (selectedRoom.effectivePrice ?? selectedRoom.price) === 'number' && Number(selectedRoom.effectivePrice ?? selectedRoom.price) > 0
@@ -131,7 +133,7 @@ export default function BookingPropertyDetailView({
               </span>
             </div>
             <span className="text-xs font-extrabold text-blue-600 dark:text-blue-400 shrink-0">
-              {formatRupiah(displayPrice)}/bln
+              {currency === 'usd' ? formatUSD(displayPrice) : formatRupiah(displayPrice)}/bln
             </span>
           </div>
         )}
@@ -150,13 +152,15 @@ export default function BookingPropertyDetailView({
 
           <div className="sm:text-right flex-shrink-0 bg-blue-50/70 dark:bg-blue-950/40 sm:bg-transparent p-3 sm:p-0 rounded-xl border border-blue-100 dark:border-blue-900/50 sm:border-0">
             <div className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight property-price">
-              {formatRupiah(displayPrice)}
+              {currency === 'usd' ? formatUSD(displayPrice) : formatRupiah(displayPrice)}
             </div>
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5 flex items-center sm:justify-end gap-1 flex-wrap">
               <span>{t('prop.perMonth')}</span>
-              <span className="text-slate-400 dark:text-slate-500 property-usd-approx">
-                (~{formatUSD(displayPrice)} USD)
-              </span>
+              {currency === 'both' && (
+                <span className="text-slate-400 dark:text-slate-500 property-usd-approx">
+                  (~{formatUSD(displayPrice)} USD)
+                </span>
+              )}
               <span className="text-emerald-600 dark:text-emerald-400 font-semibold">• {t('modal.noUtilityFee')}</span>
             </div>
           </div>
@@ -360,7 +364,7 @@ export default function BookingPropertyDetailView({
             <div className="flex flex-col">
               <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-bold tracking-wider">{t('modal.totalRent')}</span>
               <span className="text-sm font-extrabold text-blue-600 dark:text-blue-400 leading-tight">
-                Total: {formatRupiah(displayPrice)}/bln (~{formatUSD(displayPrice)} USD)
+                Total: {currency === 'usd' ? formatUSD(displayPrice) : formatRupiah(displayPrice)}/bln{currency === 'both' ? ` (~${formatUSD(displayPrice)} USD)` : ''}
               </span>
             </div>
             <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200/60 dark:border-emerald-800">
