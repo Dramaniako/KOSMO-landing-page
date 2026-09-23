@@ -141,13 +141,17 @@ Incoming Request
 
 ## 5. Frontend Error Handling & Self-Healing Architecture
 
-### 5.1 Enhanced React `ErrorBoundary` (`frontend/src/components/ErrorBoundary.tsx`)
-- **Self-Healing State Reset:** Supports `onReset?: () => void` and `resetKeys?: unknown[]` to recover component state without a destructive full browser reload.
+### 5.1 Enhanced React `ErrorBoundary` & `AppErrorBoundary` (`frontend/src/components/ErrorBoundary.tsx`, `frontend/src/App.tsx`)
+- **Top-Level Fault Isolation:** Wrapped around the entire client router (`AppErrorBoundary`), safeguarding against unhandled runtime crashes across all pages.
+- **Language-Reactive Locale Synchronization:** Automatically binds with `LanguageContext` (`locale={language}`) ensuring crash fallbacks match the active Indonesian or English interface.
+- **Self-Healing State Reset:** Supports `onReset?: () => void` and `resetKeys?: unknown[]` to recover component state without a destructive full browser reload, handling dynamic array length changes and transition boundaries.
 - **Custom Inline Fallbacks:** Accepts `fallback?: ReactNode | ((props: FallbackProps) => ReactNode)` for localized sectional failure containment (e.g. within modals).
 - **One-Click Diagnostic Copying:** Dedicated "Salin Detail Masalah" button writes error stack, timestamp, and component hierarchy to the clipboard with visual checkmark feedback.
 - **Bilingual Accessibility:** Supports both Indonesian (`locale="id"`) and English (`locale="en"`) with WCAG AAA accessible ARIA alerts (`role="alert"`, `aria-live="assertive"`).
 
 ### 5.2 Resilient API Client (`frontend/src/services/apiClient.ts`)
+- **Universal Runtime Compatibility:** Gracefully evaluates `import.meta.env` in Vite while falling back cleanly in Node.js / CLI testing environments.
+- **Robust Message Extraction:** Intelligently extracts error explanations from RFC 7807 payloads, legacy `{ error: ... }` strings, or HTTP/2 empty status texts.
 - **Rich `ApiError` Class:** Captures `code`, `details`, `requestId`, and `timestamp` from server responses.
 - **Exponential Backoff Retry:** `requestWithRetry<T>()` automatically retries idempotent GET requests on transient network or 503 errors (1x, 2x backoff delay).
 - **Timeout Protection:** AbortController support with `timeoutMs` to prevent hung UI states.

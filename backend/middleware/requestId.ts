@@ -11,19 +11,31 @@ declare global {
   }
 }
 
+const REQUEST_ID_REGEX = /^[a-zA-Z0-9_.-]{1,128}$/;
+
 /**
  * Request Correlation ID Middleware.
  * Generates or propagates a unique correlation ID across requests, logs, and error responses.
+ * Enforces sanitization to prevent HTTP response header injection and malformed headers.
  */
 export function requestIdMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const incomingId = req.headers['x-request-id'];
-  const requestId = typeof incomingId === 'string' && incomingId.trim().length > 0
+  const rawHeader = req.headers['x-request-id'];
+  const incomingId = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+
+  const requestId = typeof incomingId === 'string' && REQUEST_ID_REGEX.test(incomingId.trim())
     ? incomingId.trim()
     : `req_${crypto.randomUUID()}`;
 
   req.id = requestId;
   req.requestId = requestId;
-  res.setHeader('X-Request-Id', requestId);
+
+  try {
+    if (!res.headersSent) {
+      res.setHeader('X-Request-Id', requestId);
+    }
+  } catch {
+    // Gracefully ignore header set error if connection aborted or closed
+  }
 
   next();
 }

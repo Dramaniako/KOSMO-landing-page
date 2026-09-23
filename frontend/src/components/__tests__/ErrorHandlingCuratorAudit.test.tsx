@@ -190,4 +190,31 @@ describe('🛡️ Error Handling Curator Audit Suite (Frontend)', () => {
     const forbiddenErr = new ApiError('Forbidden', 403);
     expect(isAuthError(forbiddenErr)).toBe(true);
   });
+
+  it('ErrorBoundary: resets state when resetKeys length changes', () => {
+    let resetCount = 0;
+    const { rerender } = render(
+      <ErrorBoundary onReset={() => { resetCount++; }} resetKeys={['a']}>
+        <CrashChild shouldCrash={true} msg="Dynamic key crash" />
+      </ErrorBoundary>
+    );
+
+    expect(screen.getByText('Terjadi Kendala Tampilan')).toBeInTheDocument();
+
+    // Rerender with different array length
+    rerender(
+      <ErrorBoundary onReset={() => { resetCount++; }} resetKeys={['a', 'b']}>
+        <CrashChild shouldCrash={false} />
+      </ErrorBoundary>
+    );
+
+    expect(resetCount).toBe(1);
+    expect(screen.getByTestId('healthy-ui')).toBeInTheDocument();
+  });
+
+  it('ApiClient: getErrorMessage extracts error property when message is missing', () => {
+    expect(getErrorMessage({ error: 'Auth failed directly' })).toBe('Auth failed directly');
+    expect(getErrorMessage({ message: 'Custom server error' })).toBe('Custom server error');
+    expect(getErrorMessage(null)).toBe('Terjadi kesalahan sistem.');
+  });
 });

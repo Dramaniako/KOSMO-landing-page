@@ -45,10 +45,18 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidUpdate(prevProps: Props) {
-    if (this.state.hasError && this.props.resetKeys && prevProps.resetKeys) {
-      const hasChanged = this.props.resetKeys.some((val, idx) => val !== prevProps.resetKeys?.[idx]);
-      if (hasChanged) {
-        this.resetError();
+    if (this.state.hasError) {
+      const currentKeys = this.props.resetKeys;
+      const prevKeys = prevProps.resetKeys;
+      if (currentKeys !== undefined || prevKeys !== undefined) {
+        const hasChanged =
+          currentKeys === undefined ||
+          prevKeys === undefined ||
+          currentKeys.length !== prevKeys.length ||
+          currentKeys.some((val, idx) => val !== prevKeys[idx]);
+        if (hasChanged) {
+          this.resetError();
+        }
       }
     }
   }

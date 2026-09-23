@@ -5,9 +5,12 @@
 
 let isRegistered = false;
 
-export function setupProcessSafety(): void {
-  if (isRegistered || process.env.NODE_ENV === 'test') {
-    return;
+export function setupProcessSafety(force = false): boolean {
+  if (isRegistered && !force) {
+    return true;
+  }
+  if (process.env.NODE_ENV === 'test' && !force) {
+    return false;
   }
   isRegistered = true;
 
@@ -31,4 +34,10 @@ export function setupProcessSafety(): void {
       timestamp: new Date().toISOString()
     });
   });
+
+  return true;
+}
+
+export function isProcessSafetyActive(): boolean {
+  return isRegistered || process.listenerCount('uncaughtException') > 0;
 }

@@ -44,9 +44,14 @@ export interface RequestOptions extends RequestInit {
   retryDelayMs?: number;
 }
 
-export const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
+const viteEnv = typeof import.meta !== 'undefined' && (import.meta as unknown as Record<string, unknown>)?.env
+  ? ((import.meta as unknown as Record<string, unknown>).env as Record<string, unknown>)?.VITE_API_BASE
+  : undefined;
+const nodeEnv = typeof process !== 'undefined' && process.env ? process.env.VITE_API_BASE : undefined;
+export const API_BASE = ((viteEnv || nodeEnv || '/api') as string);
 
 export function getAuthToken(): string | null {
+  if (typeof localStorage === 'undefined') return null;
   return localStorage.getItem('token') || localStorage.getItem('kosmo_token');
 }
 
@@ -69,6 +74,15 @@ export function getErrorMessage(error: unknown, fallback = 'Terjadi kesalahan si
   }
   if (typeof error === 'string') {
     return error;
+  }
+  if (error && typeof error === 'object') {
+    const errObj = error as Record<string, unknown>;
+    if (typeof errObj.message === 'string' && errObj.message.trim().length > 0) {
+      return errObj.message.trim();
+    }
+    if (typeof errObj.error === 'string' && errObj.error.trim().length > 0) {
+      return errObj.error.trim();
+    }
   }
   return fallback;
 }
@@ -142,9 +156,17 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
       } catch {
         errorData = await res.text().catch(() => null);
       }
-      const message = (errorData && typeof errorData === 'object' && 'message' in errorData)
-        ? String((errorData as { message: unknown }).message)
-        : `HTTP ${res.status}: ${res.statusText}`;
+      let serverMessage: string | undefined;
+      if (errorData && typeof errorData === 'object') {
+        const record = errorData as Record<string, unknown>;
+        if (typeof record.message === 'string' && record.message.trim().length > 0) {
+          serverMessage = record.message.trim();
+        } else if (typeof record.error === 'string' && record.error.trim().length > 0) {
+          serverMessage = record.error.trim();
+        }
+      }
+      const statusText = res.statusText || 'Error';
+      const message = serverMessage || `HTTP ${res.status}: ${statusText}`;
 
       throw new ApiError(message, res.status, errorData);
     }

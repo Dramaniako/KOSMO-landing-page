@@ -555,3 +555,5 @@ export const useTranslation = (): LanguageContextType => {
   const context = useContext(LanguageContext);
   return context || defaultLanguageContext;
 };
+
+export const useLanguage = useTranslation;

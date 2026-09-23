@@ -142,4 +142,9 @@ Application errors extend from `AppError` with an explicit `isOperational: true`
 Instead of returning sensitive stack traces to users, each request generates an `X-Request-Id` (e.g. `req_550e8400...`). When an error occurs, operators can look up the exact correlation ID in secure server-side log streams without ever exposing runtime internals to public callers.
 
 ### 8.4 Frontend Fault Isolation
-React `ErrorBoundary` encapsulates application views, preventing render crashes from breaking the entire application. The boundary provides accessible user-facing recovery options without exposing internal component state or unencrypted memory structures.
+React `AppErrorBoundary` encapsulates the application views at the root level, preventing render crashes from breaking the entire application. The boundary provides accessible, bilingual user-facing recovery options without exposing internal component state or unencrypted memory structures.
+
+### 8.5 HTTP Header Injection Defense & Streaming Guards
+- **Request ID Sanitization:** `requestIdMiddleware` strictly validates incoming `X-Request-Id` headers against a whitelist regex (`/^[a-zA-Z0-9_.-]{1,128}$/`). Malformed headers, carriage returns, newlines (`\r\n`), or oversized values (>128 chars) are safely discarded and replaced with a fresh cryptographically secure UUID v4 to prevent HTTP response header injection (CRLF injection / CWE-113).
+- **Streaming & Post-Header Error Safety:** The centralized `errorHandler` explicitly checks `if (res.headersSent) { return next(err); }`. This delegates errors that occur mid-stream to Express's native connection termination, preventing `ERR_HTTP_HEADERS_SENT` server crashes during active binary or PDF generation.
+

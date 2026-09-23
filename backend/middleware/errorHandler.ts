@@ -146,10 +146,25 @@ export function errorHandler(
   err: unknown,
   req: Request,
   res: Response,
-  _next: NextFunction
+  next: NextFunction
 ): void {
+  // If response headers have already been sent to client, delegate to Express default handler
+  if (res.headersSent) {
+    return next(err);
+  }
+
   const normalized = normalizeError(err);
-  const requestId = req.id || req.requestId || (res.getHeader('X-Request-Id') as string) || undefined;
+  let requestId = req.id || req.requestId;
+  if (!requestId) {
+    try {
+      const headerVal = res.getHeader('X-Request-Id');
+      if (typeof headerVal === 'string') {
+        requestId = headerVal;
+      }
+    } catch {
+      // Ignore header access error
+    }
+  }
   const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
 
   // Operational vs Programmer error handling

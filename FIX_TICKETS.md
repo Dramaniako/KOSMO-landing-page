@@ -46,3 +46,11 @@ Master backlog of engineering tickets generated from the technical audit report.
 - [x] `TICKET-P1-012`: Global 404 JSON fallback handler for unmapped routes (`backend/middleware/notFoundHandler.ts`)
 - [x] `TICKET-P1-013`: Self-healing React `ErrorBoundary` with reset state recovery, custom fallbacks, and bilingual alerts (`frontend/src/components/ErrorBoundary.tsx`, `frontend/src/context/ErrorContext.tsx`)
 - [x] `TICKET-P1-014`: Autonomous Error Handling Curator Agent audit & verification (`scripts/curator_error_handling.ts`, `tests/curator_error_handling.test.ts` — Score: 10.00/10)
+
+### Phase 6: Error Resilience Hardening & Multi-Runtime Edge Cases (P1)
+- [x] `TICKET-P1-015`: Top-Level `AppErrorBoundary` mounting in `frontend/src/App.tsx` with dynamic `LanguageContext` locale synchronization.
+- [x] `TICKET-P1-016`: CRLF HTTP Response Header Injection & Malformed Request ID Sanitization (`backend/middleware/requestId.ts`).
+- [x] `TICKET-P1-017`: Post-Header Streaming Safety (`res.headersSent`) in `backend/middleware/errorHandler.ts` preventing unhandled `ERR_HTTP_HEADERS_SENT`.
+- [x] `TICKET-P1-018`: Universal Runtime Environment Compatibility (Vite + Node.js) & Multi-Format Message Extraction (`frontend/src/services/apiClient.ts`).
+- [x] `TICKET-P1-019`: Authentic Curator Agent Evaluation replacing mocked passes with functional assertions across all 5 pillars (`scripts/curator_error_handling.ts`).
+

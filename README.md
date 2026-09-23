@@ -184,8 +184,8 @@ KOSMO implements an enterprise-grade error handling architecture audited and cer
 - **Centralized Typed Error Hierarchy:** Base `AppError` class with specialized operational subclasses (`BadRequestError`, `ValidationError`, `UnauthorizedError`, `ForbiddenError`, `NotFoundError`, `ConflictError`, `DatabaseError`, `ServiceUnavailableError`).
 - **Standardized RFC 7807 Response Schema:** Predictable error envelopes containing `status`, `statusCode`, `code`, `message`, `error`, `details`, `requestId`, `timestamp`, and `path`.
 - **Driver & Framework Translation:** Automatic normalization of Zod validation failures, BodyParser malformed JSON errors, Multer upload limits, JWT token expiration, and MySQL unique constraint / connection errors.
-- **Defensive Production Safety (CWE-209):** Zero information leakage in production; stack traces and raw SQL queries are suppressed while operational diagnostic logs are recorded with correlation IDs.
-- **Frontend Self-Healing:** React `ErrorBoundary` with state reset recovery (`onReset`, `resetKeys`), custom render fallbacks, bilingual messaging (`id`/`en`), clipboard diagnostic copying, and `ErrorContext` toast alerts.
+- **Defensive Production Safety (CWE-209):** Zero information leakage in production; stack traces and raw SQL queries are suppressed while operational diagnostic logs are recorded with sanitized correlation IDs (`X-Request-Id` CRLF injection prevention and `res.headersSent` streaming guards).
+- **Frontend Self-Healing:** React `AppErrorBoundary` wrapping the client router with `LanguageContext` locale synchronization, state reset recovery (`onReset`, `resetKeys`), custom render fallbacks, bilingual messaging (`id`/`en`), clipboard diagnostic copying, and `ErrorContext` toast alerts.
 
 ---
 

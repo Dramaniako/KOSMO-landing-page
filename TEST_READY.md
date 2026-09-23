@@ -139,8 +139,8 @@ npx playwright test tests/e2e/discrete_rooms_gallery.spec.ts --ui
 
 | Suite / Artifact | Path | Test Count / Score | Focus Area | Status |
 |:---|:---|:---:|:---|:---:|
-| **Backend Error Architecture** | `tests/error_handling.test.ts` | 13 tests | `AppError`, Zod, Multer, JWT, MySQL translations | **100% PASS** |
+| **Backend Error Architecture** | `tests/error_handling.test.ts` | 16 tests | `AppError`, Zod, Multer, JWT, MySQL, CRLF headers, `res.headersSent` | **100% PASS** |
 | **Backend Curator Audit** | `tests/curator_error_handling.test.ts` | 2 tests | Automated Curator Agent score assertion | **100% PASS** |
-| **Frontend Error Curator** | `frontend/src/components/__tests__/ErrorHandlingCuratorAudit.test.tsx` | 7 tests | `ErrorBoundary`, `resetKeys`, `ErrorContext`, `apiClient` | **100% PASS** |
-| **Autonomous Curator Agent** | `scripts/curator_error_handling.ts` | **10.00 / 10.0** | 5 dimensions across architecture, contract, safety | **CERTIFIED** |
+| **Frontend Error Curator** | `frontend/src/components/__tests__/ErrorHandlingCuratorAudit.test.tsx` | 9 tests | `AppErrorBoundary`, `resetKeys` length, `ErrorContext`, `apiClient` | **100% PASS** |
+| **Autonomous Curator Agent** | `scripts/curator_error_handling.ts` | **10.00 / 10.0** | 5 dimensions across architecture, contract, safety (Authentic) | **CERTIFIED** |
 

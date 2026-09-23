@@ -73,10 +73,11 @@
 ### Centralized Error Architecture (`backend/errors/index.ts`, `backend/middleware/errorHandler.ts`)
 - `AppError`: Base application error class (`statusCode`, `code`, `isOperational`, `details`, `timestamp`).
 - `normalizeError(err: unknown)`: Translates Zod, Multer, JWT, BodyParser, and MySQL driver exceptions into typed operational `AppError` instances.
-- `errorHandler`: Express 4-argument centralized middleware providing RFC 7807 responses, logging with `[API status]`, and production credential sanitization.
-- `requestIdMiddleware`: Inspects or generates unique correlation ID `req_<uuid>`, injecting `X-Request-Id` response header.
+- `errorHandler`: Express 4-argument centralized middleware providing RFC 7807 responses, logging with `[API status]`, `res.headersSent` streaming safety, and production credential sanitization.
+- `requestIdMiddleware`: Sanitizes incoming correlation IDs against CRLF injection, generating unique `req_<uuid>` and injecting `X-Request-Id` response header.
 - `notFoundHandler`: Intercepts unmapped API routes, returning JSON 404 with `code: 'ROUTE_NOT_FOUND'`.
-- `scripts/curator_error_handling.ts`: Autonomous curator evaluating 5 dimensions, asserting score > 9.0/10.0 (achieved: **10.00/10.0**).
+- `AppErrorBoundary`: Mounts in `frontend/src/App.tsx` and binds with `LanguageContext` (`locale={language}`), protecting the full client router from uncaught UI crashes.
+- `scripts/curator_error_handling.ts`: Autonomous curator evaluating 5 dimensions with zero hardcoded flags, asserting score > 9.0/10.0 (achieved: **10.00/10.0**).
 
 ## Code Layout
 - `backend/errors/index.ts`: Centralized `AppError` typed hierarchy & `ErrorCode` constants.

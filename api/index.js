@@ -5765,12 +5765,19 @@ var router_default = router;
 
 // backend/middleware/requestId.ts
 import crypto6 from "crypto";
+var REQUEST_ID_REGEX = /^[a-zA-Z0-9_.-]{1,128}$/;
 function requestIdMiddleware(req, res, next) {
-  const incomingId = req.headers["x-request-id"];
-  const requestId = typeof incomingId === "string" && incomingId.trim().length > 0 ? incomingId.trim() : `req_${crypto6.randomUUID()}`;
+  const rawHeader = req.headers["x-request-id"];
+  const incomingId = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  const requestId = typeof incomingId === "string" && REQUEST_ID_REGEX.test(incomingId.trim()) ? incomingId.trim() : `req_${crypto6.randomUUID()}`;
   req.id = requestId;
   req.requestId = requestId;
-  res.setHeader("X-Request-Id", requestId);
+  try {
+    if (!res.headersSent) {
+      res.setHeader("X-Request-Id", requestId);
+    }
+  } catch {
+  }
   next();
 }
 
@@ -5855,9 +5862,21 @@ function normalizeError(err) {
   const statusCode = typeof errorObj?.statusCode === "number" ? errorObj.statusCode : typeof errorObj?.status === "number" ? errorObj.status : 500;
   return new AppError(message, statusCode, ErrorCode.INTERNAL_SERVER_ERROR, false);
 }
-function errorHandler(err, req, res, _next) {
+function errorHandler(err, req, res, next) {
+  if (res.headersSent) {
+    return next(err);
+  }
   const normalized = normalizeError(err);
-  const requestId = req.id || req.requestId || res.getHeader("X-Request-Id") || void 0;
+  let requestId = req.id || req.requestId;
+  if (!requestId) {
+    try {
+      const headerVal = res.getHeader("X-Request-Id");
+      if (typeof headerVal === "string") {
+        requestId = headerVal;
+      }
+    } catch {
+    }
+  }
   const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
   const isOperational = isOperationalError(normalized);
   const statusCode = normalized.statusCode || 500;
@@ -5909,9 +5928,12 @@ function notFoundHandler(req, _res, next) {
 
 // backend/utils/processSafety.ts
 var isRegistered = false;
-function setupProcessSafety() {
-  if (isRegistered || process.env.NODE_ENV === "test") {
-    return;
+function setupProcessSafety(force = false) {
+  if (isRegistered && !force) {
+    return true;
+  }
+  if (process.env.NODE_ENV === "test" && !force) {
+    return false;
   }
   isRegistered = true;
   process.on("uncaughtException", (err) => {
@@ -5931,6 +5953,7 @@ function setupProcessSafety() {
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
   });
+  return true;
 }
 
 // backend/server.ts

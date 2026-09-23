@@ -32,6 +32,14 @@ import { normalizeError, errorHandler } from '../backend/middleware/errorHandler
 import { notFoundHandler } from '../backend/middleware/notFoundHandler';
 import { requestIdMiddleware } from '../backend/middleware/requestId';
 import { asyncHandler } from '../backend/utils/asyncHandler';
+import { setupProcessSafety, isProcessSafetyActive } from '../backend/utils/processSafety';
+import {
+  ApiError,
+  isApiError,
+  isNetworkError,
+  isAuthError,
+  getErrorMessage
+} from '../frontend/src/services/apiClient';
 import app from '../backend/server';
 
 interface CheckItem {
@@ -216,6 +224,7 @@ export async function runCuratorEvaluation(): Promise<CuratorEvaluationResult> {
     originalUrl: '/api/probe'
   } as unknown as any;
   const mockRes = {
+    headersSent: false,
     getHeader: () => undefined,
     status: (code: number) => { probedStatus = code; return mockRes; },
     json: (body: any) => { probedBody = body; return mockRes; }
@@ -223,9 +232,34 @@ export async function runCuratorEvaluation(): Promise<CuratorEvaluationResult> {
 
   errorHandler(new BadRequestError('Probe failed', ErrorCode.BAD_REQUEST, { field: 'name' }), mockReq, mockRes, () => {});
   checks.contract[0].passed = probedStatus === 400 && probedBody.status === 'fail' && Boolean(probedBody.timestamp && probedBody.path);
-  checks.contract[1].passed = probedBody.requestId === 'req_probe_999';
+
+  // Probe request ID propagation and header injection sanitization
+  let sanitizedHeaderId = '';
+  const injectionReq = {
+    headers: { 'x-request-id': 'malicious\r\nBadHeader: test' }
+  } as unknown as any;
+  const injectionRes = {
+    headersSent: false,
+    setHeader: (_k: string, v: string) => { sanitizedHeaderId = v; }
+  } as unknown as any;
+  requestIdMiddleware(injectionReq, injectionRes, () => {});
+  checks.contract[1].passed =
+    probedBody.requestId === 'req_probe_999' &&
+    sanitizedHeaderId.startsWith('req_') &&
+    !sanitizedHeaderId.includes('\r');
+
   checks.contract[2].passed = probedBody.message === 'Probe failed' && probedBody.error === 'Probe failed';
   checks.contract[3].passed = Boolean(probedBody.details);
+
+  // Verify headersSent protection: if headers already sent, delegates to next without writing
+  let lateNextCalled = false;
+  let lateHeaderWritten = false;
+  const sentRes = {
+    headersSent: true,
+    status: () => { lateHeaderWritten = true; return sentRes; },
+    json: () => { lateHeaderWritten = true; return sentRes; }
+  } as unknown as any;
+  errorHandler(new Error('Post-header error'), mockReq, sentRes, (err) => { lateNextCalled = Boolean(err); });
 
   // --- Probe Dimension 3: Driver Translations ---
   const zodSchema = z.object({ code: z.string().min(3, 'Minimal 3 huruf') });
@@ -254,10 +288,40 @@ export async function runCuratorEvaluation(): Promise<CuratorEvaluationResult> {
   checks.driverTranslation[4].passed = normalizeError(sqlErr).code === ErrorCode.DUPLICATE_ENTRY;
 
   // --- Probe Dimension 4: Frontend Resilience ---
-  checks.frontendResilience[0].passed = true; // Verified in apiClient.test.ts
-  checks.frontendResilience[1].passed = true; // Verified in ErrorBoundary.test.tsx
-  checks.frontendResilience[2].passed = true; // Verified via clipboard & bilingual render props
-  checks.frontendResilience[3].passed = true; // Verified via ErrorContext & ErrorProvider
+  const feApiErr = new ApiError('Resource missing', 404, {
+    code: 'ROOM_NOT_FOUND',
+    requestId: 'req_probe_fe_1',
+    details: { roomNumber: '101' }
+  });
+  const fetchErr = new TypeError('Failed to fetch');
+  checks.frontendResilience[0].passed =
+    feApiErr.code === 'ROOM_NOT_FOUND' &&
+    feApiErr.requestId === 'req_probe_fe_1' &&
+    isApiError(feApiErr) &&
+    isNetworkError(fetchErr) &&
+    isAuthError(new ApiError('Unauthorized', 401)) &&
+    getErrorMessage(feApiErr) === 'Resource missing' &&
+    getErrorMessage({ error: 'Fallback from error key' }) === 'Fallback from error key';
+
+  const { default: ErrorBoundary } = (await import('../frontend/src/' + 'components/ErrorBoundary')) as any;
+  const { ErrorProvider, useError } = (await import('../frontend/src/' + 'context/ErrorContext')) as any;
+
+  const derived = ErrorBoundary.getDerivedStateFromError(new Error('UI Explosion'));
+  const ebInstance = new ErrorBoundary({ children: null });
+  checks.frontendResilience[1].passed =
+    derived.hasError === true &&
+    derived.error instanceof Error &&
+    typeof ebInstance.resetError === 'function' &&
+    typeof ebInstance.componentDidUpdate === 'function';
+
+  checks.frontendResilience[2].passed =
+    typeof ebInstance.handleCopyDiagnostics === 'function' &&
+    typeof ebInstance.handleReload === 'function' &&
+    typeof ebInstance.handleGoHome === 'function';
+
+  checks.frontendResilience[3].passed =
+    typeof ErrorProvider === 'function' &&
+    typeof useError === 'function';
 
   // --- Probe Dimension 5: Process Safety & Leaks ---
   let notFoundPiped: any = null;
@@ -270,7 +334,9 @@ export async function runCuratorEvaluation(): Promise<CuratorEvaluationResult> {
   await new Promise((r) => setImmediate(r));
   checks.processSafety[1].passed = asyncCaught instanceof Error && asyncCaught.message === 'async reject';
 
-  checks.processSafety[2].passed = true; // Verified via setupProcessSafety()
+  const safetySetup = setupProcessSafety(true);
+  const safetyActive = isProcessSafetyActive();
+  checks.processSafety[2].passed = safetySetup && safetyActive && lateNextCalled && !lateHeaderWritten;
   const envObj = process.env as Record<string, string | undefined>;
   const origEnv = envObj.NODE_ENV;
   envObj.NODE_ENV = 'production';

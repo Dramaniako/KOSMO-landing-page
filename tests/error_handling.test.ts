@@ -370,4 +370,67 @@ test('Professional-Grade Error Handling Architecture', async (t) => {
       envObj.NODE_ENV = origEnv;
     }
   });
+
+  await t.test('6.3 errorHandler delegates to next(err) if res.headersSent is true to prevent ERR_HTTP_HEADERS_SENT', () => {
+    let nextCalledWith: unknown = null;
+    let statusCalled = false;
+    let jsonCalled = false;
+
+    const mockReq = {
+      id: 'req_sent_1',
+      method: 'GET',
+      originalUrl: '/api/stream'
+    } as unknown as Request;
+
+    const mockRes = {
+      headersSent: true,
+      status: () => { statusCalled = true; return mockRes; },
+      json: () => { jsonCalled = true; return mockRes; }
+    } as unknown as Response;
+
+    const err = new Error('Late stream error');
+    errorHandler(err, mockReq, mockRes, (e) => { nextCalledWith = e; });
+
+    assert.equal(nextCalledWith, err, 'next(err) must be invoked');
+    assert.equal(statusCalled, false, 'res.status must NOT be called when headersSent is true');
+    assert.equal(jsonCalled, false, 'res.json must NOT be called when headersSent is true');
+  });
+
+  await t.test('6.4 requestIdMiddleware sanitizes CRLF newline header injection', () => {
+    let capturedHeader = '';
+    const req = {
+      headers: {
+        'x-request-id': 'malicious\r\nInjected-Header: evil\r\n'
+      }
+    } as unknown as Request;
+
+    const res = {
+      headersSent: false,
+      setHeader: (_k: string, v: string) => { capturedHeader = v; }
+    } as unknown as Response;
+
+    requestIdMiddleware(req, res, () => {});
+    assert.ok(capturedHeader.startsWith('req_'));
+    assert.equal(capturedHeader.includes('\r'), false);
+    assert.equal(capturedHeader.includes('\n'), false);
+    assert.equal(req.id, capturedHeader);
+  });
+
+  await t.test('6.5 requestIdMiddleware truncates/regenerates oversized IDs exceeding 128 chars', () => {
+    let capturedHeader = '';
+    const req = {
+      headers: {
+        'x-request-id': 'a'.repeat(200)
+      }
+    } as unknown as Request;
+
+    const res = {
+      headersSent: false,
+      setHeader: (_k: string, v: string) => { capturedHeader = v; }
+    } as unknown as Response;
+
+    requestIdMiddleware(req, res, () => {});
+    assert.ok(capturedHeader.startsWith('req_'));
+    assert.ok(capturedHeader.length <= 128);
+  });
 });

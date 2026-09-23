@@ -231,7 +231,7 @@ Every non-2xx API response follows this deterministic contract:
 
 ### 3.4 Distributed Request Tracing (`X-Request-Id`)
 
-All incoming requests accept an optional `X-Request-Id` client header. If omitted, KOSMO generates an ephemeral UUID `req_<uuid>`. The correlation ID is reflected in:
+All incoming requests accept an optional `X-Request-Id` client header. Incoming IDs are strictly validated against the whitelist regex `/^[a-zA-Z0-9_.-]{1,128}$/`. Any value containing newlines (`\r\n`), illegal header characters, or exceeding 128 characters is discarded and replaced with a fresh secure UUID (`req_<uuid>`). The correlation ID is reflected in:
 1. `X-Request-Id` HTTP response header.
 2. `requestId` attribute in all error responses.
 3. Server access and error log entries for rapid triage.

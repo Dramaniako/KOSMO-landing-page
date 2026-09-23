@@ -1,9 +1,10 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
-import { LanguageProvider } from './context/LanguageContext';
+import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { CurrencyProvider } from './context/CurrencyContext';
 import { ErrorProvider } from './context/ErrorContext';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -29,13 +30,19 @@ function RouteLoadingFallback() {
   );
 }
 
+function AppErrorBoundary({ children }: { children: React.ReactNode }) {
+  const { language } = useLanguage();
+  return <ErrorBoundary locale={language}>{children}</ErrorBoundary>;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
       <LanguageProvider>
         <CurrencyProvider>
           <ErrorProvider>
-            <BrowserRouter>
+            <AppErrorBoundary>
+              <BrowserRouter>
               <Suspense fallback={<RouteLoadingFallback />}>
                 <Routes>
                   <Route path="/" element={<LandingPage />} />
@@ -69,7 +76,8 @@ export default function App() {
                 </Routes>
               </Suspense>
             </BrowserRouter>
-          </ErrorProvider>
+          </AppErrorBoundary>
+        </ErrorProvider>
         </CurrencyProvider>
       </LanguageProvider>
     </ThemeProvider>

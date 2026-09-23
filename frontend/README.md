@@ -17,9 +17,10 @@ The frontend client serves as the user-facing interface for the **KOSMO** Bali C
 
 The frontend implements defense-in-depth error handling to provide self-healing and pleasant recovery experiences:
 
-### 2.1 Self-Healing React `ErrorBoundary` (`src/components/ErrorBoundary.tsx`)
-- Wraps the top-level application and can be localized around sensitive UI subsections.
-- **State Reset Capability:** Accepts `onReset?: () => void` and `resetKeys?: unknown[]` to recover component rendering state without a destructive full browser reload.
+### 2.1 Self-Healing React `ErrorBoundary` & `AppErrorBoundary` (`src/components/ErrorBoundary.tsx`, `src/App.tsx`)
+- Wraps the top-level application router (`AppErrorBoundary`), providing unified containment against unhandled React crashes.
+- **Language Synchronization:** Dynamically inherits active language from `LanguageContext` (`locale={language}`) for seamless bilingual error presentations.
+- **State Reset Capability:** Accepts `onReset?: () => void` and `resetKeys?: unknown[]` to recover component rendering state without a destructive full browser reload, handling array length variations and undefined key transitions.
 - **Custom Fallbacks:** Accepts `fallback?: ReactNode | ((props: FallbackProps) => ReactNode)` for custom inline error states.
 - **Bilingual Support:** Displays error copy in Indonesian (`locale="id"`, default) or English (`locale="en"`).
 - **Diagnostic Copying:** Single-click "Salin Detail Masalah" copies timestamped error and stack information to clipboard with feedback checkmarks.
