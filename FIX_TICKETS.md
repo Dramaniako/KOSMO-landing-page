@@ -38,3 +38,11 @@ Master backlog of engineering tickets generated from the technical audit report.
 - [x] `TICKET-P3-002`: Database Pool Limit Override & Serverless Connection Tuning (`backend/db.ts`)
 - [x] `TICKET-P3-003`: Verification Pipeline Gaps & Strict Type Checking (`scripts/verify.sh`, `tsconfig.json`)
 - [x] `TICKET-P3-004`: Cloudinary Mock Fallback Guard & Test Isolation (`backend/services/cloudinary.ts`)
+
+### Phase 5: Enterprise Error Handling & Fault Resilience (P1)
+- [x] `TICKET-P1-009`: Centralized `AppError` typed hierarchy & domain `ErrorCode` catalog (`backend/errors/index.ts`)
+- [x] `TICKET-P1-010`: Standardized RFC 7807 problem details response schema with request correlation (`backend/middleware/errorHandler.ts`, `backend/middleware/requestId.ts`)
+- [x] `TICKET-P1-011`: Driver & Framework Error Normalization for Zod, Multer, JWT, BodyParser, and MySQL (`backend/middleware/errorHandler.ts`)
+- [x] `TICKET-P1-012`: Global 404 JSON fallback handler for unmapped routes (`backend/middleware/notFoundHandler.ts`)
+- [x] `TICKET-P1-013`: Self-healing React `ErrorBoundary` with reset state recovery, custom fallbacks, and bilingual alerts (`frontend/src/components/ErrorBoundary.tsx`, `frontend/src/context/ErrorContext.tsx`)
+- [x] `TICKET-P1-014`: Autonomous Error Handling Curator Agent audit & verification (`scripts/curator_error_handling.ts`, `tests/curator_error_handling.test.ts` — Score: 10.00/10)

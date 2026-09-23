@@ -8,6 +8,13 @@ import bodyParser from 'body-parser';
 import morgan from 'morgan';
 import { initDb, ensureDbReady } from './db';
 import router from './router';
+import { requestIdMiddleware } from './middleware/requestId';
+import { errorHandler } from './middleware/errorHandler';
+import { notFoundHandler } from './middleware/notFoundHandler';
+import { setupProcessSafety } from './utils/processSafety';
+
+// Initialize defensive process-level safety net
+setupProcessSafety();
 
 import path from 'path';
 import fs from 'fs';
@@ -97,13 +104,14 @@ export const corsOptions: CorsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  exposedHeaders: ['Content-Disposition'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Request-Id'],
+  exposedHeaders: ['Content-Disposition', 'X-Request-Id', 'X-Contract-Hash'],
   credentials: true,
   maxAge: 86400
 };
 
 // Security & Parsing Middleware
+app.use(requestIdMiddleware);
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -148,16 +156,22 @@ app.use((req: Request, res: Response, next: NextFunction) => dbReadinessMiddlewa
 // Mount API router
 app.use('/api', router);
 
-// Global Error Handler to guarantee JSON responses and prevent plain text 500 crashes
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error("Unhandled API Error:", err);
-  res.status(500).json({ message: "Internal Server Error", error: "Internal Server Error" });
-});
+// 404 Handler for unmatched API routes
+app.use('/api', notFoundHandler);
+
+// Global Centralized Error Handler to guarantee JSON responses, operational mapping, and prevent plain text crashes
+app.use(errorHandler);
 
 if (!process.env.VERCEL && process.env.NODE_ENV !== 'test' && process.env.NO_LISTEN !== 'true') {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });
 }
+
+export {
+  errorHandler,
+  notFoundHandler,
+  requestIdMiddleware
+};
 
 export default app;

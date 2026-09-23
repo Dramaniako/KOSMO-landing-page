@@ -169,8 +169,36 @@ GET /api/health
 **Response (200 OK):**
 ```json
 {
-  "status": "healthy",
-  "database": "connected",
-  "timestamp": "2026-09-18T14:00:00.000Z"
+  "status": "ok",
+  "service": "kosmo-api",
+  "timestamp": "2026-09-23T10:00:00.000Z",
+  "uptime": 124.5,
+  "database": {
+    "status": "connected",
+    "queryOk": true
+  }
 }
 ```
+
+---
+
+## 5. Production Error Monitoring, Tracing & Quality Gate
+
+### 5.1 Distributed Request Tracing (`X-Request-Id`)
+All HTTP requests receive or propagate an `X-Request-Id` correlation header. Log shippers (Datadog, AWS CloudWatch, Papertrail) should index `RequestID` for instant multi-service log correlation:
+
+```
+[API 400] [VALIDATION_ERROR] POST /api/auth/register - RequestID: req_9a12c... - Format email tidak valid
+[API 500] [INTERNAL_SERVER_ERROR] POST /api/payment/token - RequestID: req_88b1...
+```
+
+### 5.2 Process-Level Safety Net
+The Node.js runtime registers handlers for `uncaughtException` and `unhandledRejection` (`backend/utils/processSafety.ts`). In production, fatal uncaught exceptions are flushed to `console.error` before exiting with code 1, permitting orchestrators (PM2, Docker, Kubernetes) to perform clean restarts without leaving zombie processes.
+
+### 5.3 Automated Curator Agent Gate
+Before promoting any release to staging or production, execute the autonomous Error Handling Curator Agent:
+
+```bash
+npm run curator:errors
+```
+Release criteria require a composite curator score of `>= 9.0/10.0` (current baseline: **10.00 / 10.0**).

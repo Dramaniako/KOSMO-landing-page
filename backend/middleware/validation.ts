@@ -183,7 +183,15 @@ export function validateBody<T extends z.ZodTypeAny>(schema: T) {
     const result = schema.safeParse(req.body);
     if (!result.success) {
       const errorMessages = result.error.issues.map((e: z.ZodIssue) => e.message).join(', ');
-      res.status(400).json({ message: errorMessages, errors: result.error.flatten() });
+      res.status(400).json({
+        status: 'fail',
+        statusCode: 400,
+        code: 'VALIDATION_ERROR',
+        message: errorMessages,
+        error: errorMessages,
+        errors: result.error.flatten(),
+        details: result.error.flatten()
+      });
       return;
     }
     next();

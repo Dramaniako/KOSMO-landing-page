@@ -123,3 +123,23 @@ To eliminate layout flashing (unauthorized component rendering prior to asynchro
 - Synchronously evaluates `localStorage` token and parsed user role before mounting the dashboard component tree.
 - Automatically handles malformed or tampered storage JSON by purging tokens and redirecting to `/login`.
 - Redirects unauthorized roles directly to their authorized portal without layout flash.
+
+---
+
+## 8. Error Handling & Information Disclosure Prevention (CWE-209)
+
+KOSMO enforces strict defense-in-depth policies against sensitive information leakage via API error responses:
+
+### 8.1 Production Error Sanitization
+- In production (`NODE_ENV === 'production'` or `process.env.VERCEL`), any unexpected server-side exception (HTTP 500) returns a generic `{"message": "Internal Server Error", "error": "Internal Server Error"}` payload.
+- Database query strings, column names, connection strings, and filesystem paths are strictly intercepted by `backend/middleware/errorHandler.ts` and prevented from reaching client HTTP responses.
+- V8 execution stack traces (`err.stack`) are only attached in local development environments.
+
+### 8.2 Operational Error Classification
+Application errors extend from `AppError` with an explicit `isOperational: true` flag. Only operational errors with curated domain error messages (e.g., "Kamar kos sudah penuh", "Format email tidak valid") are transmitted to client UIs.
+
+### 8.3 Correlation IDs for Forensic Auditability
+Instead of returning sensitive stack traces to users, each request generates an `X-Request-Id` (e.g. `req_550e8400...`). When an error occurs, operators can look up the exact correlation ID in secure server-side log streams without ever exposing runtime internals to public callers.
+
+### 8.4 Frontend Fault Isolation
+React `ErrorBoundary` encapsulates application views, preventing render crashes from breaking the entire application. The boundary provides accessible user-facing recovery options without exposing internal component state or unencrypted memory structures.

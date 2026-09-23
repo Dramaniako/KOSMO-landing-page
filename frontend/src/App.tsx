@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider } from './context/LanguageContext';
 import { CurrencyProvider } from './context/CurrencyContext';
+import { ErrorProvider } from './context/ErrorContext';
 
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -33,40 +34,42 @@ export default function App() {
     <ThemeProvider>
       <LanguageProvider>
         <CurrencyProvider>
-          <BrowserRouter>
-            <Suspense fallback={<RouteLoadingFallback />}>
-              <Routes>
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<Login />} />
-                <Route
-                  path="/admin"
-                  element={
-                    <ProtectedRoute allowedRoles={['admin']}>
-                      <AdminDashboard />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/landlord"
-                  element={
-                    <ProtectedRoute allowedRoles={['landlord']}>
-                      <LandlordDashboard />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/tenant"
-                  element={
-                    <ProtectedRoute allowedRoles={['tenant', 'landlord']}>
-                      <TenantDashboard />
-                    </ProtectedRoute>
-                  }
-                />
-                {/* Fallback to landing page */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Suspense>
-          </BrowserRouter>
+          <ErrorProvider>
+            <BrowserRouter>
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <Routes>
+                  <Route path="/" element={<LandingPage />} />
+                  <Route path="/login" element={<Login />} />
+                  <Route
+                    path="/admin"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin']}>
+                        <AdminDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/landlord"
+                    element={
+                      <ProtectedRoute allowedRoles={['landlord']}>
+                        <LandlordDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/tenant"
+                    element={
+                      <ProtectedRoute allowedRoles={['tenant', 'landlord']}>
+                        <TenantDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+                  {/* Fallback to landing page */}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Suspense>
+            </BrowserRouter>
+          </ErrorProvider>
         </CurrencyProvider>
       </LanguageProvider>
     </ThemeProvider>

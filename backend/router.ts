@@ -10,6 +10,10 @@ export {
 } from './middleware/auth';
 export type { JWTPayload, AuthenticatedRequest } from './middleware/auth';
 
+// Centralized Error Architecture Re-exports
+export * from './errors/index';
+export { asyncHandler } from './utils/asyncHandler';
+
 // Domain Route Registrations & Re-exports
 import {
   registerSystemRoutes,

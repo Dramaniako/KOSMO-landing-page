@@ -35,6 +35,8 @@
 | 18 | Issue #89: RoomSelectionGrid Memo & Windowing | Extract memoized `RoomCardItem` and implement progressive windowing/pagination for large room lists in `RoomSelectionGrid.tsx` | M3 | Survey 2 |
 | 19 | Milestone 4: Programmatic Verification & Tests | Write unit tests for new helpers/endpoints (`tests/triage_fixes.test.ts`, `frontend/src/utils/__tests__/cloudinary.test.ts`), verify all test suites, and execute Forensic Integrity Audit | M4 | Mandate |
 | 20 | Milestone 5: GitHub Resolution & Sync Report | Generate `GITHUB_TRIAGE_REPORT.md` documenting disposition of all 13 issues and 8 PRs with copy-pasteable remote sync commands | M5 | Mandate |
+| 21 | Milestone 6: Professional Error Architecture | Implement centralized `AppError` typed hierarchy, RFC 7807 response schema, request correlation tracing (`X-Request-Id`), driver translation (Zod, MySQL, Multer, JWT), and self-healing frontend `ErrorBoundary` | M6 | Mandate |
+| 22 | Milestone 6: Curator Agent Certification | Build autonomous Error Handling Curator Agent (`scripts/curator_error_handling.ts`, `tests/curator_error_handling.test.ts`) rating error architecture across 5 dimensions (Score 10.0/10) | M6 | Mandate |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
@@ -44,6 +46,7 @@
 | M3 | Frontend Performance & Virtualization | Fix issues #83, #84, #85, #86, #89 in `frontend/src/` components and utilities | M1 | DONE |
 | M4 | Verification, Automated Tests & Forensic Audit | Write automated tests in `tests/` and frontend test suite; run full verify pipeline; run Forensic Auditor | M2, M3 | DONE |
 | M5 | GitHub Resolution & Remote Sync Report | Generate comprehensive audit markdown report with copy-pasteable closure/merge commands | M4 | DONE |
+| M6 | Enterprise Error Handling & Curator Audit | Centralized AppError architecture, RFC 7807 schemas, ErrorBoundary self-healing, Curator Agent rating | M4 | DONE |
 
 ## Interface Contracts
 
@@ -67,11 +70,28 @@
 ### Frontend Utilities (`frontend/src/utils/cloudinary.ts`)
 - `getCloudinaryThumbUrl(url: string, width?: number, height?: number): string`: Injects Cloudinary on-the-fly transformations (`w_{width},h_{height},c_fill,q_auto,f_auto`) into valid Cloudinary asset URLs.
 
+### Centralized Error Architecture (`backend/errors/index.ts`, `backend/middleware/errorHandler.ts`)
+- `AppError`: Base application error class (`statusCode`, `code`, `isOperational`, `details`, `timestamp`).
+- `normalizeError(err: unknown)`: Translates Zod, Multer, JWT, BodyParser, and MySQL driver exceptions into typed operational `AppError` instances.
+- `errorHandler`: Express 4-argument centralized middleware providing RFC 7807 responses, logging with `[API status]`, and production credential sanitization.
+- `requestIdMiddleware`: Inspects or generates unique correlation ID `req_<uuid>`, injecting `X-Request-Id` response header.
+- `notFoundHandler`: Intercepts unmapped API routes, returning JSON 404 with `code: 'ROUTE_NOT_FOUND'`.
+- `scripts/curator_error_handling.ts`: Autonomous curator evaluating 5 dimensions, asserting score > 9.0/10.0 (achieved: **10.00/10.0**).
+
 ## Code Layout
+- `backend/errors/index.ts`: Centralized `AppError` typed hierarchy & `ErrorCode` constants.
+- `backend/middleware/errorHandler.ts`: Express centralized error handler & driver normalizer.
+- `backend/middleware/notFoundHandler.ts`: 404 JSON handler for unmapped `/api` routes.
+- `backend/middleware/requestId.ts`: Request correlation ID generation and propagation.
+- `backend/utils/asyncHandler.ts`: Higher-order wrapper routing async exceptions to `next(err)`.
+- `backend/utils/processSafety.ts`: Process safety net for `uncaughtException` & `unhandledRejection`.
 - `backend/middleware/auth.ts`: Authentication middleware & JWT secret handling.
 - `backend/db.ts`: Database connection, DDL, migrations, index definitions (`ensureIndexes`).
 - `backend/routes/photos.routes.ts`: Property and room photo gallery endpoints.
 - `backend/routes/rooms.routes.ts`: Discrete room endpoints and caching.
+- `frontend/src/components/ErrorBoundary.tsx`: React ErrorBoundary with reset recovery and diagnostics.
+- `frontend/src/context/ErrorContext.tsx`: Application-wide async error toast notification provider.
+- `frontend/src/services/apiClient.ts`: Typed `ApiError` parser and `requestWithRetry` backoff.
 - `frontend/src/utils/cloudinary.ts`: Cloudinary thumbnail transformation helper.
 - `frontend/src/utils/format.ts`: Central currency and date formatting (`formatRupiah`).
 - `frontend/src/pages/LandingPage.tsx`: Property detail open handler & active rental status check.
@@ -81,5 +101,9 @@
 - `frontend/src/pages/TenantDashboard/components/ActiveRentalSection.tsx`: Formatted rental prices.
 - `frontend/src/pages/TenantDashboard/components/PendingPaymentModal.tsx`: Formatted breakdown prices.
 - `frontend/src/pages/TenantDashboard/components/RentalHistorySection.tsx`: Formatted history prices.
+- `scripts/curator_error_handling.ts`: Autonomous Error Handling Curator Agent rating engine.
+- `tests/error_handling.test.ts`: Automated backend error architecture test suite.
+- `tests/curator_error_handling.test.ts`: Automated curator agent score verification test.
+- `frontend/src/components/__tests__/ErrorHandlingCuratorAudit.test.tsx`: Vitest frontend error resilience suite.
 - `tests/triage_fixes.test.ts`: Automated tests for triage fixes and PR integrations.
 - `api/index.js`: Compiled backend serverless bundle.

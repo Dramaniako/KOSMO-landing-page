@@ -792,7 +792,13 @@ var authenticateToken = (req, res, next) => {
     token = req.query.token.trim();
   }
   if (!token) {
-    res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
+    res.status(401).json({
+      status: "fail",
+      statusCode: 401,
+      code: "AUTH_TOKEN_MISSING",
+      message: "Akses ditolak. Token otentikasi diperlukan.",
+      error: "Akses ditolak. Token otentikasi diperlukan."
+    });
     return;
   }
   try {
@@ -800,23 +806,136 @@ var authenticateToken = (req, res, next) => {
     req.user = user;
     next();
   } catch (err) {
-    res.status(403).json({ message: "Token tidak valid atau telah kedaluwarsa." });
+    res.status(403).json({
+      status: "fail",
+      statusCode: 403,
+      code: "AUTH_TOKEN_INVALID",
+      message: "Token tidak valid atau telah kedaluwarsa.",
+      error: "Token tidak valid atau telah kedaluwarsa."
+    });
   }
 };
 var requireRole = (allowedRoles) => {
   return (req, res, next) => {
     const user = req.user;
     if (!user) {
-      res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
+      res.status(401).json({
+        status: "fail",
+        statusCode: 401,
+        code: "AUTH_TOKEN_MISSING",
+        message: "Akses ditolak. Token otentikasi diperlukan.",
+        error: "Akses ditolak. Token otentikasi diperlukan."
+      });
       return;
     }
     if (!allowedRoles.includes(user.role)) {
-      res.status(403).json({ message: "Akses ditolak. Peran Anda tidak memiliki izin untuk tindakan ini." });
+      res.status(403).json({
+        status: "fail",
+        statusCode: 403,
+        code: "AUTH_INSUFFICIENT_PERMISSIONS",
+        message: "Akses ditolak. Peran Anda tidak memiliki izin untuk tindakan ini.",
+        error: "Akses ditolak. Peran Anda tidak memiliki izin untuk tindakan ini."
+      });
       return;
     }
     next();
   };
 };
+
+// backend/errors/index.ts
+var ErrorCode = {
+  // General & System
+  INTERNAL_SERVER_ERROR: "INTERNAL_SERVER_ERROR",
+  BAD_REQUEST: "BAD_REQUEST",
+  VALIDATION_ERROR: "VALIDATION_ERROR",
+  UNAUTHORIZED: "UNAUTHORIZED",
+  FORBIDDEN: "FORBIDDEN",
+  NOT_FOUND: "NOT_FOUND",
+  ROUTE_NOT_FOUND: "ROUTE_NOT_FOUND",
+  CONFLICT: "CONFLICT",
+  UNPROCESSABLE_ENTITY: "UNPROCESSABLE_ENTITY",
+  RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
+  SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
+  BAD_GATEWAY: "BAD_GATEWAY",
+  MALFORMED_JSON: "MALFORMED_JSON",
+  // Database & Persistence
+  DATABASE_ERROR: "DATABASE_ERROR",
+  DATABASE_CONNECTION_FAILED: "DATABASE_CONNECTION_FAILED",
+  DATABASE_UNAVAILABLE: "DATABASE_UNAVAILABLE",
+  DUPLICATE_ENTRY: "DUPLICATE_ENTRY",
+  FOREIGN_KEY_VIOLATION: "FOREIGN_KEY_VIOLATION",
+  // Authentication & Access Control
+  AUTH_INVALID_CREDENTIALS: "AUTH_INVALID_CREDENTIALS",
+  AUTH_TOKEN_MISSING: "AUTH_TOKEN_MISSING",
+  AUTH_TOKEN_EXPIRED: "AUTH_TOKEN_EXPIRED",
+  AUTH_TOKEN_INVALID: "AUTH_TOKEN_INVALID",
+  AUTH_PASSWORD_REQUIRED: "AUTH_PASSWORD_REQUIRED",
+  AUTH_PASSWORD_INCORRECT: "AUTH_PASSWORD_INCORRECT",
+  AUTH_USER_NOT_FOUND: "AUTH_USER_NOT_FOUND",
+  AUTH_EMAIL_EXISTS: "AUTH_EMAIL_EXISTS",
+  AUTH_INSUFFICIENT_PERMISSIONS: "AUTH_INSUFFICIENT_PERMISSIONS",
+  // Property & Room Inventory
+  PROPERTY_NOT_FOUND: "PROPERTY_NOT_FOUND",
+  PROPERTY_ACCESS_DENIED: "PROPERTY_ACCESS_DENIED",
+  ROOM_NOT_FOUND: "ROOM_NOT_FOUND",
+  ROOM_OCCUPIED: "ROOM_OCCUPIED",
+  ROOM_MAINTENANCE: "ROOM_MAINTENANCE",
+  ROOM_ALREADY_EXISTS: "ROOM_ALREADY_EXISTS",
+  ROOMS_FULL: "ROOMS_FULL",
+  // Rental & Contract Tenancy
+  RENTAL_NOT_FOUND: "RENTAL_NOT_FOUND",
+  RENTAL_ACCESS_DENIED: "RENTAL_ACCESS_DENIED",
+  RENTAL_ALREADY_ACTIVE: "RENTAL_ALREADY_ACTIVE",
+  SINGLE_ACTIVE_TENANCY_VIOLATION: "SINGLE_ACTIVE_TENANCY_VIOLATION",
+  CONTRACT_PREVIEW_FAILED: "CONTRACT_PREVIEW_FAILED",
+  CONTRACT_SIGNING_FAILED: "CONTRACT_SIGNING_FAILED",
+  CONTRACT_AFFIRMATIVE_CONSENT_REQUIRED: "CONTRACT_AFFIRMATIVE_CONSENT_REQUIRED",
+  // Financial & Withdrawal
+  WITHDRAWAL_INSUFFICIENT_BALANCE: "WITHDRAWAL_INSUFFICIENT_BALANCE",
+  WITHDRAWAL_INVALID_AMOUNT: "WITHDRAWAL_INVALID_AMOUNT",
+  WITHDRAWAL_ALREADY_PROCESSED: "WITHDRAWAL_ALREADY_PROCESSED",
+  PAYMENT_UNCONFIGURED: "PAYMENT_UNCONFIGURED",
+  PAYMENT_GATEWAY_ERROR: "PAYMENT_GATEWAY_ERROR",
+  PAYMENT_SIGNATURE_INVALID: "PAYMENT_SIGNATURE_INVALID",
+  // Media & Storage
+  FILE_TOO_LARGE: "FILE_TOO_LARGE",
+  FILE_UNSUPPORTED_TYPE: "FILE_UNSUPPORTED_TYPE",
+  FILE_UPLOAD_FAILED: "FILE_UPLOAD_FAILED",
+  FILE_LIMIT_EXCEEDED: "FILE_LIMIT_EXCEEDED"
+};
+var AppError = class extends Error {
+  statusCode;
+  code;
+  isOperational;
+  details;
+  timestamp;
+  constructor(message, statusCode = 500, code = ErrorCode.INTERNAL_SERVER_ERROR, isOperational = true, details) {
+    super(message);
+    this.name = this.constructor.name;
+    this.statusCode = statusCode;
+    this.code = code;
+    this.isOperational = isOperational;
+    this.details = details;
+    this.timestamp = (/* @__PURE__ */ new Date()).toISOString();
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+  }
+};
+var NotFoundError = class extends AppError {
+  constructor(message = "Sumber daya yang diminta tidak ditemukan.", code = ErrorCode.NOT_FOUND) {
+    super(message, 404, code, true);
+  }
+};
+function isAppError(error) {
+  return error instanceof AppError;
+}
+function isOperationalError(error) {
+  if (isAppError(error)) {
+    return error.isOperational;
+  }
+  return false;
+}
 
 // backend/routes/system.routes.ts
 import rateLimit from "express-rate-limit";
@@ -1192,7 +1311,15 @@ function validateBody(schema) {
     const result = schema.safeParse(req.body);
     if (!result.success) {
       const errorMessages = result.error.issues.map((e) => e.message).join(", ");
-      res.status(400).json({ message: errorMessages, errors: result.error.flatten() });
+      res.status(400).json({
+        status: "fail",
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
+        message: errorMessages,
+        error: errorMessages,
+        errors: result.error.flatten(),
+        details: result.error.flatten()
+      });
       return;
     }
     next();
@@ -5636,11 +5763,182 @@ registerPaymentRoutes(router);
 registerTicketRoutes(router);
 var router_default = router;
 
+// backend/middleware/requestId.ts
+import crypto6 from "crypto";
+function requestIdMiddleware(req, res, next) {
+  const incomingId = req.headers["x-request-id"];
+  const requestId = typeof incomingId === "string" && incomingId.trim().length > 0 ? incomingId.trim() : `req_${crypto6.randomUUID()}`;
+  req.id = requestId;
+  req.requestId = requestId;
+  res.setHeader("X-Request-Id", requestId);
+  next();
+}
+
+// backend/middleware/errorHandler.ts
+import { ZodError } from "zod";
+function normalizeError(err) {
+  if (isAppError(err)) {
+    return err;
+  }
+  if (err instanceof ZodError) {
+    const errorMessages = err.issues.map((issue) => issue.message).join(", ");
+    return new AppError(
+      errorMessages || "Validasi data gagal.",
+      400,
+      ErrorCode.VALIDATION_ERROR,
+      true,
+      err.flatten()
+    );
+  }
+  const errorObj = err;
+  if (errorObj instanceof SyntaxError && "body" in errorObj && errorObj.status === 400) {
+    return new AppError(
+      "Format payload JSON tidak valid.",
+      400,
+      ErrorCode.MALFORMED_JSON,
+      true
+    );
+  }
+  if (errorObj.name === "MulterError") {
+    if (errorObj.code === "LIMIT_FILE_SIZE") {
+      return new AppError("Ukuran file melebihi batas maksimum 5MB.", 400, ErrorCode.FILE_TOO_LARGE, true);
+    }
+    if (errorObj.code === "LIMIT_FILE_COUNT") {
+      return new AppError("Jumlah file melebihi batas maksimum 10.", 400, ErrorCode.FILE_LIMIT_EXCEEDED, true);
+    }
+    if (errorObj.code === "LIMIT_UNEXPECTED_FILE") {
+      return new AppError("Field unggahan file tidak valid.", 400, ErrorCode.FILE_UNSUPPORTED_TYPE, true);
+    }
+    return new AppError(`Kesalahan unggahan file: ${errorObj.message}`, 400, ErrorCode.FILE_UPLOAD_FAILED, true);
+  }
+  if (errorObj.name === "TokenExpiredError") {
+    return new AppError("Token telah kadaluarsa. Silakan masuk kembali.", 401, ErrorCode.AUTH_TOKEN_EXPIRED, true);
+  }
+  if (errorObj.name === "JsonWebTokenError") {
+    return new AppError("Token tidak valid.", 401, ErrorCode.AUTH_TOKEN_INVALID, true);
+  }
+  if (typeof errorObj.code === "string") {
+    if (errorObj.code === "ER_DUP_ENTRY" || errorObj.errno === 1062) {
+      return new AppError(
+        "Data sudah ada di sistem (duplikasi entri).",
+        409,
+        ErrorCode.DUPLICATE_ENTRY,
+        true
+      );
+    }
+    if (errorObj.code === "ER_NO_REFERENCED_ROW" || errorObj.code === "ER_NO_REFERENCED_ROW_2" || errorObj.errno === 1452) {
+      return new AppError(
+        "Data referensi tidak ditemukan (Foreign Key Violation).",
+        400,
+        ErrorCode.FOREIGN_KEY_VIOLATION,
+        true
+      );
+    }
+    if (errorObj.code === "ER_ROW_IS_REFERENCED" || errorObj.code === "ER_ROW_IS_REFERENCED_2" || errorObj.errno === 1451) {
+      return new AppError(
+        "Data tidak dapat dihapus karena masih terkait dengan entitas lain.",
+        409,
+        ErrorCode.CONFLICT,
+        true
+      );
+    }
+    if (errorObj.code === "ECONNREFUSED" || errorObj.code === "ETIMEDOUT" || errorObj.code === "PROTOCOL_CONNECTION_LOST" || errorObj.code === "ER_ACCESS_DENIED_ERROR") {
+      return new AppError(
+        "Koneksi ke basis data terputus. Silakan coba kembali beberapa saat lagi.",
+        503,
+        ErrorCode.DATABASE_UNAVAILABLE,
+        true
+      );
+    }
+  }
+  const message = errorObj?.message && typeof errorObj.message === "string" ? errorObj.message : "Internal Server Error";
+  const statusCode = typeof errorObj?.statusCode === "number" ? errorObj.statusCode : typeof errorObj?.status === "number" ? errorObj.status : 500;
+  return new AppError(message, statusCode, ErrorCode.INTERNAL_SERVER_ERROR, false);
+}
+function errorHandler(err, req, res, _next) {
+  const normalized = normalizeError(err);
+  const requestId = req.id || req.requestId || res.getHeader("X-Request-Id") || void 0;
+  const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+  const isOperational = isOperationalError(normalized);
+  const statusCode = normalized.statusCode || 500;
+  const status = statusCode >= 500 ? "error" : "fail";
+  let clientMessage = normalized.message;
+  if (!isOperational && statusCode >= 500 && isProduction) {
+    clientMessage = "Internal Server Error";
+  }
+  const logPrefix = `[API ${statusCode}] [${normalized.code}]`;
+  if (statusCode >= 500) {
+    console.error(
+      `${logPrefix} ${req.method} ${req.originalUrl || req.url} - RequestID: ${requestId || "none"}`,
+      err
+    );
+  } else {
+    console.warn(
+      `${logPrefix} ${req.method} ${req.originalUrl || req.url} - RequestID: ${requestId || "none"} - ${clientMessage}`
+    );
+  }
+  const responsePayload = {
+    status,
+    statusCode,
+    code: normalized.code,
+    message: clientMessage,
+    error: clientMessage,
+    timestamp: normalized.timestamp || (/* @__PURE__ */ new Date()).toISOString(),
+    path: req.originalUrl || req.url
+  };
+  if (requestId) {
+    responsePayload.requestId = requestId;
+  }
+  if (normalized.details !== void 0) {
+    responsePayload.details = normalized.details;
+    if (normalized.code === ErrorCode.VALIDATION_ERROR) {
+      responsePayload.errors = normalized.details;
+    }
+  }
+  if (!isProduction && err instanceof Error && err.stack) {
+    responsePayload.stack = err.stack;
+  }
+  res.status(statusCode).json(responsePayload);
+}
+
+// backend/middleware/notFoundHandler.ts
+function notFoundHandler(req, _res, next) {
+  const message = `Endpoint [${req.method}] ${req.originalUrl || req.url} tidak ditemukan.`;
+  next(new NotFoundError(message, ErrorCode.ROUTE_NOT_FOUND));
+}
+
+// backend/utils/processSafety.ts
+var isRegistered = false;
+function setupProcessSafety() {
+  if (isRegistered || process.env.NODE_ENV === "test") {
+    return;
+  }
+  isRegistered = true;
+  process.on("uncaughtException", (err) => {
+    console.error("\u{1F4A5} [CRITICAL FATAL] Uncaught Exception:", {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    if (!process.env.VERCEL && process.env.NODE_ENV === "production") {
+      process.exit(1);
+    }
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("\u26A0\uFE0F [CRITICAL WARNING] Unhandled Promise Rejection:", {
+      reason: reason instanceof Error ? { name: reason.name, message: reason.message, stack: reason.stack } : reason,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
+}
+
 // backend/server.ts
 import path4 from "path";
 import fs3 from "fs";
 import { fileURLToPath } from "url";
 import os from "os";
+setupProcessSafety();
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path4.dirname(__filename);
 var uploadsDir = process.env.VERCEL ? path4.join(os.tmpdir(), "kosmo_uploads") : path4.join(__dirname, "uploads");
@@ -5696,11 +5994,12 @@ var corsOptions = {
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-  exposedHeaders: ["Content-Disposition"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "X-Request-Id"],
+  exposedHeaders: ["Content-Disposition", "X-Request-Id", "X-Contract-Hash"],
   credentials: true,
   maxAge: 86400
 };
+app.use(requestIdMiddleware);
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -5729,10 +6028,8 @@ async function dbReadinessMiddleware(req, res, next, dbReadyFn = ensureDbReady) 
 }
 app.use((req, res, next) => dbReadinessMiddleware(req, res, next));
 app.use("/api", router_default);
-app.use((err, _req, res, _next) => {
-  console.error("Unhandled API Error:", err);
-  res.status(500).json({ message: "Internal Server Error", error: "Internal Server Error" });
-});
+app.use("/api", notFoundHandler);
+app.use(errorHandler);
 if (!process.env.VERCEL && process.env.NODE_ENV !== "test" && process.env.NO_LISTEN !== "true") {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);

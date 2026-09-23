@@ -71,6 +71,12 @@ graph TD
    - All balance mutations, withdrawal lifecycles, and rental occupancy assignments execute inside isolated transactions (`pool.getConnection()`) using row-level locking (`SELECT ... FOR UPDATE`).
    - Automatic rollback and fund reversal guarantees prevent inventory leaks and financial discrepancies.
 
+5. **Enterprise Error Handling & Fault Resilience:**
+   - Centralized typed error hierarchy (`AppError`, `BadRequestError`, `ValidationError`, `ConflictError`, etc.) separating operational issues from programmer bugs.
+   - RFC 7807 problem details specification compliant error envelopes with distributed request tracing (`X-Request-Id`).
+   - Defense-in-depth against data leakage (CWE-209): production environments suppress stack traces and database internals.
+   - Frontend self-healing with React `ErrorBoundary` supporting `resetKeys`, localized custom fallbacks, bilingual messaging, and global `ErrorContext` toasts.
+
 ---
 
 ## 3. Technology Stack Matrix

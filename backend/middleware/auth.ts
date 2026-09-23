@@ -72,7 +72,13 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
   }
 
   if (!token) {
-    res.status(401).json({ message: 'Akses ditolak. Token otentikasi diperlukan.' });
+    res.status(401).json({
+      status: 'fail',
+      statusCode: 401,
+      code: 'AUTH_TOKEN_MISSING',
+      message: 'Akses ditolak. Token otentikasi diperlukan.',
+      error: 'Akses ditolak. Token otentikasi diperlukan.'
+    });
     return;
   }
 
@@ -81,7 +87,13 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
     (req as AuthenticatedRequest).user = user;
     next();
   } catch (err: unknown) {
-    res.status(403).json({ message: 'Token tidak valid atau telah kedaluwarsa.' });
+    res.status(403).json({
+      status: 'fail',
+      statusCode: 403,
+      code: 'AUTH_TOKEN_INVALID',
+      message: 'Token tidak valid atau telah kedaluwarsa.',
+      error: 'Token tidak valid atau telah kedaluwarsa.'
+    });
   }
 };
 
@@ -89,11 +101,23 @@ export const requireRole = (allowedRoles: UserRole[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
     const user = (req as AuthenticatedRequest).user;
     if (!user) {
-      res.status(401).json({ message: 'Akses ditolak. Token otentikasi diperlukan.' });
+      res.status(401).json({
+        status: 'fail',
+        statusCode: 401,
+        code: 'AUTH_TOKEN_MISSING',
+        message: 'Akses ditolak. Token otentikasi diperlukan.',
+        error: 'Akses ditolak. Token otentikasi diperlukan.'
+      });
       return;
     }
     if (!allowedRoles.includes(user.role)) {
-      res.status(403).json({ message: 'Akses ditolak. Peran Anda tidak memiliki izin untuk tindakan ini.' });
+      res.status(403).json({
+        status: 'fail',
+        statusCode: 403,
+        code: 'AUTH_INSUFFICIENT_PERMISSIONS',
+        message: 'Akses ditolak. Peran Anda tidak memiliki izin untuk tindakan ini.',
+        error: 'Akses ditolak. Peran Anda tidak memiliki izin untuk tindakan ini.'
+      });
       return;
     }
     next();
