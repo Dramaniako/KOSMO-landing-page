@@ -162,7 +162,9 @@ app.use('/api', notFoundHandler);
 // Global Centralized Error Handler to guarantee JSON responses, operational mapping, and prevent plain text crashes
 app.use(errorHandler);
 
-if (!process.env.VERCEL && process.env.NODE_ENV !== 'test' && process.env.NO_LISTEN !== 'true') {
+const isDirectRun = Boolean(process.argv[1] && /server(\.ts|\.js)?$/i.test(process.argv[1]));
+
+if (!process.env.VERCEL && process.env.NO_LISTEN !== 'true' && (isDirectRun || process.env.NODE_ENV !== 'test')) {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });

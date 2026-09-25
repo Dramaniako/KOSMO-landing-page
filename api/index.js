@@ -47,9 +47,9 @@ var dbConfig = {
   password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "kosmo_db",
   ...sslOption ? { ssl: sslOption } : {},
-  connectTimeout: 1e4,
+  connectTimeout: 3e4,
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || "5", 10),
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || (isTiDB ? "15" : "10"), 10),
   maxIdle: 5,
   idleTimeout: 6e4,
   enableKeepAlive: true,
@@ -81,7 +81,7 @@ function getPool() {
     const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
     activePool = mysql.createPool({
       ...dbConfig,
-      connectionLimit: isServerless ? 2 : parseInt(process.env.DB_CONNECTION_LIMIT || "10", 10),
+      connectionLimit: isServerless ? 2 : parseInt(process.env.DB_CONNECTION_LIMIT || (isTiDB ? "15" : "10"), 10),
       maxIdle: isServerless ? 1 : 5,
       idleTimeout: isServerless ? 1e4 : 6e4,
       queueLimit: 0
@@ -691,7 +691,7 @@ async function initDb() {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     try {
-      if (!process.env.VERCEL && process.env.NODE_ENV !== "production") {
+      if (!process.env.VERCEL && process.env.NODE_ENV !== "production" && !isTiDB) {
         try {
           const baseConnection = await mysql.createConnection({
             host: dbConfig.host,
@@ -705,7 +705,20 @@ async function initDb() {
         } catch {
         }
       }
-      const [tableRows] = await pool.query("SHOW TABLES");
+      let tableRows = [];
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          const [rows] = await pool.query("SHOW TABLES");
+          tableRows = rows;
+          break;
+        } catch (err) {
+          retries--;
+          if (retries === 0) throw err;
+          console.warn(`[Database Retry] Transient connection/handshake error during SHOW TABLES. Retrying... (${retries} attempts left)`);
+          await new Promise((resolve) => setTimeout(resolve, 1e3));
+        }
+      }
       const existingTables = tableRows.map((row) => Object.values(row)[0].toLowerCase());
       const requiredTables = [
         "users",
@@ -6053,7 +6066,8 @@ app.use((req, res, next) => dbReadinessMiddleware(req, res, next));
 app.use("/api", router_default);
 app.use("/api", notFoundHandler);
 app.use(errorHandler);
-if (!process.env.VERCEL && process.env.NODE_ENV !== "test" && process.env.NO_LISTEN !== "true") {
+var isDirectRun = Boolean(process.argv[1] && /server(\.ts|\.js)?$/i.test(process.argv[1]));
+if (!process.env.VERCEL && process.env.NO_LISTEN !== "true" && (isDirectRun || process.env.NODE_ENV !== "test")) {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });

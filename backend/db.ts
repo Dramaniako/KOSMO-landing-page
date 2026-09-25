@@ -46,9 +46,9 @@ export const dbConfig: ConnectionOptions = {
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'kosmo_db',
   ...(sslOption ? { ssl: sslOption } : {}),
-  connectTimeout: 10000,
+  connectTimeout: 30000,
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '5', 10),
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || (isTiDB ? '15' : '10'), 10),
   maxIdle: 5,
   idleTimeout: 60000,
   enableKeepAlive: true,
@@ -91,7 +91,7 @@ export function getPool(): mysql.Pool {
     const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
     activePool = mysql.createPool({
       ...dbConfig,
-      connectionLimit: isServerless ? 2 : parseInt(process.env.DB_CONNECTION_LIMIT || '10', 10),
+      connectionLimit: isServerless ? 2 : parseInt(process.env.DB_CONNECTION_LIMIT || (isTiDB ? '15' : '10'), 10),
       maxIdle: isServerless ? 1 : 5,
       idleTimeout: isServerless ? 10000 : 60000,
       queueLimit: 0
@@ -830,8 +830,8 @@ export async function initDb(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      // Auto-create database if possible (in local development only)
-      if (!process.env.VERCEL && process.env.NODE_ENV !== 'production') {
+      // Auto-create database if possible (in local development only and non-TiDB)
+      if (!process.env.VERCEL && process.env.NODE_ENV !== 'production' && !isTiDB) {
         try {
           const baseConnection = await mysql.createConnection({
             host: dbConfig.host,
@@ -847,8 +847,21 @@ export async function initDb(): Promise<void> {
         }
       }
 
-      // Serverless optimization: Check if all required tables exist
-      const [tableRows] = await pool.query<RowDataPacket[]>("SHOW TABLES");
+      // Serverless optimization: Check if all required tables exist (with retry for transient SSL handshakes)
+      let tableRows: RowDataPacket[] = [];
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          const [rows] = await pool.query<RowDataPacket[]>("SHOW TABLES");
+          tableRows = rows;
+          break;
+        } catch (err: unknown) {
+          retries--;
+          if (retries === 0) throw err;
+          console.warn(`[Database Retry] Transient connection/handshake error during SHOW TABLES. Retrying... (${retries} attempts left)`);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
       const existingTables = tableRows.map(row => Object.values(row)[0].toLowerCase());
       
       const requiredTables = [
