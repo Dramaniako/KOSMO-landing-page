@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: kosmo-db
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: kosmo_db
+      MYSQL_USER: kosmo_user
+      MYSQL_PASSWORD: kosmo_secure_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - kosmo_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "kosmo_user", "-pkosmo_secure_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kosmo-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: kosmo_user
+      DB_PASSWORD: kosmo_secure_password
+      DB_NAME: kosmo_db
+      DB_SSL: 'false'
+      JWT_SECRET: kosmo_super_secure_jwt_production_secret_key_Bali2026
+      ALLOWED_ORIGINS: http://localhost,http://localhost:80,http://localhost:5173,http://127.0.0.1
+    ports:
+      - "5000:5000"
+    volumes:
+      - kosmo_uploads_data:/app/backend/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kosmo-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  kosmo_db_data:
+  kosmo_uploads_data:

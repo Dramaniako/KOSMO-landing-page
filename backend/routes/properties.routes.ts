@@ -41,7 +41,26 @@ export function registerPropertyRoutes(router: Router): void {
     const targetOwner = ownerId || owner;
     const effectiveMin = priceMin !== undefined ? priceMin : minPrice;
     const effectiveMax = priceMax !== undefined ? priceMax : maxPrice;
-    const cacheKey = `properties:${district || 'all'}:${effectiveMin || 0}:${effectiveMax || 0}:${facility || 'all'}:${targetOwner || 'all'}`;
+
+    const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+    const offsetParam = req.query.offset
+      ? parseInt(String(req.query.offset), 10)
+      : limitParam
+      ? (pageParam - 1) * limitParam
+      : 0;
+
+    const rawFacilities = facility
+      ? Array.isArray(facility)
+        ? facility.flatMap(f => String(f).split(','))
+        : typeof facility === 'string'
+        ? facility.split(',')
+        : []
+      : [];
+    const uniqueFacilitiesList = Array.from(new Set(rawFacilities.map(f => f.trim().toLowerCase()).filter(Boolean)));
+    const sortedFacilityKey = uniqueFacilitiesList.slice().sort().join(',');
+
+    const cacheKey = `properties:${district || 'all'}:${effectiveMin || 0}:${effectiveMax || 0}:${sortedFacilityKey || 'all'}:${targetOwner || 'all'}:${limitParam || 'all'}:${offsetParam || 0}`;
 
     const cachedData = apiCache.get<PropertyRow[]>(cacheKey);
     if (cachedData) {
@@ -75,7 +94,24 @@ export function registerPropertyRoutes(router: Router): void {
         params.push(parseInt(String(effectiveMax), 10));
       }
 
+      if (uniqueFacilitiesList.length > 0) {
+        const placeholders = uniqueFacilitiesList.map(() => '?').join(', ');
+        sql += ` AND p.id IN (
+          SELECT pf_sub.propertyId
+          FROM property_facilities pf_sub
+          WHERE LOWER(pf_sub.facility) IN (${placeholders})
+          GROUP BY pf_sub.propertyId
+          HAVING COUNT(DISTINCT LOWER(pf_sub.facility)) = ?
+        )`;
+        params.push(...uniqueFacilitiesList, uniqueFacilitiesList.length);
+      }
+
       sql += ' GROUP BY p.id';
+
+      if (limitParam && limitParam > 0) {
+        sql += ' LIMIT ? OFFSET ?';
+        params.push(limitParam, Math.max(0, offsetParam));
+      }
 
       const [properties] = await pool.query<(PropertyRow & { facilitiesString?: string })[]>(sql, params);
 
@@ -84,17 +120,7 @@ export function registerPropertyRoutes(router: Router): void {
         delete prop.facilitiesString;
       }
 
-      // Filter by facility in JS if requested
-      let filteredProperties = properties;
-      if (facility) {
-        const facilitiesList = (Array.isArray(facility) ? facility.map(String) : [String(facility)]).map(f => f.toLowerCase());
-        filteredProperties = properties.filter(p => {
-          const propFacSet = new Set((p.facilities || []).map(item => item.toLowerCase()));
-          return facilitiesList.every(f => propFacSet.has(f));
-        });
-      }
-
-      const normalized = filteredProperties.map(normalizePropertySummary);
+      const normalized = properties.map(normalizePropertySummary);
       apiCache.set(cacheKey, normalized, 60);
 
       res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');

@@ -125,6 +125,14 @@ export function registerAuthRoutes(router: Router): void {
           role: user.role
         });
 
+        res.cookie('token', token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+          path: '/'
+        });
+
         res.json({
           message: "Login berhasil!",
           user: safeUser,
@@ -170,6 +178,14 @@ export function registerAuthRoutes(router: Router): void {
           role: newUser.role
         });
 
+        res.cookie('token', token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+          path: '/'
+        });
+
         res.status(201).json({
           message: "Registrasi berhasil!",
           user: safeUser,
@@ -181,6 +197,19 @@ export function registerAuthRoutes(router: Router): void {
       }
     }
   );
+
+  router.post('/auth/logout', (_req: Request, res: Response) => {
+    const cookieOpts = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
+      path: '/'
+    };
+    res.clearCookie('token', cookieOpts);
+    res.clearCookie('auth_token', cookieOpts);
+    res.clearCookie('kosmo_token', cookieOpts);
+    res.json({ message: 'Logout berhasil.' });
+  });
 
   // Current User Profile Getter
   router.get('/auth/me', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {

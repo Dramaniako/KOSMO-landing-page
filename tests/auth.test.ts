@@ -5,7 +5,8 @@ import {
   generateJwtToken,
   verifyJwtToken,
   authenticateToken,
-  requireRole
+  requireRole,
+  parseCookies
 } from '../backend/middleware/auth';
 import type { JWTPayload, AuthenticatedRequest } from '../backend/middleware/auth';
 import {
@@ -319,5 +320,71 @@ test('Authentication logic, password security gates & JWT', async (t) => {
 
     assert.equal(nextCalled, true);
     assert.equal((mockReq as AuthenticatedRequest).user?.id, mockPayload.id);
+  });
+
+  await t.test('parseCookies correctly extracts cookies from cookie header', () => {
+    assert.deepEqual(parseCookies(''), {});
+    assert.deepEqual(parseCookies(undefined), {});
+    const parsed = parseCookies('token=jwt_sample_123; path=/; HttpOnly; kosmo_pref=dark');
+    assert.equal(parsed.token, 'jwt_sample_123');
+    assert.equal(parsed.kosmo_pref, 'dark');
+
+    // Quoted cookies per RFC 6265
+    const parsedQuoted = parseCookies('token="quoted_jwt_value_789"; pref="light"');
+    assert.equal(parsedQuoted.token, 'quoted_jwt_value_789');
+    assert.equal(parsedQuoted.pref, 'light');
+
+    // Array cookie headers
+    const parsedArray = parseCookies(['token=arr_jwt', 'extra=true']);
+    assert.equal(parsedArray.token, 'arr_jwt');
+    assert.equal(parsedArray.extra, 'true');
+  });
+
+  await t.test('authenticateToken accepts JWT from HttpOnly Cookie header', () => {
+    const validToken = generateJwtToken(mockPayload, undefined, '1h');
+    let nextCalled = false;
+    const mockReq = {
+      headers: {
+        cookie: `token=${validToken}; path=/; HttpOnly`
+      },
+      query: {}
+    } as unknown as Request;
+    const mockRes = {
+      status: () => mockRes,
+      json: () => mockRes
+    } as unknown as Response;
+
+    authenticateToken(mockReq, mockRes, () => {
+      nextCalled = true;
+    });
+
+    assert.equal(nextCalled, true);
+    assert.equal((mockReq as AuthenticatedRequest).user?.id, mockPayload.id);
+  });
+
+  await t.test('authenticateToken rejects invalid JWT provided via cookie', () => {
+    let statusCode: number | null = null;
+    let jsonBody: unknown = null;
+    const mockReq = {
+      headers: {
+        cookie: `token=invalid.tampered.jwt`
+      },
+      query: {}
+    } as unknown as Request;
+    const mockRes = {
+      status: (code: number) => {
+        statusCode = code;
+        return mockRes;
+      },
+      json: (body: unknown) => {
+        jsonBody = body;
+        return mockRes;
+      }
+    } as unknown as Response;
+
+    authenticateToken(mockReq, mockRes, () => {});
+
+    assert.equal(statusCode, 403);
+    assert.ok(jsonBody && typeof jsonBody === 'object' && (jsonBody as { code: string }).code === 'AUTH_TOKEN_INVALID');
   });
 });

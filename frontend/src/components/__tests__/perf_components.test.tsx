@@ -39,8 +39,15 @@ describe('Frontend Component Render Performance', () => {
   };
 
   it('renders KosCard in less than 200ms with lazy and async attributes', () => {
-    // Warmup render for JSDOM
-    render(<div />);
+    // Warmup render for JSDOM and icon tree
+    const { unmount } = render(
+      <KosCard
+        property={mockProperty}
+        onOpenDetail={vi.fn()}
+        renderFacilityIcon={() => <span />}
+      />
+    );
+    unmount();
 
     const start = performance.now();
     const { container } = render(
@@ -60,6 +67,24 @@ describe('Frontend Component Render Performance', () => {
   });
 
   it('renders SearchFilterBar with low latency and valid controls', () => {
+    // Warmup render for JSDOM
+    const { unmount } = render(
+      <SearchFilterBar
+        district="Semua"
+        setDistrict={vi.fn()}
+        priceMin={0}
+        setPriceMin={vi.fn()}
+        priceMax={5000000}
+        setPriceMax={vi.fn()}
+        facilities={mockFacilities}
+        toggleFacility={vi.fn()}
+        handleSearch={vi.fn()}
+        resetFilters={vi.fn()}
+        renderFacilityIcon={(name) => <span>{name}</span>}
+      />
+    );
+    unmount();
+
     const start = performance.now();
     const { container } = render(
       <SearchFilterBar
@@ -158,24 +183,38 @@ describe('Frontend Component Render Performance', () => {
   });
 
   it('executes validateIdentity utility in sub-millisecond latency', () => {
+    // Warmup JIT compiler
+    validateIdentity('5171012345678901', 'NIK');
+    validateIdentity('B12345678', 'PASSPORT');
+
+    const iterations = 50;
     const startNik = performance.now();
-    const nikResult = validateIdentity('5171012345678901', 'NIK');
-    const nikDuration = performance.now() - startNik;
+    let nikResult = validateIdentity('5171012345678901', 'NIK');
+    for (let i = 0; i < iterations; i++) {
+      nikResult = validateIdentity('5171012345678901', 'NIK');
+    }
+    const nikDuration = (performance.now() - startNik) / iterations;
 
     expect(nikResult.isValid).toBe(true);
     expect(nikResult.error).toBeNull();
-    expect(nikDuration).toBeLessThan(5);
+    expect(nikDuration).toBeLessThan(1);
 
     const startPassport = performance.now();
-    const passportResult = validateIdentity('B12345678', 'PASSPORT');
-    const passportDuration = performance.now() - startPassport;
+    let passportResult = validateIdentity('B12345678', 'PASSPORT');
+    for (let i = 0; i < iterations; i++) {
+      passportResult = validateIdentity('B12345678', 'PASSPORT');
+    }
+    const passportDuration = (performance.now() - startPassport) / iterations;
 
     expect(passportResult.isValid).toBe(true);
     expect(passportResult.error).toBeNull();
-    expect(passportDuration).toBeLessThan(5);
+    expect(passportDuration).toBeLessThan(1);
   });
 
   it('initializes useIdentityValidation hook within 50ms', () => {
+    // Warmup renderHook harness for JSDOM
+    renderHook(() => null);
+
     const mockUser: User = {
       id: 'usr-perf-1',
       name: 'Ketut Hook Tester',

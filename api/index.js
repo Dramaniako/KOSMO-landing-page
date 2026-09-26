@@ -796,9 +796,37 @@ function verifyJwtToken(token, secret = getJwtSecret()) {
   }
   return { id, email, role };
 }
+function parseCookies(header) {
+  if (!header) return {};
+  const headerStr = Array.isArray(header) ? header.join("; ") : header;
+  if (typeof headerStr !== "string") return {};
+  const cookies = {};
+  for (const pair of headerStr.split(";")) {
+    const idx = pair.indexOf("=");
+    if (idx < 0) continue;
+    const key = pair.substring(0, idx).trim();
+    let val = pair.substring(idx + 1).trim();
+    if (!key) continue;
+    if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
+      val = val.slice(1, -1);
+    }
+    try {
+      cookies[key] = decodeURIComponent(val);
+    } catch {
+      cookies[key] = val;
+    }
+  }
+  return cookies;
+}
 var authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   let token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7).trim() : null;
+  if (!token) {
+    const parsedCookies = parseCookies(req.headers.cookie);
+    const reqCookies = req.cookies;
+    token = reqCookies?.token || parsedCookies["token"] || reqCookies?.auth_token || parsedCookies["auth_token"] || reqCookies?.kosmo_token || parsedCookies["kosmo_token"] || null;
+    if (token) token = token.trim();
+  }
   if (!token && typeof req.query?.downloadToken === "string") {
     token = req.query.downloadToken.trim();
   } else if (!token && typeof req.query?.token === "string") {
@@ -1520,6 +1548,13 @@ function registerAuthRoutes(router2) {
           email: user.email,
           role: user.role
         });
+        res.cookie("token", token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+          maxAge: 7 * 24 * 60 * 60 * 1e3,
+          path: "/"
+        });
         res.json({
           message: "Login berhasil!",
           user: safeUser,
@@ -1560,6 +1595,13 @@ function registerAuthRoutes(router2) {
           email: newUser.email,
           role: newUser.role
         });
+        res.cookie("token", token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+          maxAge: 7 * 24 * 60 * 60 * 1e3,
+          path: "/"
+        });
         res.status(201).json({
           message: "Registrasi berhasil!",
           user: safeUser,
@@ -1571,6 +1613,18 @@ function registerAuthRoutes(router2) {
       }
     }
   );
+  router2.post("/auth/logout", (_req, res) => {
+    const cookieOpts = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/"
+    };
+    res.clearCookie("token", cookieOpts);
+    res.clearCookie("auth_token", cookieOpts);
+    res.clearCookie("kosmo_token", cookieOpts);
+    res.json({ message: "Logout berhasil." });
+  });
   router2.get("/auth/me", authenticateToken, async (req, res) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Otentikasi diperlukan." });
@@ -1994,7 +2048,13 @@ function registerPropertyRoutes(router2) {
     const targetOwner = ownerId || owner;
     const effectiveMin = priceMin !== void 0 ? priceMin : minPrice;
     const effectiveMax = priceMax !== void 0 ? priceMax : maxPrice;
-    const cacheKey = `properties:${district || "all"}:${effectiveMin || 0}:${effectiveMax || 0}:${facility || "all"}:${targetOwner || "all"}`;
+    const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : void 0;
+    const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+    const offsetParam = req.query.offset ? parseInt(String(req.query.offset), 10) : limitParam ? (pageParam - 1) * limitParam : 0;
+    const rawFacilities = facility ? Array.isArray(facility) ? facility.flatMap((f) => String(f).split(",")) : typeof facility === "string" ? facility.split(",") : [] : [];
+    const uniqueFacilitiesList = Array.from(new Set(rawFacilities.map((f) => f.trim().toLowerCase()).filter(Boolean)));
+    const sortedFacilityKey = uniqueFacilitiesList.slice().sort().join(",");
+    const cacheKey = `properties:${district || "all"}:${effectiveMin || 0}:${effectiveMax || 0}:${sortedFacilityKey || "all"}:${targetOwner || "all"}:${limitParam || "all"}:${offsetParam || 0}`;
     const cachedData = apiCache.get(cacheKey);
     if (cachedData) {
       res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
@@ -2024,21 +2084,28 @@ function registerPropertyRoutes(router2) {
         sql += " AND p.price <= ?";
         params.push(parseInt(String(effectiveMax), 10));
       }
+      if (uniqueFacilitiesList.length > 0) {
+        const placeholders = uniqueFacilitiesList.map(() => "?").join(", ");
+        sql += ` AND p.id IN (
+          SELECT pf_sub.propertyId
+          FROM property_facilities pf_sub
+          WHERE LOWER(pf_sub.facility) IN (${placeholders})
+          GROUP BY pf_sub.propertyId
+          HAVING COUNT(DISTINCT LOWER(pf_sub.facility)) = ?
+        )`;
+        params.push(...uniqueFacilitiesList, uniqueFacilitiesList.length);
+      }
       sql += " GROUP BY p.id";
+      if (limitParam && limitParam > 0) {
+        sql += " LIMIT ? OFFSET ?";
+        params.push(limitParam, Math.max(0, offsetParam));
+      }
       const [properties] = await pool.query(sql, params);
       for (const prop of properties) {
         prop.facilities = prop.facilitiesString ? prop.facilitiesString.split(",").filter(Boolean) : [];
         delete prop.facilitiesString;
       }
-      let filteredProperties = properties;
-      if (facility) {
-        const facilitiesList = (Array.isArray(facility) ? facility.map(String) : [String(facility)]).map((f) => f.toLowerCase());
-        filteredProperties = properties.filter((p) => {
-          const propFacSet = new Set((p.facilities || []).map((item) => item.toLowerCase()));
-          return facilitiesList.every((f) => propFacSet.has(f));
-        });
-      }
-      const normalized = filteredProperties.map(normalizePropertySummary);
+      const normalized = properties.map(normalizePropertySummary);
       apiCache.set(cacheKey, normalized, 60);
       res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
       res.json(normalized);
@@ -3045,7 +3112,6 @@ function registerLandlordRoutes(router2) {
 // backend/services/contract.ts
 import PDFDocument from "pdfkit";
 import crypto4 from "crypto";
-import fs2 from "fs";
 import path3 from "path";
 function sanitizeRentalId(id) {
   if (!id || typeof id !== "string") return "contract";
@@ -3213,32 +3279,6 @@ function generateRentalContractBuffer(data) {
     }
   });
 }
-async function generateRentalContractPdf(data, outputDir) {
-  const buffer = await generateRentalContractBuffer(data);
-  const contractHash = computeContractHash(buffer);
-  const sanitizedId = sanitizeRentalId(data.rentalId);
-  const fileName = `contract_${sanitizedId}.pdf`;
-  if (outputDir) {
-    try {
-      const resolvedTargetDir = path3.resolve(outputDir);
-      if (!fs2.existsSync(resolvedTargetDir)) {
-        fs2.mkdirSync(resolvedTargetDir, { recursive: true });
-      }
-      const fullFilePath = path3.join(resolvedTargetDir, fileName);
-      const resolvedFilePath = path3.resolve(fullFilePath);
-      if (resolvedFilePath.startsWith(resolvedTargetDir)) {
-        fs2.writeFileSync(resolvedFilePath, buffer);
-      }
-    } catch {
-    }
-  }
-  return {
-    filePath: `/uploads/${fileName}`,
-    fileName,
-    buffer,
-    contractHash
-  };
-}
 async function generateAndUploadContract(data) {
   const pdfBuffer = await generateRentalContractBuffer(data);
   const contractHash = computeContractHash(pdfBuffer);
@@ -3259,6 +3299,480 @@ async function generateAndUploadContract(data) {
   };
 }
 
+// backend/repositories/contracts.repository.ts
+var ContractsRepository = class {
+  defaultPool;
+  constructor(customPool = pool) {
+    this.defaultPool = customPool;
+  }
+  async findPropertyById(propertyId, conn = this.defaultPool, forUpdate = false) {
+    const sql = `SELECT id, name, address, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ?${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [propertyId]);
+    return rows[0];
+  }
+  async findRoomById(roomId, propertyId, conn = this.defaultPool, forUpdate = false) {
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ?${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [roomId, propertyId]);
+    return rows[0];
+  }
+  async findAvailableRoom(propertyId, conn, forUpdate = true) {
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [propertyId]);
+    return rows[0];
+  }
+  async countRoomsByPropertyId(propertyId, conn = this.defaultPool) {
+    const [rows] = await conn.query(
+      "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+      [propertyId]
+    );
+    return Number(rows[0]?.count || 0);
+  }
+  async findUserById(userId, conn = this.defaultPool, forUpdate = false) {
+    const sql = `SELECT * FROM users WHERE id = ?${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [userId]);
+    return rows[0];
+  }
+  async findActiveRentalsByTenantId(tenantId, conn, forUpdate = true) {
+    const sql = `SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active'${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [tenantId]);
+    return rows;
+  }
+  async insertContractRental(data, conn) {
+    const sql = `INSERT INTO rentals (
+      id,
+      tenantId,
+      propertyId,
+      roomId,
+      propertyName,
+      price,
+      startDate,
+      status,
+      document,
+      contract_url,
+      contract_hash,
+      contract_signed_at,
+      signer_ip,
+      signer_user_agent,
+      tenant_nik_passport,
+      tenant_signature_data,
+      admin_fee_amount,
+      duration_months
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    await conn.query(sql, [
+      data.rentalId,
+      data.tenantId,
+      data.propertyId,
+      data.roomId || null,
+      data.propertyName,
+      data.rentalPrice,
+      data.startDateStr,
+      data.contractUrl || null,
+      data.contractUrl || null,
+      data.contractHash,
+      data.signedAtDate,
+      data.signerIp,
+      data.signerUserAgent,
+      data.tenantNikPassport,
+      data.signatureBase64,
+      data.adminFee,
+      data.duration
+    ]);
+  }
+  async updateRoomOccupied(roomId, conn) {
+    await conn.query("UPDATE rooms SET status = 'occupied' WHERE id = ?", [roomId]);
+  }
+  async incrementPropertyOccupied(propertyId, conn) {
+    await conn.query("UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?", [
+      propertyId
+    ]);
+  }
+  async findRentalContractJoinedById(rentalId) {
+    const sql = `SELECT 
+      r.id AS rental_id,
+      r.tenantId AS rental_tenant_id,
+      r.propertyId AS rental_property_id,
+      r.roomId AS rental_room_id,
+      rm.roomNumber AS room_number,
+      r.propertyName AS rental_property_name,
+      r.price AS rental_price,
+      r.startDate AS rental_start_date,
+      r.status AS rental_status,
+      r.document AS rental_document,
+      r.contract_url,
+      r.contract_hash,
+      r.contract_signed_at,
+      r.signer_ip,
+      r.signer_user_agent,
+      r.tenant_nik_passport,
+      r.tenant_signature_data,
+      r.admin_fee_amount,
+      r.duration_months,
+      p.name AS property_name,
+      p.address AS property_address,
+      p.price AS property_price,
+      p.ownerId AS property_owner_id,
+      u.name AS tenant_name,
+      u.email AS tenant_email,
+      u.phone AS tenant_phone,
+      u.address AS tenant_address,
+      u.occupation AS tenant_occupation,
+      u.emergency_contact_name AS tenant_emergency_contact_name,
+      u.emergency_contact_phone AS tenant_emergency_contact_phone,
+      u.emergency_contact_relation AS tenant_emergency_contact_relation,
+      l.name AS landlord_name,
+      l.email AS landlord_email,
+      l.phone AS landlord_phone
+    FROM rentals r
+    LEFT JOIN properties p ON r.propertyId = p.id
+    LEFT JOIN rooms rm ON r.roomId = rm.id
+    LEFT JOIN users u ON r.tenantId = u.id
+    LEFT JOIN users l ON p.ownerId = l.id
+    WHERE r.id = ?`;
+    const [rows] = await this.defaultPool.query(sql, [rentalId]);
+    return rows[0];
+  }
+};
+var contractsRepository = new ContractsRepository();
+
+// backend/services/contract.service.ts
+var ContractServiceError = class extends Error {
+  constructor(statusCode, message, details) {
+    super(message);
+    this.statusCode = statusCode;
+    this.details = details;
+    this.name = "ContractServiceError";
+  }
+  statusCode;
+  details;
+};
+var ContractService = class {
+  constructor(repo = contractsRepository) {
+    this.repo = repo;
+  }
+  repo;
+  async generatePreview(input) {
+    const {
+      authUser,
+      propertyId,
+      durationMonths,
+      startDate,
+      roomId,
+      tenantNikPassport,
+      signatureBase64,
+      rentalId: customRentalId,
+      signerIp,
+      signerUserAgent
+    } = input;
+    const property = await this.repo.findPropertyById(propertyId);
+    if (!property) {
+      throw new ContractServiceError(404, "Properti tidak ditemukan.");
+    }
+    let room;
+    if (roomId && typeof roomId === "string" && roomId.trim() !== "") {
+      room = await this.repo.findRoomById(roomId.trim(), propertyId);
+      if (!room) {
+        throw new ContractServiceError(404, "Kamar tidak ditemukan pada properti ini.");
+      }
+    }
+    const tenant = await this.repo.findUserById(authUser.id);
+    let landlord = property.ownerId ? await this.repo.findUserById(property.ownerId) : void 0;
+    const signedAtDate = /* @__PURE__ */ new Date();
+    const signedAtIso = signedAtDate.toISOString();
+    const duration = Number(durationMonths) || 1;
+    const monthlyPrice = room && typeof room.price === "number" && room.price > 0 ? Number(room.price) : Number(property.price) || 0;
+    const adminFee = 5e3;
+    const totalPrice = monthlyPrice * duration + adminFee;
+    const startDateStr = startDate || signedAtIso.split("T")[0];
+    const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : "preview-draft";
+    const contractData = {
+      rentalId,
+      roomId: room ? room.id : void 0,
+      roomNumber: room ? room.roomNumber : void 0,
+      propertyName: property.name,
+      propertyAddress: property.address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
+      landlordName: landlord ? landlord.name : "PT KOSMO Bali Hospitality / Pengelola Properti",
+      landlordEmail: landlord ? landlord.email : "hospitality@kosmo.id",
+      landlordPhone: landlord ? landlord.phone : "+62 361-900-5676",
+      tenantName: tenant ? tenant.name : authUser.email,
+      tenantEmail: tenant ? tenant.email : authUser.email,
+      tenantPhone: tenant ? tenant.phone || "" : "",
+      tenantNikPassport: tenantNikPassport || (tenant ? tenant.identity_number : "") || "-",
+      tenantAddress: tenant ? tenant.address || "" : "",
+      tenantOccupation: tenant ? tenant.occupation || "" : "",
+      emergencyContactName: tenant ? tenant.emergency_contact_name || "" : "",
+      emergencyContactPhone: tenant ? tenant.emergency_contact_phone || "" : "",
+      emergencyContactRelation: tenant ? tenant.emergency_contact_relation || "" : "",
+      startDate: startDateStr,
+      durationMonths: duration,
+      monthlyPrice,
+      pricePerMonth: monthlyPrice,
+      totalPrice,
+      adminFee,
+      signatureBase64: signatureBase64 || void 0,
+      signerIp,
+      signerUserAgent,
+      signedAt: signedAtIso,
+      utilityQuotas: {
+        electricityKwh: 200,
+        water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
+        wifiMbps: 100,
+        security: "24/7 CCTV & Security Access",
+        waste: "Daily Waste Management Included"
+      }
+    };
+    const pdfBuffer = await generateRentalContractBuffer(contractData);
+    const contractHash = computeContractHash(pdfBuffer);
+    const profileStatus = tenant ? isUserProfileComplete(tenant) : { complete: false, missingFields: ["user"], missingFieldLabels: ["Data Pengguna"] };
+    return {
+      success: true,
+      contractData,
+      contractHash,
+      monthlyPrice,
+      adminFee,
+      totalPrice,
+      totalAmount: totalPrice,
+      room: room ? {
+        id: room.id,
+        roomNumber: room.roomNumber,
+        floor: room.floor,
+        type: room.type,
+        price: room.price,
+        effectivePrice: monthlyPrice,
+        status: room.status
+      } : null,
+      isProfileComplete: profileStatus.complete,
+      missingProfileFields: profileStatus.missingFields,
+      missingProfileFieldLabels: profileStatus.missingFieldLabels
+    };
+  }
+  async signContract(input) {
+    const {
+      authUser,
+      propertyId,
+      durationMonths,
+      startDate,
+      roomId,
+      tenantNikPassport,
+      signatureBase64,
+      rentalId: customRentalId,
+      signerIp,
+      signerUserAgent
+    } = input;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const tenant = await this.repo.findUserById(authUser.id, connection, true);
+      if (!tenant) {
+        await connection.rollback();
+        throw new ContractServiceError(404, "Pengguna tidak ditemukan.");
+      }
+      const profileCheck = isUserProfileComplete(tenant);
+      if (!profileCheck.complete) {
+        await connection.rollback();
+        throw new ContractServiceError(
+          422,
+          "Profil identitas hukum penyewa belum lengkap. Berdasarkan Pasal 1320 KUHPerdata & UU ITE, Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, dan Kontak Darurat) pada profil Anda sebelum menyewa kos.",
+          {
+            missingFields: profileCheck.missingFields,
+            missingFieldLabels: profileCheck.missingFieldLabels
+          }
+        );
+      }
+      const activeRentals = await this.repo.findActiveRentalsByTenantId(authUser.id, connection, true);
+      if (activeRentals.length > 0) {
+        await connection.rollback();
+        throw new ContractServiceError(
+          409,
+          "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
+        );
+      }
+      const property = await this.repo.findPropertyById(propertyId, connection, true);
+      if (!property) {
+        await connection.rollback();
+        throw new ContractServiceError(404, "Properti tidak ditemukan.");
+      }
+      if (property.occupiedRooms >= property.totalRooms) {
+        await connection.rollback();
+        throw new ContractServiceError(400, "Kamar kos sudah penuh.");
+      }
+      let selectedRoom;
+      if (roomId && typeof roomId === "string" && roomId.trim() !== "") {
+        selectedRoom = await this.repo.findRoomById(roomId.trim(), propertyId, connection, true);
+        if (!selectedRoom) {
+          await connection.rollback();
+          throw new ContractServiceError(404, "Kamar tidak ditemukan pada properti ini.");
+        }
+        if (selectedRoom.status !== "available") {
+          await connection.rollback();
+          throw new ContractServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
+        }
+      } else {
+        const availableRoom = await this.repo.findAvailableRoom(propertyId, connection, true);
+        if (availableRoom) {
+          selectedRoom = availableRoom;
+        } else {
+          const discreteCount = await this.repo.countRoomsByPropertyId(propertyId, connection);
+          if (discreteCount > 0) {
+            await connection.rollback();
+            throw new ContractServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
+          }
+        }
+      }
+      let landlord = property.ownerId ? await this.repo.findUserById(property.ownerId, connection) : void 0;
+      const signedAtDate = /* @__PURE__ */ new Date();
+      const signedAtIso = signedAtDate.toISOString();
+      const duration = Number(durationMonths) || 1;
+      const rentalPrice = selectedRoom && typeof selectedRoom.price === "number" && selectedRoom.price > 0 ? Number(selectedRoom.price) : Number(property.price) || 0;
+      const adminFee = 5e3;
+      const totalAmount = rentalPrice * duration + adminFee;
+      const startDateStr = startDate || signedAtIso.split("T")[0];
+      const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
+      const contractData = {
+        rentalId,
+        roomId: selectedRoom ? selectedRoom.id : void 0,
+        roomNumber: selectedRoom ? selectedRoom.roomNumber : void 0,
+        propertyName: property.name,
+        propertyAddress: property.address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
+        landlordName: landlord ? landlord.name : "PT KOSMO Bali Hospitality / Pengelola Properti",
+        landlordEmail: landlord ? landlord.email : "hospitality@kosmo.id",
+        landlordPhone: landlord ? landlord.phone : "+62 361-900-5676",
+        tenantName: tenant.name,
+        tenantEmail: tenant.email,
+        tenantPhone: tenant.phone || "",
+        tenantNikPassport: tenantNikPassport || tenant.identity_number || "-",
+        tenantAddress: tenant.address || "",
+        tenantOccupation: tenant.occupation || "",
+        emergencyContactName: tenant.emergency_contact_name || "",
+        emergencyContactPhone: tenant.emergency_contact_phone || "",
+        emergencyContactRelation: tenant.emergency_contact_relation || "",
+        startDate: startDateStr,
+        durationMonths: duration,
+        monthlyPrice: rentalPrice,
+        pricePerMonth: rentalPrice,
+        totalPrice: totalAmount,
+        adminFee,
+        signatureBase64,
+        signerIp,
+        signerUserAgent,
+        signedAt: signedAtDate,
+        utilityQuotas: {
+          electricityKwh: 200,
+          water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
+          wifiMbps: 100,
+          security: "24/7 CCTV & Security Access",
+          waste: "Daily Waste Management Included"
+        }
+      };
+      const uploadResult = await generateAndUploadContract(contractData);
+      const contractUrl = uploadResult.cloudinaryUrl || `/uploads/contract_${sanitizeRentalId(rentalId)}.pdf`;
+      const contractHash = uploadResult.contractHash;
+      await this.repo.insertContractRental(
+        {
+          rentalId,
+          tenantId: authUser.id,
+          propertyId,
+          roomId: selectedRoom ? selectedRoom.id : null,
+          propertyName: property.name,
+          rentalPrice,
+          startDateStr,
+          contractUrl,
+          contractHash,
+          signedAtDate,
+          signerIp,
+          signerUserAgent,
+          tenantNikPassport: tenantNikPassport || tenant.identity_number || "-",
+          signatureBase64,
+          adminFee,
+          duration
+        },
+        connection
+      );
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rentals");
+      return {
+        success: true,
+        message: "Kontrak digital berhasil ditandatangani. Silakan selesaikan pembayaran.",
+        rentalId,
+        roomId: selectedRoom ? selectedRoom.id : null,
+        roomNumber: selectedRoom ? selectedRoom.roomNumber : null,
+        contractUrl,
+        contractHash,
+        adminFee,
+        totalAmount,
+        signedAt: signedAtIso
+      };
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+  async getContractPdf(rentalId, authUser) {
+    const rental = await this.repo.findRentalContractJoinedById(rentalId);
+    if (!rental) {
+      throw new ContractServiceError(404, "Data sewa tidak ditemukan.");
+    }
+    const isTenant = authUser.id === rental.rental_tenant_id;
+    const isOwner = Boolean(rental.property_owner_id && authUser.id === rental.property_owner_id);
+    const isAdmin = authUser.role === "admin";
+    if (!isTenant && !isOwner && !isAdmin) {
+      throw new ContractServiceError(403, "Akses ditolak ke dokumen kontrak ini.");
+    }
+    const contractDuration = Number(rental.duration_months || 1);
+    const contractMonthlyPrice = Number(rental.rental_price || rental.property_price || 0);
+    const contractAdminFee = rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? Number(rental.admin_fee_amount) : 5e3;
+    const contractTotalPrice = contractMonthlyPrice * contractDuration + contractAdminFee;
+    const contractData = {
+      rentalId: rental.rental_id,
+      roomId: rental.rental_room_id || void 0,
+      roomNumber: rental.room_number || void 0,
+      propertyName: rental.rental_property_name || rental.property_name || "Unit KOSMO Bali",
+      propertyAddress: rental.property_address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
+      landlordName: rental.landlord_name || "PT KOSMO Bali Hospitality / Pengelola Properti",
+      landlordEmail: rental.landlord_email || "hospitality@kosmo.id",
+      landlordPhone: rental.landlord_phone || "+62 361-900-5676",
+      tenantName: rental.tenant_name || "Penyewa KOSMO",
+      tenantEmail: rental.tenant_email || "",
+      tenantPhone: rental.tenant_phone || "",
+      tenantNikPassport: rental.tenant_nik_passport || "-",
+      tenantAddress: rental.tenant_address || "",
+      tenantOccupation: rental.tenant_occupation || "",
+      emergencyContactName: rental.tenant_emergency_contact_name || "",
+      emergencyContactPhone: rental.tenant_emergency_contact_phone || "",
+      emergencyContactRelation: rental.tenant_emergency_contact_relation || "",
+      startDate: rental.rental_start_date || (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
+      durationMonths: contractDuration,
+      monthlyPrice: contractMonthlyPrice,
+      pricePerMonth: contractMonthlyPrice,
+      totalPrice: contractTotalPrice,
+      adminFee: contractAdminFee,
+      signatureBase64: rental.tenant_signature_data || void 0,
+      signerIp: rental.signer_ip || void 0,
+      signerUserAgent: rental.signer_user_agent || void 0,
+      signedAt: rental.contract_signed_at ? new Date(rental.contract_signed_at).toISOString() : void 0,
+      utilityQuotas: {
+        electricityKwh: 200,
+        water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
+        wifiMbps: 100,
+        security: "24/7 CCTV & Security Access",
+        waste: "Daily Waste Management Included"
+      }
+    };
+    const pdfBuffer = await generateRentalContractBuffer(contractData);
+    const computedHash = computeContractHash(pdfBuffer);
+    const contractHash = rental.contract_hash || computedHash;
+    const safeId = sanitizeRentalId(rental.rental_id);
+    return {
+      pdfBuffer,
+      contractHash,
+      safeId
+    };
+  }
+};
+var contractService = new ContractService();
+
 // backend/routes/contracts.routes.ts
 function registerContractRoutes(router2) {
   router2.post(
@@ -3270,113 +3784,30 @@ function registerContractRoutes(router2) {
       if (!authUser) {
         return res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
       }
-      const {
-        propertyId,
-        durationMonths,
-        startDate,
-        roomId,
-        tenantNikPassport,
-        signatureBase64,
-        rentalId: customRentalId
-      } = req.body;
+      const signerIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.socket.remoteAddress || "127.0.0.1";
+      const signerUserAgent = req.headers["user-agent"] || "Mozilla/5.0 (KOSMO Secure Client)";
       try {
-        const [propRows] = await pool.query(
-          "SELECT id, name, address, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ?",
-          [propertyId]
-        );
-        const property = propRows[0];
-        if (!property) {
-          return res.status(404).json({ success: false, message: "Properti tidak ditemukan." });
-        }
-        let room;
-        if (roomId && typeof roomId === "string" && roomId.trim() !== "") {
-          const [roomRows] = await pool.query(
-            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ?",
-            [roomId.trim(), propertyId]
-          );
-          room = roomRows[0];
-          if (!room) {
-            return res.status(404).json({ success: false, message: "Kamar tidak ditemukan pada properti ini." });
-          }
-        }
-        const [userRows] = await pool.query("SELECT * FROM users WHERE id = ?", [authUser.id]);
-        const tenant = userRows[0];
-        let landlord;
-        if (property.ownerId) {
-          const [landlordRows] = await pool.query("SELECT * FROM users WHERE id = ?", [property.ownerId]);
-          landlord = landlordRows[0];
-        }
-        const signerIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.socket.remoteAddress || "127.0.0.1";
-        const signerUserAgent = req.headers["user-agent"] || "Mozilla/5.0 (KOSMO Secure Client)";
-        const signedAtDate = /* @__PURE__ */ new Date();
-        const signedAtIso = signedAtDate.toISOString();
-        const duration = Number(durationMonths) || 1;
-        const monthlyPrice = room && typeof room.price === "number" && room.price > 0 ? Number(room.price) : Number(property.price) || 0;
-        const adminFee = 5e3;
-        const totalPrice = monthlyPrice * duration + adminFee;
-        const startDateStr = startDate || signedAtIso.split("T")[0];
-        const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : "preview-draft";
-        const contractData = {
-          rentalId,
-          roomId: room ? room.id : void 0,
-          roomNumber: room ? room.roomNumber : void 0,
-          propertyName: property.name,
-          propertyAddress: property.address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
-          landlordName: landlord ? landlord.name : "PT KOSMO Bali Hospitality / Pengelola Properti",
-          landlordEmail: landlord ? landlord.email : "hospitality@kosmo.id",
-          landlordPhone: landlord ? landlord.phone : "+62 361-900-5676",
-          tenantName: tenant ? tenant.name : authUser.email,
-          tenantEmail: tenant ? tenant.email : authUser.email,
-          tenantPhone: tenant ? tenant.phone || "" : "",
-          tenantNikPassport: tenantNikPassport || (tenant ? tenant.identity_number : "") || "-",
-          tenantAddress: tenant ? tenant.address || "" : "",
-          tenantOccupation: tenant ? tenant.occupation || "" : "",
-          emergencyContactName: tenant ? tenant.emergency_contact_name || "" : "",
-          emergencyContactPhone: tenant ? tenant.emergency_contact_phone || "" : "",
-          emergencyContactRelation: tenant ? tenant.emergency_contact_relation || "" : "",
-          startDate: startDateStr,
-          durationMonths: duration,
-          monthlyPrice,
-          pricePerMonth: monthlyPrice,
-          totalPrice,
-          adminFee,
-          signatureBase64: signatureBase64 || void 0,
+        const preview = await contractService.generatePreview({
+          authUser,
+          propertyId: req.body.propertyId,
+          durationMonths: req.body.durationMonths,
+          startDate: req.body.startDate,
+          roomId: req.body.roomId,
+          tenantNikPassport: req.body.tenantNikPassport,
+          signatureBase64: req.body.signatureBase64,
+          rentalId: req.body.rentalId,
           signerIp,
-          signerUserAgent,
-          signedAt: signedAtIso,
-          utilityQuotas: {
-            electricityKwh: 200,
-            water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
-            wifiMbps: 100,
-            security: "24/7 CCTV & Security Access",
-            waste: "Daily Waste Management Included"
-          }
-        };
-        const pdfBuffer = await generateRentalContractBuffer(contractData);
-        const contractHash = computeContractHash(pdfBuffer);
-        const profileStatus = tenant ? isUserProfileComplete(tenant) : { complete: false, missingFields: ["user"], missingFieldLabels: ["Data Pengguna"] };
-        return res.status(200).json({
-          success: true,
-          contractData,
-          contractHash,
-          monthlyPrice,
-          adminFee,
-          totalPrice,
-          totalAmount: totalPrice,
-          room: room ? {
-            id: room.id,
-            roomNumber: room.roomNumber,
-            floor: room.floor,
-            type: room.type,
-            price: room.price,
-            effectivePrice: monthlyPrice,
-            status: room.status
-          } : null,
-          isProfileComplete: profileStatus.complete,
-          missingProfileFields: profileStatus.missingFields,
-          missingProfileFieldLabels: profileStatus.missingFieldLabels
+          signerUserAgent
         });
+        return res.status(200).json(preview);
       } catch (err) {
+        if (err instanceof ContractServiceError) {
+          return res.status(err.statusCode).json({
+            success: false,
+            message: err.message,
+            ...err.details
+          });
+        }
         console.error("Contract preview error:", err);
         return res.status(500).json({ success: false, message: "Gagal membuat pratinjau kontrak digital." });
       }
@@ -3391,198 +3822,32 @@ function registerContractRoutes(router2) {
       if (!authUser) {
         return res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
       }
-      const {
-        propertyId,
-        durationMonths,
-        startDate,
-        roomId,
-        tenantNikPassport,
-        signatureBase64,
-        rentalId: customRentalId
-      } = req.body;
-      const connection = await pool.getConnection();
+      const signerIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.socket.remoteAddress || "127.0.0.1";
+      const signerUserAgent = req.headers["user-agent"] || "Mozilla/5.0 (KOSMO Secure Client)";
       try {
-        await connection.beginTransaction();
-        const [userRows] = await connection.query("SELECT * FROM users WHERE id = ? FOR UPDATE", [authUser.id]);
-        const tenant = userRows[0];
-        if (!tenant) {
-          await connection.rollback();
-          return res.status(404).json({ success: false, message: "Pengguna tidak ditemukan." });
-        }
-        const profileCheck = isUserProfileComplete(tenant);
-        if (!profileCheck.complete) {
-          await connection.rollback();
-          return res.status(422).json({
-            success: false,
-            message: "Profil identitas hukum penyewa belum lengkap. Berdasarkan Pasal 1320 KUHPerdata & UU ITE, Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, dan Kontak Darurat) pada profil Anda sebelum menyewa kos.",
-            missingFields: profileCheck.missingFields,
-            missingFieldLabels: profileCheck.missingFieldLabels
-          });
-        }
-        const [activeRentals] = await connection.query(
-          "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE",
-          [authUser.id]
-        );
-        if (activeRentals.length > 0) {
-          await connection.rollback();
-          return res.status(409).json({
-            success: false,
-            message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
-          });
-        }
-        const [propRows] = await connection.query(
-          "SELECT id, name, address, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
-          [propertyId]
-        );
-        const property = propRows[0];
-        if (!property) {
-          await connection.rollback();
-          return res.status(404).json({ success: false, message: "Properti tidak ditemukan." });
-        }
-        if (property.occupiedRooms >= property.totalRooms) {
-          await connection.rollback();
-          return res.status(400).json({ success: false, message: "Kamar kos sudah penuh." });
-        }
-        let selectedRoom;
-        if (roomId && typeof roomId === "string" && roomId.trim() !== "") {
-          const [roomRows] = await connection.query(
-            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE",
-            [roomId.trim(), propertyId]
-          );
-          selectedRoom = roomRows[0];
-          if (!selectedRoom) {
-            await connection.rollback();
-            return res.status(404).json({ success: false, message: "Kamar tidak ditemukan pada properti ini." });
-          }
-          if (selectedRoom.status !== "available") {
-            await connection.rollback();
-            return res.status(409).json({
-              success: false,
-              message: "Kamar yang Anda pilih sudah tidak tersedia."
-            });
-          }
-        } else {
-          const [availableRoomRows] = await connection.query(
-            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
-            [propertyId]
-          );
-          if (availableRoomRows.length > 0) {
-            selectedRoom = availableRoomRows[0];
-          } else {
-            const [discreteCountRows] = await connection.query(
-              "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
-              [propertyId]
-            );
-            if (Number(discreteCountRows[0]?.count || 0) > 0) {
-              await connection.rollback();
-              return res.status(409).json({
-                success: false,
-                message: "Kamar yang Anda pilih sudah tidak tersedia."
-              });
-            }
-          }
-        }
-        let landlord;
-        if (property.ownerId) {
-          const [landlordRows] = await connection.query("SELECT * FROM users WHERE id = ?", [property.ownerId]);
-          landlord = landlordRows[0];
-        }
-        const signerIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.socket.remoteAddress || "127.0.0.1";
-        const signerUserAgent = req.headers["user-agent"] || "Mozilla/5.0 (KOSMO Secure Client)";
-        const signedAtDate = /* @__PURE__ */ new Date();
-        const signedAtIso = signedAtDate.toISOString();
-        const duration = Number(durationMonths) || 1;
-        const adminFee = 5e3;
-        const rentalPrice = selectedRoom && typeof selectedRoom.price === "number" && selectedRoom.price > 0 ? Number(selectedRoom.price) : Number(property.price) || 0;
-        const totalAmount = rentalPrice * duration + adminFee;
-        const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
-        const startDateStr = startDate || signedAtIso.split("T")[0];
-        const contractData = {
-          rentalId,
-          roomId: selectedRoom ? selectedRoom.id : void 0,
-          roomNumber: selectedRoom ? selectedRoom.roomNumber : void 0,
-          propertyName: property.name,
-          propertyAddress: property.address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
-          landlordName: landlord ? landlord.name : "PT KOSMO Bali Hospitality / Pengelola Properti",
-          landlordEmail: landlord ? landlord.email : "hospitality@kosmo.id",
-          landlordPhone: landlord ? landlord.phone : "+62 361-900-5676",
-          tenantName: tenant ? tenant.name : authUser.email,
-          tenantEmail: tenant ? tenant.email : authUser.email,
-          tenantPhone: tenant ? tenant.phone || "" : "",
-          tenantNikPassport: tenantNikPassport || (tenant ? tenant.identity_number : "") || "-",
-          tenantAddress: tenant ? tenant.address || "" : "",
-          tenantOccupation: tenant ? tenant.occupation || "" : "",
-          emergencyContactName: tenant ? tenant.emergency_contact_name || "" : "",
-          emergencyContactPhone: tenant ? tenant.emergency_contact_phone || "" : "",
-          emergencyContactRelation: tenant ? tenant.emergency_contact_relation || "" : "",
-          startDate: startDateStr,
-          durationMonths: duration,
-          monthlyPrice: rentalPrice,
-          pricePerMonth: rentalPrice,
-          totalPrice: totalAmount,
-          adminFee,
-          signatureBase64,
+        const result = await contractService.signContract({
+          authUser,
+          propertyId: req.body.propertyId,
+          durationMonths: req.body.durationMonths,
+          startDate: req.body.startDate,
+          roomId: req.body.roomId,
+          tenantNikPassport: req.body.tenantNikPassport,
+          signatureBase64: req.body.signatureBase64,
+          rentalId: req.body.rentalId,
           signerIp,
-          signerUserAgent,
-          signedAt: signedAtIso,
-          utilityQuotas: {
-            electricityKwh: 200,
-            water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
-            wifiMbps: 100,
-            security: "24/7 CCTV & Security Access",
-            waste: "Daily Waste Management Included"
-          }
-        };
-        const uploadResult = await generateAndUploadContract(contractData);
-        const contractUrl = uploadResult.cloudinaryUrl || `/uploads/contract_${sanitizeRentalId(rentalId)}.pdf`;
-        const contractHash = uploadResult.contractHash;
-        await connection.query(
-          `INSERT INTO rentals (
-            id, tenantId, propertyId, roomId, propertyName, price, startDate, status,
-            document, contract_url, contract_hash, contract_signed_at,
-            signer_ip, signer_user_agent, tenant_nik_passport, tenant_signature_data, admin_fee_amount, duration_months
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            rentalId,
-            authUser.id,
-            propertyId,
-            selectedRoom ? selectedRoom.id : null,
-            property.name,
-            rentalPrice,
-            startDateStr,
-            contractUrl,
-            contractUrl,
-            contractHash,
-            signedAtDate,
-            signerIp,
-            signerUserAgent,
-            tenantNikPassport,
-            signatureBase64,
-            adminFee,
-            duration
-          ]
-        );
-        await connection.commit();
-        apiCache.invalidatePattern("properties");
-        apiCache.invalidatePattern("rentals");
-        return res.status(201).json({
-          success: true,
-          message: "Kontrak digital berhasil ditandatangani. Silakan selesaikan pembayaran.",
-          rentalId,
-          roomId: selectedRoom ? selectedRoom.id : null,
-          roomNumber: selectedRoom ? selectedRoom.roomNumber : null,
-          contractUrl,
-          contractHash,
-          adminFee,
-          totalAmount,
-          signedAt: signedAtIso
+          signerUserAgent
         });
+        return res.status(201).json(result);
       } catch (err) {
-        await connection.rollback();
+        if (err instanceof ContractServiceError) {
+          return res.status(err.statusCode).json({
+            success: false,
+            message: err.message,
+            ...err.details
+          });
+        }
         console.error("Contract sign error:", err);
         return res.status(500).json({ success: false, message: "Gagal memproses penandatanganan kontrak digital." });
-      } finally {
-        connection.release();
       }
     }
   );
@@ -3596,104 +3861,7 @@ function registerContractRoutes(router2) {
         return res.status(401).json({ message: "Akses ditolak. Token otentikasi diperlukan." });
       }
       try {
-        const [rows] = await pool.query(
-          `SELECT 
-            r.id AS rental_id,
-            r.tenantId AS rental_tenant_id,
-            r.propertyId AS rental_property_id,
-            r.roomId AS rental_room_id,
-            rm.roomNumber AS room_number,
-            r.propertyName AS rental_property_name,
-            r.price AS rental_price,
-            r.startDate AS rental_start_date,
-            r.status AS rental_status,
-            r.document AS rental_document,
-            r.contract_url,
-            r.contract_hash,
-            r.contract_signed_at,
-            r.signer_ip,
-            r.signer_user_agent,
-            r.tenant_nik_passport,
-            r.tenant_signature_data,
-            r.admin_fee_amount,
-            r.duration_months,
-            p.name AS property_name,
-            p.address AS property_address,
-            p.price AS property_price,
-            p.ownerId AS property_owner_id,
-            u.name AS tenant_name,
-            u.email AS tenant_email,
-            u.phone AS tenant_phone,
-            u.address AS tenant_address,
-            u.occupation AS tenant_occupation,
-            u.emergency_contact_name AS tenant_emergency_contact_name,
-            u.emergency_contact_phone AS tenant_emergency_contact_phone,
-            u.emergency_contact_relation AS tenant_emergency_contact_relation,
-            l.name AS landlord_name,
-            l.email AS landlord_email,
-            l.phone AS landlord_phone
-          FROM rentals r
-          LEFT JOIN properties p ON r.propertyId = p.id
-          LEFT JOIN rooms rm ON r.roomId = rm.id
-          LEFT JOIN users u ON r.tenantId = u.id
-          LEFT JOIN users l ON p.ownerId = l.id
-          WHERE r.id = ?`,
-          [id]
-        );
-        const rental = rows[0];
-        if (!rental) {
-          return res.status(404).json({ message: "Data sewa tidak ditemukan." });
-        }
-        const isTenant = authUser.id === rental.rental_tenant_id;
-        const isOwner = Boolean(rental.property_owner_id && authUser.id === rental.property_owner_id);
-        const isAdmin = authUser.role === "admin";
-        if (!isTenant && !isOwner && !isAdmin) {
-          return res.status(403).json({ message: "Akses ditolak ke dokumen kontrak ini." });
-        }
-        const contractDuration = Number(rental.duration_months || 1);
-        const contractMonthlyPrice = Number(rental.rental_price || rental.property_price || 0);
-        const contractAdminFee = rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? Number(rental.admin_fee_amount) : 5e3;
-        const contractTotalPrice = contractMonthlyPrice * contractDuration + contractAdminFee;
-        const contractData = {
-          rentalId: rental.rental_id,
-          roomId: rental.rental_room_id || void 0,
-          roomNumber: rental.room_number || void 0,
-          propertyName: rental.rental_property_name || rental.property_name || "Unit KOSMO Bali",
-          propertyAddress: rental.property_address || "Kabupaten Badung / Kota Denpasar, Bali, Indonesia",
-          landlordName: rental.landlord_name || "PT KOSMO Bali Hospitality / Pengelola Properti",
-          landlordEmail: rental.landlord_email || "hospitality@kosmo.id",
-          landlordPhone: rental.landlord_phone || "+62 361-900-5676",
-          tenantName: rental.tenant_name || "Penyewa KOSMO",
-          tenantEmail: rental.tenant_email || "",
-          tenantPhone: rental.tenant_phone || "",
-          tenantNikPassport: rental.tenant_nik_passport || "-",
-          tenantAddress: rental.tenant_address || "",
-          tenantOccupation: rental.tenant_occupation || "",
-          emergencyContactName: rental.tenant_emergency_contact_name || "",
-          emergencyContactPhone: rental.tenant_emergency_contact_phone || "",
-          emergencyContactRelation: rental.tenant_emergency_contact_relation || "",
-          startDate: rental.rental_start_date || (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
-          durationMonths: contractDuration,
-          monthlyPrice: contractMonthlyPrice,
-          pricePerMonth: contractMonthlyPrice,
-          totalPrice: contractTotalPrice,
-          adminFee: contractAdminFee,
-          signatureBase64: rental.tenant_signature_data || void 0,
-          signerIp: rental.signer_ip || void 0,
-          signerUserAgent: rental.signer_user_agent || void 0,
-          signedAt: rental.contract_signed_at ? new Date(rental.contract_signed_at).toISOString() : void 0,
-          utilityQuotas: {
-            electricityKwh: 200,
-            water: "PDAM & Deep Well (Air Bersih Terfilter) Included",
-            wifiMbps: 100,
-            security: "24/7 CCTV & Security Access",
-            waste: "Daily Waste Management Included"
-          }
-        };
-        const pdfBuffer = await generateRentalContractBuffer(contractData);
-        const computedHash = computeContractHash(pdfBuffer);
-        const contractHash = rental.contract_hash || computedHash;
-        const safeId = sanitizeRentalId(rental.rental_id);
+        const { pdfBuffer, contractHash, safeId } = await contractService.getContractPdf(String(id), authUser);
         const isDownload = req.query.download === "true" || req.query.download === "1";
         const dispositionType = isDownload ? "attachment" : "inline";
         res.setHeader("Content-Type", "application/pdf");
@@ -3704,6 +3872,9 @@ function registerContractRoutes(router2) {
         res.setHeader("Pragma", "no-cache");
         res.end(pdfBuffer);
       } catch (err) {
+        if (err instanceof ContractServiceError) {
+          return res.status(err.statusCode).json({ message: err.message });
+        }
         console.error("Get contract PDF error:", err);
         res.status(500).json({ message: "Gagal membuat dokumen kontrak PDF." });
       }
@@ -4729,8 +4900,191 @@ function registerPhotoRoutes(router2) {
   );
 }
 
-// backend/routes/rentals.routes.ts
+// backend/services/rental.service.ts
 import bcrypt6 from "bcryptjs";
+
+// backend/repositories/rentals.repository.ts
+var RentalsRepository = class {
+  defaultPool;
+  constructor(customPool = pool) {
+    this.defaultPool = customPool;
+  }
+  async findRentalsByFilter(role, userId, tenantIdFilter, limit, offset = 0) {
+    let sql = `
+      SELECT 
+        r.*,
+        rm.roomNumber,
+        rm.floor AS roomFloor,
+        rm.type AS roomType
+      FROM rentals r
+      LEFT JOIN rooms rm ON r.roomId = rm.id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (role === "tenant") {
+      sql += " AND r.tenantId = ?";
+      params.push(userId);
+    } else if (role === "landlord") {
+      sql += " AND r.propertyId IN (SELECT id FROM properties WHERE ownerId = ?)";
+      params.push(userId);
+    } else if (role === "admin" && tenantIdFilter) {
+      sql += " AND r.tenantId = ?";
+      params.push(tenantIdFilter);
+    }
+    sql += " ORDER BY r.id DESC";
+    if (limit && limit > 0) {
+      sql += " LIMIT ? OFFSET ?";
+      params.push(limit, Math.max(0, offset));
+    }
+    const [rows] = await this.defaultPool.query(sql, params);
+    return rows;
+  }
+  async findTenantRentals(tenantId) {
+    const sql = `
+      SELECT 
+        r.*,
+        rm.roomNumber,
+        rm.floor AS roomFloor,
+        rm.type AS roomType
+      FROM rentals r
+      LEFT JOIN rooms rm ON r.roomId = rm.id
+      WHERE r.tenantId = ? 
+      ORDER BY r.id DESC
+    `;
+    const [rows] = await this.defaultPool.query(sql, [tenantId]);
+    return rows;
+  }
+  async findRentalById(rentalId, conn = this.defaultPool, forUpdate = false) {
+    const sql = `
+      SELECT 
+        r.*,
+        p.name AS propertyName,
+        p.address AS propertyAddress,
+        p.ownerId AS propertyOwnerId,
+        rm.roomNumber,
+        rm.floor AS roomFloor,
+        rm.type AS roomType
+      FROM rentals r
+      LEFT JOIN properties p ON r.propertyId = p.id
+      LEFT JOIN rooms rm ON r.roomId = rm.id
+      WHERE r.id = ?${forUpdate ? " FOR UPDATE" : ""}
+    `;
+    const [rows] = await conn.query(sql, [rentalId]);
+    return rows[0];
+  }
+  async findExistingRentalForUpdate(rentalId, conn) {
+    const [rows] = await conn.query(
+      "SELECT id, status, document, roomId, propertyId, price, duration_months FROM rentals WHERE id = ? FOR UPDATE",
+      [rentalId]
+    );
+    return rows[0];
+  }
+  async findActiveRentalsByTenantId(tenantId, conn, forUpdate = true) {
+    const sql = `SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active'${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [tenantId]);
+    return rows;
+  }
+  async insertRentalBooking(data, conn) {
+    const sql = `
+      INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, document, duration_months)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    await conn.query(sql, [
+      data.id,
+      data.tenantId,
+      data.propertyId,
+      data.roomId || null,
+      data.propertyName,
+      data.price,
+      data.startDate,
+      data.status,
+      data.document,
+      data.durationMonths
+    ]);
+  }
+  async updateRentalStatus(rentalId, status, conn) {
+    await conn.query("UPDATE rentals SET status = ? WHERE id = ?", [status, rentalId]);
+  }
+  async decrementPropertyOccupied(propertyId, conn) {
+    await conn.query(
+      "UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?",
+      [propertyId]
+    );
+  }
+  async setRoomStatus(roomId, status, conn) {
+    await conn.query("UPDATE rooms SET status = ? WHERE id = ?", [status, roomId]);
+  }
+  async creditLandlordBalance(ownerId, revenue, conn) {
+    await conn.query(
+      "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
+      [revenue, revenue, ownerId]
+    );
+  }
+  async findUserById(userId, conn = this.defaultPool, forUpdate = false) {
+    const sql = `SELECT * FROM users WHERE id = ?${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [userId]);
+    return rows[0];
+  }
+  async findUserPasswordById(userId, conn = this.defaultPool) {
+    const [rows] = await conn.query("SELECT password FROM users WHERE id = ?", [userId]);
+    return rows[0];
+  }
+  async findPropertyById(propertyId, conn = this.defaultPool, forUpdate = false) {
+    const sql = `SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ?${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [propertyId]);
+    return rows[0];
+  }
+  async findRoomById(roomId, propertyId, conn = this.defaultPool, forUpdate = false) {
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ?${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [roomId, propertyId]);
+    return rows[0];
+  }
+  async findAvailableRoom(propertyId, conn, forUpdate = true) {
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, [propertyId]);
+    return rows[0];
+  }
+  async countRoomsByPropertyId(propertyId, conn = this.defaultPool) {
+    const [rows] = await conn.query(
+      "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+      [propertyId]
+    );
+    return Number(rows[0]?.count || 0);
+  }
+  async incrementPropertyOccupied(propertyId, conn) {
+    await conn.query("UPDATE properties SET occupiedRooms = occupiedRooms + 1 WHERE id = ?", [
+      propertyId
+    ]);
+  }
+  async activateExistingRental(rentalId, effectivePrice, documentUrl, duration, conn) {
+    await conn.query(
+      "UPDATE rentals SET status = 'active', price = ?, document = ?, duration_months = ? WHERE id = ?",
+      [effectivePrice, documentUrl, duration, rentalId]
+    );
+  }
+  async findRentalSummaryById(rentalId, conn = this.defaultPool) {
+    const [rows] = await conn.query(
+      "SELECT id, tenantId, propertyId, roomId, status FROM rentals WHERE id = ?",
+      [rentalId]
+    );
+    return rows[0];
+  }
+  async findRentalForUpdate(rentalId, conn) {
+    const [rows] = await conn.query(
+      "SELECT id, tenantId, propertyId, roomId, status FROM rentals WHERE id = ? FOR UPDATE",
+      [rentalId]
+    );
+    return rows[0];
+  }
+  async lockRoomById(roomId, conn) {
+    const [rows] = await conn.query(
+      "SELECT id, status FROM rooms WHERE id = ? FOR UPDATE",
+      [roomId]
+    );
+    return rows[0];
+  }
+};
+var rentalsRepository = new RentalsRepository();
 
 // backend/routes/payment.routes.ts
 import crypto5 from "crypto";
@@ -5106,92 +5460,399 @@ function registerPaymentRoutes(router2) {
   });
 }
 
-// backend/routes/rentals.routes.ts
-function computePaymentSchedule(startDateStr, status, durationMonthsOrRef, referenceDate) {
-  let effectiveDuration = 1;
-  let isBoundedDuration = false;
-  let effectiveRef = /* @__PURE__ */ new Date();
-  if (durationMonthsOrRef instanceof Date) {
-    effectiveRef = durationMonthsOrRef;
-    isBoundedDuration = false;
-  } else {
-    if (typeof durationMonthsOrRef === "number" && !isNaN(durationMonthsOrRef)) {
-      effectiveDuration = Math.max(1, Math.floor(durationMonthsOrRef));
-      isBoundedDuration = true;
-    }
-    if (referenceDate instanceof Date) {
-      effectiveRef = referenceDate;
-    }
+// backend/services/rental.service.ts
+var RentalServiceError = class extends Error {
+  constructor(statusCode, message, details) {
+    super(message);
+    this.statusCode = statusCode;
+    this.details = details;
+    this.name = "RentalServiceError";
   }
-  const now = new Date(effectiveRef);
-  now.setHours(0, 0, 0, 0);
-  const rawStart = new Date(startDateStr);
-  const start = isNaN(rawStart.getTime()) ? new Date(now) : new Date(rawStart);
-  start.setHours(0, 0, 0, 0);
-  const startDay = start.getDate();
-  const getClampedDate = (months) => {
-    const totalMonths = start.getMonth() + months;
-    const year = start.getFullYear() + Math.floor(totalMonths / 12);
-    const month = (totalMonths % 12 + 12) % 12;
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    return new Date(year, month, Math.min(startDay, daysInMonth), 0, 0, 0, 0);
-  };
-  const pad = (n) => n.toString().padStart(2, "0");
-  const leaseEnd = getClampedDate(effectiveDuration);
-  const leaseStartDate = start.toLocaleDateString("id-ID", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
-  const leaseEndDate = leaseEnd.toLocaleDateString("id-ID", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
-  const leaseEndDateISO = `${leaseEnd.getFullYear()}-${pad(leaseEnd.getMonth() + 1)}-${pad(leaseEnd.getDate())}`;
-  if (status !== "active" || isBoundedDuration && now > leaseEnd) {
+  statusCode;
+  details;
+};
+var RentalService = class {
+  constructor(repo = rentalsRepository) {
+    this.repo = repo;
+  }
+  repo;
+  computePaymentSchedule(startDateStr, status, durationMonthsOrRef, referenceDate) {
+    let effectiveDuration = 1;
+    let isBoundedDuration = false;
+    let effectiveRef = /* @__PURE__ */ new Date();
+    if (durationMonthsOrRef instanceof Date) {
+      effectiveRef = durationMonthsOrRef;
+      isBoundedDuration = false;
+    } else {
+      if (typeof durationMonthsOrRef === "number" && !isNaN(durationMonthsOrRef)) {
+        effectiveDuration = Math.max(1, Math.floor(durationMonthsOrRef));
+        isBoundedDuration = true;
+      }
+      if (referenceDate instanceof Date) {
+        effectiveRef = referenceDate;
+      }
+    }
+    const now = new Date(effectiveRef);
+    now.setHours(0, 0, 0, 0);
+    const rawStart = new Date(startDateStr);
+    const start = isNaN(rawStart.getTime()) ? new Date(now) : new Date(rawStart);
+    start.setHours(0, 0, 0, 0);
+    const startDay = start.getDate();
+    const getClampedDate = (months) => {
+      const totalMonths = start.getMonth() + months;
+      const year = start.getFullYear() + Math.floor(totalMonths / 12);
+      const month = (totalMonths % 12 + 12) % 12;
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      return new Date(year, month, Math.min(startDay, daysInMonth), 0, 0, 0, 0);
+    };
+    const pad = (n) => n.toString().padStart(2, "0");
+    const leaseEnd = getClampedDate(effectiveDuration);
+    const leaseStartDate = start.toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
+    const leaseEndDate = leaseEnd.toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
+    const leaseEndDateISO = `${leaseEnd.getFullYear()}-${pad(leaseEnd.getMonth() + 1)}-${pad(
+      leaseEnd.getDate()
+    )}`;
+    if (status !== "active" || isBoundedDuration && now > leaseEnd) {
+      return {
+        nextPaymentDate: "-",
+        nextPaymentDateISO: "",
+        daysRemaining: 0,
+        paymentStatus: "Penyewaan Selesai",
+        leaseStartDate,
+        leaseEndDate,
+        leaseEndDateISO,
+        totalDurationMonths: effectiveDuration
+      };
+    }
+    let addedMonths = 1;
+    let due = getClampedDate(addedMonths);
+    while (due < now && (!isBoundedDuration || addedMonths < effectiveDuration)) {
+      addedMonths += 1;
+      due = getClampedDate(addedMonths);
+    }
+    const diffMs = due.getTime() - now.getTime();
+    const daysRemaining = Math.max(0, Math.round(diffMs / (1e3 * 60 * 60 * 24)));
+    const iso = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`;
+    const formatted = due.toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
+    let paymentStatus = "Lunas (Periode Berjalan)";
+    if (daysRemaining === 0) {
+      paymentStatus = "Menunggu Pembayaran";
+    } else if (daysRemaining <= 3) {
+      paymentStatus = "Menjelang Jatuh Tempo";
+    }
     return {
-      nextPaymentDate: "-",
-      nextPaymentDateISO: "",
-      daysRemaining: 0,
-      paymentStatus: "Penyewaan Selesai",
+      nextPaymentDate: formatted,
+      nextPaymentDateISO: iso,
+      daysRemaining,
+      paymentStatus,
       leaseStartDate,
       leaseEndDate,
       leaseEndDateISO,
       totalDurationMonths: effectiveDuration
     };
   }
-  let addedMonths = 1;
-  let due = getClampedDate(addedMonths);
-  while (due < now && (!isBoundedDuration || addedMonths < effectiveDuration)) {
-    addedMonths += 1;
-    due = getClampedDate(addedMonths);
+  enrichRental(r) {
+    const duration = Number(r.duration_months || 1);
+    const schedule = this.computePaymentSchedule(
+      r.startDate || (/* @__PURE__ */ new Date()).toISOString(),
+      r.status,
+      duration
+    );
+    return {
+      ...r,
+      duration_months: duration,
+      nextPaymentDate: schedule.nextPaymentDate,
+      nextPaymentDateISO: schedule.nextPaymentDateISO,
+      daysRemaining: schedule.daysRemaining,
+      paymentStatus: schedule.paymentStatus,
+      leaseStartDate: schedule.leaseStartDate,
+      leaseEndDate: schedule.leaseEndDate,
+      leaseEndDateISO: schedule.leaseEndDateISO,
+      totalDurationMonths: schedule.totalDurationMonths
+    };
   }
-  const diffMs = due.getTime() - now.getTime();
-  const daysRemaining = Math.max(0, Math.round(diffMs / (1e3 * 60 * 60 * 24)));
-  const iso = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`;
-  const formatted = due.toLocaleDateString("id-ID", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
-  let paymentStatus = "Lunas (Periode Berjalan)";
-  if (daysRemaining === 0) {
-    paymentStatus = "Menunggu Pembayaran";
-  } else if (daysRemaining <= 3) {
-    paymentStatus = "Menjelang Jatuh Tempo";
+  async getRentals(authUser, tenantIdFilter, limit, offset = 0) {
+    const rows = await this.repo.findRentalsByFilter(
+      authUser.role,
+      authUser.id,
+      tenantIdFilter,
+      limit,
+      offset
+    );
+    return rows.map((r) => this.enrichRental(r));
   }
-  return {
-    nextPaymentDate: formatted,
-    nextPaymentDateISO: iso,
-    daysRemaining,
-    paymentStatus,
-    leaseStartDate,
-    leaseEndDate,
-    leaseEndDateISO,
-    totalDurationMonths: effectiveDuration
-  };
-}
+  async getTenantRentals(tenantId) {
+    const rows = await this.repo.findTenantRentals(tenantId);
+    return rows.map((r) => this.enrichRental(r));
+  }
+  async getRentalById(rentalId, authUser) {
+    const rental = await this.repo.findRentalById(rentalId);
+    if (!rental) {
+      throw new RentalServiceError(404, "Data sewa tidak ditemukan.");
+    }
+    const isTenant = authUser.id === rental.tenantId;
+    const isOwner = Boolean(
+      rental.propertyOwnerId && authUser.id === rental.propertyOwnerId
+    );
+    const isAdmin = authUser.role === "admin";
+    if (!isTenant && !isOwner && !isAdmin) {
+      throw new RentalServiceError(403, "Akses ditolak ke data sewa ini.");
+    }
+    return this.enrichRental(rental);
+  }
+  async createBooking(input) {
+    const {
+      authUser,
+      tenantId,
+      propertyId,
+      propertyName,
+      price,
+      durationMonths,
+      signature,
+      roomId,
+      rentalId: customRentalId
+    } = input;
+    if (!tenantId || !propertyId) {
+      throw new RentalServiceError(400, "tenantId dan propertyId wajib diisi.");
+    }
+    if (authUser.role !== "admin" && authUser.id !== tenantId) {
+      throw new RentalServiceError(
+        403,
+        "Akses ditolak. Anda tidak dapat memesan atas nama akun lain."
+      );
+    }
+    const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
+    if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes("placeholder") && !process.env.MIDTRANS_SERVER_KEY.includes("your-server-key")) {
+      try {
+        const snapApi = snap;
+        if (snapApi.transaction?.status) {
+          const statusResponse = await snapApi.transaction.status(rentalId);
+          const isValidPayment = statusResponse.transaction_status === "settlement" || statusResponse.transaction_status === "capture" && statusResponse.fraud_status === "accept";
+          if (!isValidPayment) {
+            throw new RentalServiceError(
+              402,
+              "Pembayaran belum diselesaikan pada payment gateway Midtrans."
+            );
+          }
+        }
+      } catch (midtransErr) {
+        if (midtransErr instanceof RentalServiceError) throw midtransErr;
+        console.warn("Midtrans status check warning:", midtransErr);
+      }
+    }
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const tenant = await this.repo.findUserById(tenantId, connection, true);
+      if (!tenant) {
+        await connection.rollback();
+        throw new RentalServiceError(404, "Pengguna tidak ditemukan.");
+      }
+      const property = await this.repo.findPropertyById(propertyId, connection, true);
+      if (!property) {
+        await connection.rollback();
+        throw new RentalServiceError(404, "Properti tidak ditemukan.");
+      }
+      const existingRental = await this.repo.findExistingRentalForUpdate(rentalId, connection);
+      if (existingRental && existingRental.status === "active") {
+        await connection.commit();
+        return {
+          message: "Penyewaan kos sudah aktif!",
+          rentalId,
+          document: existingRental.document || "sertifikat_kepemilikan.pdf"
+        };
+      }
+      if (property.occupiedRooms >= property.totalRooms) {
+        await connection.rollback();
+        throw new RentalServiceError(400, "Kamar kos sudah penuh.");
+      }
+      let assignedRoom;
+      const targetRoomId = roomId || existingRental?.roomId;
+      if (targetRoomId) {
+        assignedRoom = await this.repo.findRoomById(targetRoomId, propertyId, connection, true);
+        if (!assignedRoom) {
+          await connection.rollback();
+          throw new RentalServiceError(404, "Kamar tidak ditemukan pada properti ini.");
+        }
+        if (assignedRoom.status !== "available") {
+          await connection.rollback();
+          throw new RentalServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
+        }
+      } else {
+        const availableRoom = await this.repo.findAvailableRoom(propertyId, connection, true);
+        if (availableRoom) {
+          assignedRoom = availableRoom;
+        } else {
+          const discreteCount = await this.repo.countRoomsByPropertyId(propertyId, connection);
+          if (discreteCount > 0) {
+            await connection.rollback();
+            throw new RentalServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
+          }
+        }
+      }
+      const activeRentals = await this.repo.findActiveRentalsByTenantId(tenantId, connection, true);
+      const isCurrentRentalActive = activeRentals.some((r) => r.id === rentalId);
+      if (activeRentals.length > 0 && !isCurrentRentalActive) {
+        await connection.rollback();
+        throw new RentalServiceError(
+          409,
+          "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
+        );
+      }
+      const profileCheck = isUserProfileComplete(tenant);
+      if (!profileCheck.complete) {
+        await connection.rollback();
+        throw new RentalServiceError(
+          422,
+          "Profil identitas hukum penyewa belum lengkap. Berdasarkan Pasal 1320 KUHPerdata & UU ITE, Anda wajib melengkapi data identitas (NIK/Paspor, Alamat Domisili, Pekerjaan, dan Kontak Darurat) pada profil Anda sebelum menyewa kos.",
+          {
+            missingFields: profileCheck.missingFields,
+            missingFieldLabels: profileCheck.missingFieldLabels
+          }
+        );
+      }
+      const duration = Number(durationMonths) || 1;
+      const effectivePrice = assignedRoom && typeof assignedRoom.price === "number" && assignedRoom.price > 0 ? Number(assignedRoom.price) : Number(price || property.price || 0);
+      const addedRevenue = effectivePrice * duration;
+      const startDateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("id-ID", {
+        day: "numeric",
+        month: "short",
+        year: "numeric"
+      });
+      const resolvedPropertyName = propertyName || property.name || "Kos KOSMO";
+      const documentUrl = `/uploads/rental_contract_${rentalId}.pdf`;
+      if (assignedRoom) {
+        await this.repo.setRoomStatus(assignedRoom.id, "occupied", connection);
+      }
+      await this.repo.incrementPropertyOccupied(propertyId, connection);
+      if (property.ownerId) {
+        await this.repo.creditLandlordBalance(property.ownerId, addedRevenue, connection);
+      }
+      if (existingRental) {
+        await this.repo.activateExistingRental(rentalId, effectivePrice, documentUrl, duration, connection);
+      } else {
+        await this.repo.insertRentalBooking(
+          {
+            id: rentalId,
+            tenantId,
+            propertyId,
+            roomId: assignedRoom ? assignedRoom.id : null,
+            propertyName: resolvedPropertyName,
+            price: effectivePrice,
+            startDate: startDateStr,
+            status: "active",
+            document: documentUrl,
+            durationMonths: duration
+          },
+          connection
+        );
+      }
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rentals");
+      if (assignedRoom) {
+        try {
+          await syncPropertyRoomCounts(connection, propertyId);
+        } catch {
+        }
+      }
+      return {
+        message: "Penyewaan kos berhasil dibuat!",
+        rentalId,
+        document: documentUrl,
+        roomId: assignedRoom ? assignedRoom.id : null,
+        roomNumber: assignedRoom ? assignedRoom.roomNumber : null
+      };
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+  async terminateRental(rentalId, authUser, password) {
+    if (!password) {
+      throw new RentalServiceError(400, "Password wajib dimasukkan.");
+    }
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const earlyRental = await this.repo.findRentalSummaryById(rentalId, connection);
+      if (!earlyRental) {
+        await connection.rollback();
+        throw new RentalServiceError(404, "Data sewa tidak ditemukan.");
+      }
+      if (earlyRental.status === "terminated") {
+        await connection.rollback();
+        throw new RentalServiceError(400, "Sewa sudah pernah diberhentikan.");
+      }
+      const caller = await this.repo.findUserPasswordById(authUser.id, connection);
+      const isMatch = caller?.password ? await bcrypt6.compare(password, caller.password) : false;
+      if (!caller || !caller.password || !isMatch) {
+        await connection.rollback();
+        throw new RentalServiceError(401, "Password salah.");
+      }
+      const property = await this.repo.findPropertyById(earlyRental.propertyId, connection, true);
+      const isTenant = authUser.id === earlyRental.tenantId;
+      const isOwner = Boolean(property && authUser.id === property.ownerId);
+      const isAdmin = authUser.role === "admin";
+      if (!isTenant && !isOwner && !isAdmin) {
+        await connection.rollback();
+        throw new RentalServiceError(
+          403,
+          "Akses ditolak. Anda tidak berhak memberhentikan sewa ini."
+        );
+      }
+      const rental = await this.repo.findRentalForUpdate(rentalId, connection);
+      if (!rental) {
+        await connection.rollback();
+        throw new RentalServiceError(404, "Data sewa tidak ditemukan.");
+      }
+      if (rental.status === "terminated") {
+        await connection.rollback();
+        throw new RentalServiceError(400, "Sewa sudah pernah diberhentikan.");
+      }
+      if (rental.status === "active") {
+        if (rental.roomId) {
+          await this.repo.lockRoomById(rental.roomId, connection);
+          await this.repo.setRoomStatus(rental.roomId, "available", connection);
+          try {
+            await syncPropertyRoomCounts(connection, rental.propertyId);
+          } catch {
+          }
+        } else {
+          await this.repo.decrementPropertyOccupied(rental.propertyId, connection);
+        }
+      }
+      await this.repo.updateRentalStatus(rentalId, "terminated", connection);
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("rentals");
+      return { message: "Sewa kos berhasil diberhentikan." };
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+};
+var rentalService = new RentalService();
+
+// backend/routes/rentals.routes.ts
+var computePaymentSchedule = rentalService.computePaymentSchedule.bind(rentalService);
 function registerRentalRoutes(router2) {
   router2.get("/rentals", authenticateToken, async (req, res) => {
     const authUser = req.user;
@@ -5203,51 +5864,17 @@ function registerRentalRoutes(router2) {
     const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
     const offsetParam = req.query.offset ? parseInt(String(req.query.offset), 10) : limitParam ? (pageParam - 1) * limitParam : 0;
     try {
-      let sql = `
-        SELECT 
-          r.*,
-          rm.roomNumber,
-          rm.floor AS roomFloor,
-          rm.type AS roomType
-        FROM rentals r
-        LEFT JOIN rooms rm ON r.roomId = rm.id
-        WHERE 1=1
-      `;
-      const params = [];
-      if (authUser.role === "tenant") {
-        sql += " AND r.tenantId = ?";
-        params.push(authUser.id);
-      } else if (authUser.role === "landlord") {
-        sql += " AND r.propertyId IN (SELECT id FROM properties WHERE ownerId = ?)";
-        params.push(authUser.id);
-      } else if (authUser.role === "admin" && tenantId) {
-        sql += " AND r.tenantId = ?";
-        params.push(String(tenantId));
-      }
-      sql += " ORDER BY r.id DESC";
-      if (limitParam && limitParam > 0) {
-        sql += " LIMIT ? OFFSET ?";
-        params.push(limitParam, Math.max(0, offsetParam));
-      }
-      const [rows] = await pool.query(sql, params);
-      const enrichedRows = rows.map((r) => {
-        const duration = Number(r.duration_months || 1);
-        const schedule = computePaymentSchedule(r.startDate || (/* @__PURE__ */ new Date()).toISOString(), r.status, duration);
-        return {
-          ...r,
-          duration_months: duration,
-          nextPaymentDate: schedule.nextPaymentDate,
-          nextPaymentDateISO: schedule.nextPaymentDateISO,
-          daysRemaining: schedule.daysRemaining,
-          paymentStatus: schedule.paymentStatus,
-          leaseStartDate: schedule.leaseStartDate,
-          leaseEndDate: schedule.leaseEndDate,
-          leaseEndDateISO: schedule.leaseEndDateISO,
-          totalDurationMonths: schedule.totalDurationMonths
-        };
-      });
-      res.json(enrichedRows);
+      const rentals = await rentalService.getRentals(
+        authUser,
+        tenantId ? String(tenantId) : void 0,
+        limitParam,
+        offsetParam
+      );
+      res.json(rentals);
     } catch (err) {
+      if (err instanceof RentalServiceError) {
+        return res.status(err.statusCode).json({ message: err.message, ...err.details });
+      }
       console.error("Get rentals error:", err);
       res.status(500).json({ message: "Gagal mengambil data sewa." });
     }
@@ -5262,304 +5889,77 @@ function registerRentalRoutes(router2) {
       return res.status(400).json({ message: "tenantId diperlukan." });
     }
     try {
-      const [rows] = await pool.query(
-        `SELECT 
-          r.*,
-          rm.roomNumber,
-          rm.floor AS roomFloor,
-          rm.type AS roomType
-        FROM rentals r
-        LEFT JOIN rooms rm ON r.roomId = rm.id
-        WHERE r.tenantId = ? 
-        ORDER BY r.id DESC`,
-        [tenantId]
-      );
-      const enrichedRows = rows.map((r) => {
-        const duration = Number(r.duration_months || 1);
-        const schedule = computePaymentSchedule(r.startDate || (/* @__PURE__ */ new Date()).toISOString(), r.status, duration);
-        return {
-          ...r,
-          duration_months: duration,
-          nextPaymentDate: schedule.nextPaymentDate,
-          nextPaymentDateISO: schedule.nextPaymentDateISO,
-          daysRemaining: schedule.daysRemaining,
-          paymentStatus: schedule.paymentStatus,
-          leaseStartDate: schedule.leaseStartDate,
-          leaseEndDate: schedule.leaseEndDate,
-          leaseEndDateISO: schedule.leaseEndDateISO,
-          totalDurationMonths: schedule.totalDurationMonths
-        };
-      });
-      res.json(enrichedRows);
+      const rentals = await rentalService.getTenantRentals(tenantId);
+      res.json(rentals);
     } catch (err) {
+      if (err instanceof RentalServiceError) {
+        return res.status(err.statusCode).json({ message: err.message, ...err.details });
+      }
       console.error("Get tenant rentals error:", err);
       res.status(500).json({ message: "Gagal mengambil data sewa tenant." });
     }
   });
-  router2.post("/rentals", authenticateToken, async (req, res) => {
-    const { tenantId, propertyId, propertyName, price, durationMonths, signature, roomId } = req.body;
+  router2.get("/rentals/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
     const authUser = req.user;
-    if (!tenantId || !propertyId) {
-      return res.status(400).json({ message: "tenantId dan propertyId wajib diisi." });
+    if (!authUser) {
+      return res.status(401).json({ message: "Otentikasi diperlukan." });
     }
-    if (authUser?.role !== "admin" && authUser?.id !== tenantId) {
-      return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat memesan atas nama akun lain." });
-    }
-    const rentalId = req.body.rentalId && typeof req.body.rentalId === "string" && req.body.rentalId.trim() !== "" ? req.body.rentalId : generateId("rent");
-    if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes("placeholder") && !process.env.MIDTRANS_SERVER_KEY.includes("your-server-key")) {
-      try {
-        const snapApi = snap;
-        if (snapApi.transaction?.status) {
-          const statusResponse = await snapApi.transaction.status(rentalId);
-          const isValidPayment = statusResponse.transaction_status === "settlement" || statusResponse.transaction_status === "capture" && statusResponse.fraud_status === "accept";
-          if (!isValidPayment) {
-            return res.status(402).json({ message: "Pembayaran belum diselesaikan pada payment gateway Midtrans." });
-          }
-        }
-      } catch (midtransErr) {
-        console.warn("Midtrans status check warning:", midtransErr);
-      }
-    }
-    const connection = await pool.getConnection();
     try {
-      await connection.beginTransaction();
-      const [userRows] = await connection.query("SELECT * FROM users WHERE id = ? FOR UPDATE", [tenantId]);
-      const tenant = userRows[0];
-      if (!tenant) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Pengguna tidak ditemukan." });
-      }
-      const [propRows] = await connection.query(
-        "SELECT totalRooms, occupiedRooms, price, name, address, ownerId FROM properties WHERE id = ? FOR UPDATE",
-        [propertyId]
-      );
-      const property = propRows[0];
-      if (!property) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Properti tidak ditemukan." });
-      }
-      const [existingRentals] = await connection.query(
-        "SELECT id, status, document, roomId FROM rentals WHERE id = ? FOR UPDATE",
-        [rentalId]
-      );
-      if (existingRentals.length > 0 && existingRentals[0].status === "active") {
-        await connection.commit();
-        return res.status(200).json({
-          message: "Penyewaan kos sudah aktif!",
-          rentalId,
-          document: existingRentals[0].document || "sertifikat_kepemilikan.pdf"
-        });
-      }
-      if (property.occupiedRooms >= property.totalRooms) {
-        await connection.rollback();
-        return res.status(400).json({ message: "Kamar kos sudah penuh." });
-      }
-      let assignedRoom;
-      const targetRoomId = roomId || existingRentals[0]?.roomId;
-      if (targetRoomId) {
-        const [roomRows] = await connection.query(
-          "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE",
-          [targetRoomId, propertyId]
-        );
-        assignedRoom = roomRows[0];
-        if (!assignedRoom) {
-          await connection.rollback();
-          return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
-        }
-        if (assignedRoom.status !== "available") {
-          await connection.rollback();
-          return res.status(409).json({ message: "Kamar sudah terisi atau tidak tersedia." });
-        }
-      } else {
-        const [availRooms] = await connection.query(
-          "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
-          [propertyId]
-        );
-        if (availRooms.length > 0) {
-          assignedRoom = availRooms[0];
-        } else {
-          const [countRows] = await connection.query(
-            "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
-            [propertyId]
-          );
-          if (Number(countRows[0]?.count || 0) > 0) {
-            await connection.rollback();
-            return res.status(409).json({ message: "Kamar sudah terisi atau tidak tersedia." });
-          }
-        }
-      }
-      const profileCheck = isUserProfileComplete(tenant);
-      if (!profileCheck.complete) {
-        await connection.rollback();
-        return res.status(422).json({
-          message: "Profil identitas hukum penyewa belum lengkap. Lengkapi profil Anda terlebih dahulu sebelum menyewa.",
-          missingFields: profileCheck.missingFields,
-          missingFieldLabels: profileCheck.missingFieldLabels
-        });
-      }
-      const [activeRentals] = await connection.query(
-        "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? LIMIT 1",
-        [tenantId, rentalId]
-      );
-      if (activeRentals.length > 0) {
-        await connection.rollback();
-        return res.status(409).json({
-          message: "Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
-        });
-      }
-      const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-      const rentalPrice = assignedRoom && typeof assignedRoom.price === "number" && assignedRoom.price > 0 ? Number(assignedRoom.price) : price || property.price;
-      const rentalName = propertyName || property.name;
-      let documentPath = "sertifikat_kepemilikan.pdf";
-      try {
-        const contractResult = await generateRentalContractPdf({
-          rentalId,
-          tenantName: tenant ? tenant.name : "Penyewa",
-          tenantEmail: tenant ? tenant.email : "",
-          tenantPhone: tenant ? tenant.phone : "",
-          tenantNikPassport: tenant ? tenant.identity_number : "",
-          tenantAddress: tenant ? tenant.address : "",
-          tenantOccupation: tenant ? tenant.occupation : "",
-          emergencyContactName: tenant ? tenant.emergency_contact_name : "",
-          emergencyContactPhone: tenant ? tenant.emergency_contact_phone : "",
-          emergencyContactRelation: tenant ? tenant.emergency_contact_relation : "",
-          propertyName: rentalName,
-          propertyAddress: property.address || "",
-          pricePerMonth: rentalPrice,
-          startDate,
-          durationMonths: durationMonths || 1,
-          signatureBase64: signature
-        });
-        documentPath = contractResult.filePath;
-      } catch (contractErr) {
-        console.warn("PDF contract generation warning:", contractErr);
-      }
-      const rentalDuration = durationMonths && durationMonths > 0 ? durationMonths : 1;
-      if (existingRentals.length > 0) {
-        await connection.query(
-          `UPDATE rentals 
-           SET status = 'active', document = ?, propertyName = ?, price = ?, startDate = ?, duration_months = ?, roomId = COALESCE(roomId, ?) 
-           WHERE id = ?`,
-          [documentPath, rentalName, rentalPrice, startDate, rentalDuration, assignedRoom?.id || null, rentalId]
-        );
-      } else {
-        await connection.query(
-          `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, document, duration_months) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-          [rentalId, tenantId, propertyId, assignedRoom?.id || null, rentalName, rentalPrice, startDate, documentPath, rentalDuration]
-        );
-      }
-      if (assignedRoom) {
-        await connection.query("UPDATE rooms SET status = 'occupied' WHERE id = ?", [assignedRoom.id]);
-        await syncPropertyRoomCounts(connection, propertyId);
-      } else {
-        await connection.query(
-          "UPDATE properties SET occupiedRooms = LEAST(totalRooms, occupiedRooms + 1) WHERE id = ?",
-          [propertyId]
-        );
-      }
-      if (property.ownerId) {
-        await connection.query(
-          "UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?",
-          [rentalPrice * rentalDuration, rentalPrice * rentalDuration, property.ownerId]
-        );
-      }
-      await connection.commit();
-      apiCache.invalidatePattern("properties");
-      res.status(201).json({
-        message: "Penyewaan kos berhasil diproses!",
-        rentalId,
-        document: documentPath
-      });
+      const rental = await rentalService.getRentalById(String(id), authUser);
+      res.json(rental);
     } catch (err) {
-      await connection.rollback();
+      if (err instanceof RentalServiceError) {
+        return res.status(err.statusCode).json({ message: err.message, ...err.details });
+      }
+      console.error("Get rental detail error:", err);
+      res.status(500).json({ message: "Gagal mengambil detail sewa." });
+    }
+  });
+  router2.post("/rentals", authenticateToken, async (req, res) => {
+    const authUser = req.user;
+    if (!authUser) {
+      return res.status(401).json({ message: "Otentikasi diperlukan." });
+    }
+    const { tenantId, propertyId, propertyName, price, durationMonths, signature, roomId } = req.body;
+    try {
+      const result = await rentalService.createBooking({
+        authUser,
+        tenantId,
+        propertyId,
+        propertyName,
+        price,
+        durationMonths,
+        signature,
+        roomId,
+        rentalId: req.body.rentalId
+      });
+      const statusCode = result.message.includes("sudah aktif") ? 200 : 201;
+      res.status(statusCode).json(result);
+    } catch (err) {
+      if (err instanceof RentalServiceError) {
+        return res.status(err.statusCode).json({ message: err.message, ...err.details });
+      }
       console.error("Create rental error:", err);
-      res.status(500).json({ message: "Gagal memproses penyewaan kos." });
-    } finally {
-      connection.release();
+      res.status(500).json({ message: "Gagal membuat penyewaan kos." });
     }
   });
   router2.post("/rentals/:id/terminate", authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { password } = req.body;
     const authUser = req.user;
-    if (!password) {
-      return res.status(400).json({ message: "Password wajib dimasukkan." });
+    if (!authUser) {
+      return res.status(401).json({ message: "Otentikasi diperlukan." });
     }
-    const connection = await pool.getConnection();
+    const { password } = req.body;
     try {
-      await connection.beginTransaction();
-      const [earlyRentalRows] = await connection.query(
-        "SELECT id, tenantId, propertyId, roomId, status FROM rentals WHERE id = ?",
-        [id]
-      );
-      const earlyRental = earlyRentalRows[0];
-      if (!earlyRental) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Data sewa tidak ditemukan." });
-      }
-      if (earlyRental.status === "terminated") {
-        await connection.rollback();
-        return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
-      }
-      const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
-      const caller = userRows[0];
-      const isMatch = caller && caller.password ? await bcrypt6.compare(password, caller.password) : false;
-      if (!caller || !caller.password || !isMatch) {
-        await connection.rollback();
-        return res.status(401).json({ message: "Password salah." });
-      }
-      const [propRows] = await connection.query(
-        "SELECT id, ownerId, totalRooms, occupiedRooms FROM properties WHERE id = ? FOR UPDATE",
-        [earlyRental.propertyId]
-      );
-      const property = propRows[0];
-      const isTenant = authUser?.id === earlyRental.tenantId;
-      const isOwner = property && authUser?.id === property.ownerId;
-      const isAdmin = authUser?.role === "admin";
-      if (!isTenant && !isOwner && !isAdmin) {
-        await connection.rollback();
-        return res.status(403).json({ message: "Akses ditolak. Anda tidak berhak memberhentikan sewa ini." });
-      }
-      const [rentalRows] = await connection.query(
-        "SELECT id, tenantId, propertyId, roomId, status FROM rentals WHERE id = ? FOR UPDATE",
-        [id]
-      );
-      const rental = rentalRows[0];
-      if (!rental) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Data sewa tidak ditemukan." });
-      }
-      if (rental.status === "terminated") {
-        await connection.rollback();
-        return res.status(400).json({ message: "Sewa sudah pernah diberhentikan." });
-      }
-      if (rental.status === "active") {
-        if (rental.roomId) {
-          await connection.query("SELECT id, status FROM rooms WHERE id = ? FOR UPDATE", [rental.roomId]);
-          await connection.query("UPDATE rooms SET status = 'available' WHERE id = ?", [rental.roomId]);
-          await syncPropertyRoomCounts(connection, rental.propertyId);
-        } else {
-          await connection.query(
-            "UPDATE properties SET occupiedRooms = GREATEST(0, occupiedRooms - 1) WHERE id = ?",
-            [rental.propertyId]
-          );
-        }
-      }
-      await connection.query(
-        "UPDATE rentals SET status = 'terminated' WHERE id = ?",
-        [id]
-      );
-      await connection.commit();
-      apiCache.invalidatePattern("properties");
-      apiCache.invalidatePattern("rentals");
-      res.json({ message: "Sewa kos berhasil diberhentikan." });
+      const result = await rentalService.terminateRental(String(id), authUser, password);
+      res.json(result);
     } catch (err) {
-      await connection.rollback();
+      if (err instanceof RentalServiceError) {
+        return res.status(err.statusCode).json({ message: err.message, ...err.details });
+      }
       console.error("Terminate rental error:", err);
       res.status(500).json({ message: "Gagal memberhentikan sewa kos." });
-    } finally {
-      connection.release();
     }
   });
 }
@@ -5971,7 +6371,7 @@ function setupProcessSafety(force = false) {
 
 // backend/server.ts
 import path4 from "path";
-import fs3 from "fs";
+import fs2 from "fs";
 import { fileURLToPath } from "url";
 import os from "os";
 setupProcessSafety();
@@ -5979,8 +6379,8 @@ var __filename = fileURLToPath(import.meta.url);
 var __dirname = path4.dirname(__filename);
 var uploadsDir = process.env.VERCEL ? path4.join(os.tmpdir(), "kosmo_uploads") : path4.join(__dirname, "uploads");
 try {
-  if (!fs3.existsSync(uploadsDir)) {
-    fs3.mkdirSync(uploadsDir, { recursive: true });
+  if (!fs2.existsSync(uploadsDir)) {
+    fs2.mkdirSync(uploadsDir, { recursive: true });
   }
 } catch {
 }

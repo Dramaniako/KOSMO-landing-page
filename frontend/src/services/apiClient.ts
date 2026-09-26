@@ -138,6 +138,7 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
 
   try {
     const fetchOptions: RequestInit = {
+      credentials: options.credentials !== undefined ? options.credentials : 'include',
       ...options,
       headers,
       signal: abortController ? abortController.signal : options.signal
@@ -218,7 +219,11 @@ export async function requestBlob(
   }
 
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
-  const res = await fetch(url, { ...options, headers });
+  const res = await fetch(url, {
+    credentials: options.credentials !== undefined ? options.credentials : 'include',
+    ...options,
+    headers
+  });
 
   if (!res.ok) {
     throw new ApiError(`Gagal mengunduh dokumen (HTTP ${res.status})`, res.status);

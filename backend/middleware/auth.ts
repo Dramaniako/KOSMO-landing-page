@@ -61,9 +61,42 @@ export interface AuthenticatedRequest extends Request {
   user?: JWTPayload;
 }
 
+export function parseCookies(header?: string | string[]): Record<string, string> {
+  if (!header) return {};
+  const headerStr = Array.isArray(header) ? header.join('; ') : header;
+  if (typeof headerStr !== 'string') return {};
+  const cookies: Record<string, string> = {};
+  for (const pair of headerStr.split(';')) {
+    const idx = pair.indexOf('=');
+    if (idx < 0) continue;
+    const key = pair.substring(0, idx).trim();
+    let val = pair.substring(idx + 1).trim();
+    if (!key) continue;
+    if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
+      val = val.slice(1, -1);
+    }
+    try {
+      cookies[key] = decodeURIComponent(val);
+    } catch {
+      cookies[key] = val;
+    }
+  }
+  return cookies;
+}
+
 export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
   const authHeader = req.headers['authorization'];
   let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+  // Support HttpOnly cookies in addition to Bearer tokens
+  if (!token) {
+    const parsedCookies = parseCookies(req.headers.cookie);
+    const reqCookies = (req as Request & { cookies?: Record<string, string> }).cookies;
+    token = reqCookies?.token || parsedCookies['token'] ||
+            reqCookies?.auth_token || parsedCookies['auth_token'] ||
+            reqCookies?.kosmo_token || parsedCookies['kosmo_token'] || null;
+    if (token) token = token.trim();
+  }
 
   if (!token && typeof req.query?.downloadToken === 'string') {
     token = req.query.downloadToken.trim();

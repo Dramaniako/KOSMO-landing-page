@@ -34,6 +34,7 @@ test('Express router endpoints registration', async (t) => {
       { path: '/upload', method: 'post' },
       { path: '/auth/login', method: 'post' },
       { path: '/auth/register', method: 'post' },
+      { path: '/auth/logout', method: 'post' },
       { path: '/auth/verify-password', method: 'post' },
       { path: '/users/profile/:id', method: 'get' },
       { path: '/users/profile/:id', method: 'put' },
