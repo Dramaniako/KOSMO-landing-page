@@ -6,16 +6,19 @@ This document outlines the security controls, cryptographic standards, concurren
 
 ## 1. Authentication & Token Security
 
-### Stateless Bearer JWT Tokens
+### Dual Token Delivery: Stateless Bearer JWT & RFC 6265 HttpOnly Cookies
 - **Algorithm:** HMAC SHA-256 (`HS256`).
 - **Standard Expiration:** 7 days (`7d`).
-- **Header Delivery:** All API requests pass tokens via the standard `Authorization: Bearer <token>` HTTP header.
+- **Header Delivery:** API requests accept standard `Authorization: Bearer <token>` HTTP headers.
+- **HttpOnly Cookie Delivery:** API responses set an `HttpOnly`, `SameSite=Lax` cookie named `token`. This provides defense-in-depth against credential extraction in the event of client-side Cross-Site Scripting (XSS).
+- **Graceful Token Extraction:** Authentication middleware (`backend/middleware/auth.ts`) checks the `Authorization` header first, falling back to parsing the `Cookie` header via RFC 6265 compliant parsing (`parseCookies`).
 - **Strict Claims Enforcement:** Every token payload must validate `{ id: string, email: string, role: UserRole }`. Malformed or expired claims immediately trigger `401 Unauthorized` or `403 Forbidden`.
+- **Session Revocation:** Dedicated `POST /api/auth/logout` endpoint clears the `token` cookie with immediate expiration (`Expires=Thu, 01 Jan 1970 00:00:00 GMT`).
 
 ### Elimination of JWT in URL Query Parameters
 Long-lived JWT tokens are strictly prohibited from appearing in URL query strings (`?token=...`) to prevent token leakage via server access logs, web proxies, browser history, and HTTP `Referer` headers (CWE-598).
 
-- **Authenticated Blob Downloads:** The frontend triggers file downloads (Excel audits, financial reports) using authenticated `fetch()` with the `Authorization` header, converting the binary response to an in-memory `Blob` object and revoking the object URL post-download.
+- **Authenticated Blob Downloads:** The frontend triggers file downloads (Excel audits, financial reports) using authenticated `fetch()` with the `Authorization` header or credentials cookie, converting the binary response to an in-memory `Blob` object and revoking the object URL post-download.
 - **Short-Lived Download Tokens:** For workflows requiring direct download links, clients request a 60-second single-purpose download ticket via `POST /api/reports/download-token`. This short-lived token cannot be leveraged for account takeover.
 
 ---
@@ -147,4 +150,14 @@ React `AppErrorBoundary` encapsulates the application views at the root level, p
 ### 8.5 HTTP Header Injection Defense & Streaming Guards
 - **Request ID Sanitization:** `requestIdMiddleware` strictly validates incoming `X-Request-Id` headers against a whitelist regex (`/^[a-zA-Z0-9_.-]{1,128}$/`). Malformed headers, carriage returns, newlines (`\r\n`), or oversized values (>128 chars) are safely discarded and replaced with a fresh cryptographically secure UUID v4 to prevent HTTP response header injection (CRLF injection / CWE-113).
 - **Streaming & Post-Header Error Safety:** The centralized `errorHandler` explicitly checks `if (res.headersSent) { return next(err); }`. This delegates errors that occur mid-stream to Express's native connection termination, preventing `ERR_HTTP_HEADERS_SENT` server crashes during active binary or PDF generation.
+
+---
+
+## 9. Container & Infrastructure Security
+
+- **Unprivileged Container Execution:** The production backend Docker container runs under the unprivileged `node:node` system account rather than root, limiting blast radius in the event of remote code execution.
+- **Multi-Stage Builds:** Development dependencies, source TypeScript, and compiler toolchains are pruned from the final production images, leaving only stripped production runtimes.
+- **Nginx Hardening:** The frontend Nginx container sets strict security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `X-XSS-Protection: 1; mode=block`), hides server version banners, and restricts direct access to hidden files (`location ~ /\. { deny all; }`).
+- **Network Isolation:** In Docker Compose, the database service is isolated within internal bridge networking, communicating exclusively with the backend service.
+
 

@@ -1,9 +1,9 @@
 # KOSMO Bali Co-Living Marketplace — Production Technical Handoff
 
-> **Document Version:** 2.0.0 (Production Release)  
+> **Document Version:** 2.1.0 (Production Release)  
 > **Repository:** `KOSMO-landing-page`  
-> **Last Verified:** August 2026  
-> **Target Environment:** Node.js (Standalone Server & Vercel Serverless) + TiDB Serverless Cloud (AWS Singapore `ap-southeast-1`)
+> **Last Verified:** September 2026  
+> **Target Environment:** Node.js (Standalone Server, Docker Containers & Vercel Serverless) + TiDB Serverless Cloud (AWS Singapore `ap-southeast-1`)
 
 ---
 
@@ -74,37 +74,54 @@ graph TD
 ```
 KOSMO-landing-page/
 ├── .agents/                        # AI Workspace rules and execution standards
-│   └── rules/workspace-rules.md    # Operating rules, zero-any policy, commit rules
+│   ├── rules/workspace-rules.md    # Operating rules, zero-any policy, commit rules
+│   └── skills/                     # Domain agent skills (concurrency, migration, security)
 ├── api/                            # Vercel Serverless deployment entrypoint
 │   └── index.js                    # Bundled standalone ESM output produced by esbuild for Vercel
-├── backend/                        # Backend REST API architecture
+├── backend/                        # Backend REST API architecture (3-Tier Layered)
 │   ├── api.ts                      # Serverless entrypoint source (bundled to api/index.js)
-│   ├── db/                         # Legacy JSON files (preserved/unreferenced)
-│   ├── middleware/                 # Express middleware suite
-│   │   ├── auth.ts                 # JWT verification, payload decode, requireRole guard
+│   ├── errors/                     # Centralized typed error hierarchy & catalog
+│   ├── middleware/                 # Express middleware suite (Auth, Cookies, Upload, Validation, Errors)
+│   │   ├── auth.ts                 # JWT verification, cookie parsing, requireRole guard
+│   │   ├── errorHandler.ts         # RFC 7807 centralized error handler & driver normalizer
+│   │   ├── notFoundHandler.ts      # 404 JSON fallback handler
+│   │   ├── requestId.ts            # X-Request-Id correlation generator & CRLF sanitizer
 │   │   ├── upload.ts               # Multer memory storage & MIME type validation
 │   │   └── validation.ts           # Zod payload schema validators
+│   ├── repositories/               # Data access layer (MySQL queries & transactions)
+│   │   ├── contracts.repository.ts # Contract persistence & hash checks
+│   │   └── rentals.repository.ts   # Rental lifecycle, room locking & status transitions
+│   ├── routes/                     # Domain-partitioned express route handlers
+│   │   ├── auth.routes.ts          # Login, register, logout, verify-password
+│   │   ├── contracts.routes.ts     # Lease generation, PDF previews, digital signing
+│   │   ├── properties.routes.ts    # Listings, filters, facilities, rooms
+│   │   └── rentals.routes.ts       # Tenancy management, termination, payments
 │   ├── services/                   # Business domain services
 │   │   ├── cache.ts                # TTL-based in-memory cache with wildcard invalidation
 │   │   ├── cloudinary.ts           # Cloudinary SDK buffer streaming & URL resolver
-│   │   └── contract.ts             # PDFKit legal rental contract generator
+│   │   ├── contract.service.ts     # Business logic for contracts & PDF orchestration
+│   │   ├── contract.ts             # PDFKit legal rental contract generator
+│   │   └── rental.service.ts       # Rental workflows, active lease validation, concurrency
 │   ├── types/                      # Domain interfaces (User, Property, Rental, Withdrawal)
 │   ├── uploads/                    # Local storage directory for generated PDF documents
+│   ├── utils/                      # Process safety, async handler, ID helpers
 │   ├── db.ts                       # Persistent connection pool & schema auto-initialization
-│   ├── router.ts                   # REST API route handlers & SQL transactions
+│   ├── router.ts                   # Central REST API router registration
 │   ├── server.ts                   # Express server initialization, middleware stack, listener
 │   └── tsconfig.json               # Backend TypeScript configuration
 ├── frontend/                       # React 19 SPA client
 │   ├── src/
 │   │   ├── components/             # Reusable UI components
 │   │   │   ├── __tests__/          # Vitest component unit tests
-│   │   │   ├── BookingModal.tsx    # Details, e-contract signing, and checkout modal
+│   │   │   ├── BookingModal/       # 3-step contract, photo gallery & checkout wizard
 │   │   │   ├── ErrorBoundary.tsx   # React runtime error boundary
 │   │   │   ├── KosCard.tsx         # Property card item with async image decoding
 │   │   │   ├── KosCardSkeleton.tsx # Shimmer pulse loading skeleton
 │   │   │   ├── SearchFilterBar.tsx # Dual min/max price filter & district selector
 │   │   │   └── ThemeLanguageToggle.tsx # Dark mode and ID/EN language toggle
 │   │   ├── context/                # Global React context providers
+│   │   │   ├── CurrencyContext.tsx # Reactive IDR / USD currency switcher
+│   │   │   ├── ErrorContext.tsx    # Application-wide async error toast notification provider
 │   │   │   ├── LanguageContext.tsx # Bilingual translation engine (ID / EN)
 │   │   │   └── ThemeContext.tsx    # Dark/Light theme manager with system scheme detection
 │   │   ├── pages/                  # Route-level page components
@@ -113,35 +130,28 @@ KOSMO-landing-page/
 │   │   │   ├── LandlordDashboard.tsx# Financial ledger, property CRUD, tenant roster
 │   │   │   ├── Login.tsx           # Authentication page (Login & Registration)
 │   │   │   └── TenantDashboard.tsx # Tenancy contracts, next payment due dates, and profile
+│   │   ├── services/               # HTTP client & API adapters
 │   │   ├── types/                  # Frontend domain models & Leaflet type definitions
-│   │   ├── App.tsx                 # Root router wrapped in ThemeProvider and LanguageProvider
+│   │   ├── App.tsx                 # Root router with AppErrorBoundary & ProtectedRoute
 │   │   └── index.css               # Design tokens, dark mode variables, and utilities
+│   ├── Dockerfile                  # Multi-stage production Nginx container
+│   ├── nginx.conf                  # Nginx proxy, compression & caching configuration
 │   └── vite.config.ts              # Vite bundler configuration & proxies
+├── Dockerfile                      # Backend Node.js production container
+├── docker-compose.yml              # Service mesh orchestration (Backend + Frontend + DB)
 ├── scripts/                        # Operational, verification, and audit helper scripts
-│   ├── audit_performance.ts        # Automated endpoint latency & payload audit
-│   ├── backend.sh                  # Start backend dev server (`npx tsx backend/server.ts`)
-│   ├── compare_performance.ts      # Latency benchmarking script
-│   ├── frontend.sh                 # Start frontend dev server (`npm --prefix frontend run dev`)
+│   ├── curator_error_handling.ts   # Autonomous Error Handling Curator Agent rating engine
 │   ├── seed.ts                     # Automated database reset & Bali property seed script
-│   └── verify.sh                   # Mandatory 5-gate verification suite
+│   └── verify.sh                   # Mandatory 5-gate verification suite (verify.ps1 for Windows)
 ├── tests/                          # Automated backend & E2E test suites
 │   ├── e2e/                        # Playwright E2E browser tests
-│   │   ├── auth_roles.spec.ts      # Multi-role authentication & redirect tests
-│   │   ├── perf_webvitals.spec.ts  # Core Web Vitals performance benchmarks
-│   │   ├── rental_flow.spec.ts     # Full real registration -> booking -> tenant E2E test
-│   │   └── search_and_book.spec.ts # Catalog search, price filter, modal tests
-│   ├── auth.test.ts                # Authentication, password hashing, and role guard tests
+│   ├── auth.test.ts                # Authentication, cookie sessions, password hashing tests
 │   ├── contract.test.ts            # PDF contract generator and e-signature embedding tests
 │   ├── db_integration.test.ts      # Live MySQL table integrity & rollback tests
-│   ├── jwt.test.ts                 # JWT signing, claims verification, and expiration tests
+│   ├── error_handling.test.ts      # RFC 7807 error schema & driver normalization tests
 │   ├── payment.test.ts             # Midtrans SHA-512 signature & webhook transition tests
-│   ├── perf_api.test.ts            # Response time SLAs & payload size benchmarks
-│   ├── perf_db.test.ts             # Raw SQL JOIN & pool query benchmarks
-│   ├── rentals.test.ts             # Rental transactions, single tenancy, & payment schedule tests
+│   ├── rentals.test.ts             # Rental transactions, single tenancy & payment tests
 │   ├── router.test.ts              # REST API endpoint registration tests
-│   ├── search.test.ts              # Search & multi-parameter filter logic tests
-│   ├── types.test.ts               # Domain schema boundary & data validation tests
-│   ├── upload.test.ts              # Cloudinary upload & MIME type validation tests
 │   └── withdrawals.test.ts         # Landlord withdrawal state machine & refund rollback tests
 ├── package.json                    # Workspace root scripts & dependencies
 ├── playwright.config.ts            # Playwright browser test runner configuration
@@ -551,9 +561,10 @@ if (computedSignature.toLowerCase() !== signature_key.toLowerCase()) {
 
 ### 5.2 Security & Authentication Guardrails
 - **Bcrypt Password Security:** 10 salt rounds used for all password hashes. Raw passwords are never returned in responses.
-- **SQL Injection Prevention:** All SQL queries in `backend/router.ts` and `backend/db.ts` use prepared statements with parameterized inputs (`?`).
-- **Destructive Action Gates:** Destructive operations (`DELETE /api/properties/:id`, `POST /api/rentals/:id/terminate`) enforce password re-verification via `POST /api/auth/verify-password`.
-- **JWT Authorization:** Standard Bearer tokens with 7-day expiration containing `{ id, email, role }` claims.
+- **SQL Injection Prevention:** All SQL queries across `backend/repositories/`, `backend/routes/`, and `backend/db.ts` use prepared statements with parameterized inputs (`?`).
+- **Destructive Action Gates:** Destructive operations (`DELETE /api/properties/:id`, `POST /api/rentals/:id/terminate`, `DELETE /api/users/:id`) enforce password re-verification via `POST /api/auth/verify-password`.
+- **Dual JWT Delivery & Cookie Sessions:** Standard Bearer tokens with 7-day expiration containing `{ id, email, role }` claims, paired with RFC 6265 `HttpOnly` cookie delivery and dedicated logout (`POST /api/auth/logout`).
+- **3-Tier Modular Architecture:** Router -> Service -> Repository separation isolating HTTP handling, business workflows, and transactional database persistence.
 
 ### 5.3 Error Handling & Information Disclosure Safeguards (CWE-209)
 - **Centralized AppError Pipeline:** All operational failures extend `AppError`, ensuring structured RFC 7807 responses without leaking stack traces or SQL internals in production.
@@ -622,6 +633,7 @@ npx playwright test
 | **Run Error Curator Agent**| `npm run curator:errors` *(evaluates error architecture against 5 pillars)* |
 | **Run Playwright E2E** | `npx playwright test` |
 | **Run Full Verification**| `./scripts/verify.sh` |
+| **Run Full Stack (Docker)**| `docker compose up --build -d` *(orchestrates backend, Nginx frontend & db)* |
 
 ---
 
@@ -655,7 +667,7 @@ npx playwright test
 #### Phase 2 (Medium-Term: P2 / P3)
 - [ ] **WhatsApp & Email Reminders:** Automated Twilio / SendGrid notifications for rent due dates 3 days prior to expiration.
 - [ ] **Real-Time Landlord-Tenant Chat:** WebSocket / Socket.io channel enabling direct messaging between tenants and property owners.
-- [ ] **Multi-Currency Converter:** Real-time currency exchange rates (USD, AUD, EUR, GBP) converted from IDR based on daily Bank Indonesia API rates.
+- [x] **Multi-Currency Converter:** Real-time reactive currency switching (IDR / USD) with dynamic conversion and formatting (`CurrencyContext`).
 
 ---
 

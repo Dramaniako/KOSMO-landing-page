@@ -80,8 +80,11 @@ For in-depth technical specifications, please consult the dedicated documentatio
 
 ### 🌐 Cross-Cutting System Capabilities
 - **Bilingual Internationalization (i18n):** Native support for **Bahasa Indonesia (`id`)** and **English (`en`)**, persisted in `localStorage` and synchronized with user profiles.
+- **Reactive Dual Currency (`CurrencyContext`):** Real-time switching between Indonesian Rupiah (`IDR`) and US Dollar (`USD`) with dynamic exchange rate conversion and caching.
 - **Adaptive Theme System:** Dark and Light mode toggling with `prefers-color-scheme` auto-detection and zero Cumulative Layout Shift (CLS).
+- **Dual Authentication & Session Management:** Supports both `Authorization: Bearer <token>` and RFC 6265 `HttpOnly` cookie sessions with password re-auth gates and secure logout (`POST /api/auth/logout`).
 - **Declarative Route Protection (`<ProtectedRoute>`):** Centralized role-based routing preventing unauthorized layout flash across all dashboard views.
+- **3-Tier Modular Backend Architecture:** Separation of concerns across Routes, Business Services, and Data Repositories for optimal maintainability and testability.
 
 ---
 
@@ -130,6 +133,15 @@ npm run dev:backend
 
 # Terminal 2: Start Frontend Client (http://localhost:5173)
 npm --prefix frontend run dev
+```
+
+### 6. Alternative: Run via Docker Compose
+```bash
+# Build and start full stack in detached mode
+docker compose up --build -d
+
+# Check running container status
+docker compose ps
 ```
 
 ---
@@ -197,28 +209,35 @@ KOSMO-landing-page/
 │   ├── architecture.md             # System design, tech stack & ER diagram
 │   ├── api.md                      # Comprehensive REST API reference
 │   ├── error-handling.md           # Error architecture & Curator Agent standard
-│   ├── deployment.md               # Production runbook (Node.js & Vercel)
-│   └── security.md                 # Security controls, JWT & concurrency locks
+│   ├── deployment.md               # Production runbook (Node.js, Docker & Vercel)
+│   └── security.md                 # Security controls, JWT, cookie auth & concurrency locks
 ├── api/                            # Vercel Serverless entrypoint
 │   └── index.js                    # Bundled backend production artifact
-├── backend/                        # Backend REST API architecture
-│   ├── middleware/                 # Auth, upload, and Zod validation middleware
+├── backend/                        # Backend REST API architecture (3-Tier)
+│   ├── errors/                     # Centralized typed error hierarchy & catalog
+│   ├── middleware/                 # Auth, cookie parse, upload, and Zod validation middleware
+│   ├── repositories/               # Data access repositories (Contracts, Rentals)
 │   ├── routes/                     # Domain-partitioned express route handlers
-│   ├── services/                   # Cache, Cloudinary, and PDF contract services
+│   ├── services/                   # Business domain services (Rental, Contract, Cache, Cloudinary)
 │   ├── types/                      # Domain TypeScript interfaces
+│   ├── utils/                      # Process safety net, async handlers, ID helpers
 │   ├── db.ts                       # TiDB / MySQL pool & schema lifecycle
 │   ├── router.ts                   # Central router registration
 │   └── server.ts                   # Express server entrypoint & middleware pipeline
 ├── frontend/                       # React 19 Client SPA
 │   ├── src/
 │   │   ├── components/             # Reusable UI components & ProtectedRoute
-│   │   ├── context/                # Theme & Language Context Providers
+│   │   ├── context/                # Theme, Language, Currency & Error Context Providers
 │   │   ├── pages/                  # Admin, Landlord, and Tenant Dashboards
-│   │   ├── services/               # HTTP client & API adapters
+│   │   ├── services/               # Resilient HTTP client & API adapters
 │   │   ├── types/                  # Frontend interfaces & Leaflet declarations
-│   │   └── App.tsx                 # Root router with declarative route guards
+│   │   └── App.tsx                 # Root router with declarative route guards & AppErrorBoundary
+│   ├── Dockerfile                  # Production Nginx multi-stage build container
+│   ├── nginx.conf                  # Nginx reverse proxy, security headers & caching
 │   └── vite.config.ts              # Vite bundler configuration & API proxy
-├── scripts/                        # Operational & maintenance scripts
+├── Dockerfile                      # Backend Node.js production container
+├── docker-compose.yml              # Multi-container orchestration (Backend + Frontend Nginx)
+├── scripts/                        # Operational, verification, and curator scripts
 └── tests/                          # Automated test suites (Unit, Integration, E2E)
 ```
 

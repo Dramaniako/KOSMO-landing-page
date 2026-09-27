@@ -63,8 +63,9 @@ graph TD
    - All cryptographic routines (salted password hashing, verification) use asynchronous `bcrypt.hash()` and `bcrypt.compare()` to prevent Node.js event-loop starvation.
    - Long-lived operations (PDF contract generation, Cloudinary uploads, Excel streaming) are handled through memory buffers and streams without blocking disk I/O.
 
-3. **Stateless Authentication with Dual Token Strategies:**
-   - Standard session tokens: Signed HS256 JWT tokens with 7-day expiration sent via `Authorization: Bearer <token>` HTTP headers.
+3. **Stateless Authentication with Dual Token & Cookie Strategies:**
+   - Standard session tokens: Signed HS256 JWT tokens with 7-day expiration sent via `Authorization: Bearer <token>` HTTP headers or RFC 6265 `HttpOnly` Cookie headers (`token=<jwt>; Path=/; HttpOnly; SameSite=Lax`).
+   - Dedicated logout endpoint (`POST /api/auth/logout`) that explicitly destroys the session cookie.
    - Short-lived file download tokens: 60-second single-purpose JWT tokens (`POST /api/reports/download-token`) to eliminate persistent credentials from URL query parameters.
 
 4. **Transactional Data Integrity & Pessimistic Concurrency:**
@@ -76,6 +77,14 @@ graph TD
    - RFC 7807 problem details specification compliant error envelopes with distributed request tracing (`X-Request-Id`).
    - Defense-in-depth against data leakage (CWE-209): production environments suppress stack traces and database internals.
    - Frontend self-healing with React `ErrorBoundary` supporting `resetKeys`, localized custom fallbacks, bilingual messaging, and global `ErrorContext` toasts.
+
+6. **Modular 3-Tier Layered Architecture (Routes -> Services -> Repositories):**
+   - **HTTP Routing (`backend/routes/`):** Request deserialization, status codes, input sanitization, and response formatting.
+   - **Domain Services (`backend/services/`):** Business logic, validation orchestration, caching coordination, and payment / PDF workflows (`rental.service.ts`, `contract.service.ts`, `cache.ts`).
+   - **Data Repositories (`backend/repositories/`):** Direct database persistence, transactional connections, and row-level locking (`rentals.repository.ts`, `contracts.repository.ts`).
+
+7. **Production Containerization & Orchestration:**
+   - Multi-stage Docker packaging (`Dockerfile` backend, `frontend/Dockerfile` Nginx SPA) orchestrated with `docker-compose.yml` for unified local and production operations.
 
 ---
 
@@ -98,6 +107,8 @@ graph TD
 | **Spreadsheets** | [xlsx (SheetJS)](https://sheetjs.com/) | `^0.18.5` | Automated Excel financial and visitor report generation |
 | **Unit Testing** | [Node Native Test](https://nodejs.org/api/test.html) & [Vitest](https://vitest.dev/) | `Node 20+` / `^4.1.10` | Backend domain unit tests & React component tests |
 | **E2E Testing** | [Playwright](https://playwright.dev/) | `^1.62.1` | Real browser end-to-end integration tests |
+| **Containerization** | [Docker](https://www.docker.com/) & Compose | `^24.0` / `Compose v2` | Multi-stage production container images & service mesh |
+| **Reverse Proxy & SPA Host** | [Nginx](https://nginx.org/) | `1.27-alpine` | High-performance static SPA host, gzip caching, and headers |
 
 ---
 

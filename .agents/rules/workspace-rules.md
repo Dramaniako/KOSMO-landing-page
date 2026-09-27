@@ -5,13 +5,14 @@ trigger: always_on
 # KOSMO Workspace Operating Rules & Verification Standards
 
 ## 1. Core Architecture & Tech Stack
-- **Backend:** Node.js, Express, TypeScript (`backend/server.ts`, `backend/router.ts`) running on standalone Node and Vercel Serverless (`api/index.js`).
+- **Backend:** Node.js, Express, TypeScript (3-tier Router -> Service -> Repository pattern in `backend/routes/`, `backend/services/`, `backend/repositories/`, `backend/router.ts`) running on standalone Node, Docker containers, and Vercel Serverless (`api/index.js`).
 - **Database:** MySQL via `mysql2/promise` connection pooling in `backend/db.ts`. 
-  - Domain tables: `users`, `properties`, `property_facilities`, `reviews`, `withdrawals`, `visitor_tracking`, `rentals`.
+  - Domain tables: `users`, `properties`, `property_facilities`, `rooms`, `property_photos`, `reviews`, `withdrawals`, `visitor_tracking`, `rentals`.
   - Canonical User Roles: Strict union type `'admin' | 'landlord' | 'tenant'`.
 - **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, Lucide React (`frontend/src/`).
+- **Authentication:** Stateless JWT via `Authorization: Bearer <token>` and RFC 6265 `HttpOnly` cookie sessions (`token=<jwt>`).
 - **Maps & Location:** Leaflet OpenStreetMap (`frontend/src/types/leaflet.d.ts`).
-- **Static Assets:** Handled via `/uploads/*` and Multer in `backend/uploads/`.
+- **Static Assets:** Handled via `/uploads/*`, Multer in `backend/uploads/`, and streaming Cloudinary CDN.
 
 ---
 

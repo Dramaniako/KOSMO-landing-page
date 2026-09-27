@@ -6,16 +6,21 @@ All API endpoints are served under the `/api` prefix and communicate using JSON 
 
 ## 1. Authentication & Security Headers
 
-### Authorization Header
-Protected routes require a JSON Web Token (JWT) supplied in the standard `Authorization` header:
-
-```http
-Authorization: Bearer <jwt_token>
-```
+### Authorization Header & HttpOnly Cookies
+Protected routes authenticate via either:
+1. **Bearer Header:** Standard JSON Web Token (JWT) in the `Authorization` header:
+   ```http
+   Authorization: Bearer <jwt_token>
+   ```
+2. **HttpOnly Cookie:** RFC 6265 compliant cookie named `token`:
+   ```http
+   Cookie: token=<jwt_token>
+   ```
+The authentication middleware automatically checks the `Authorization` header first, then falls back to parsing the `Cookie` header.
 
 ### Short-Lived Download Tokens
 For browser file downloads (Excel sheets or PDF leases), client applications may either:
-1. Fetch the file via authenticated `fetch()` requesting a binary `Blob`, or
+1. Fetch the file via authenticated `fetch()` requesting a binary `Blob` (with `credentials: 'include'`), or
 2. Request a 60-second single-use download token via `POST /api/reports/download-token` and pass `?downloadToken=<token>` in the download request.
 
 ---
@@ -26,8 +31,9 @@ For browser file downloads (Excel sheets or PDF leases), client applications may
 
 | Method | Endpoint | Access | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/auth/login` | Public | Authenticates credentials and returns user profile with signed 7d JWT |
+| `POST` | `/api/auth/login` | Public | Authenticates credentials and returns user profile with signed 7d JWT and sets HttpOnly cookie |
 | `POST` | `/api/auth/register` | Public | Creates a new user account (`tenant` role by default) |
+| `POST` | `/api/auth/logout` | Public / Protected | Clears the `token` HttpOnly session cookie |
 | `POST` | `/api/auth/verify-password` | Protected | Password confirmation gate required before executing destructive actions |
 | `GET` | `/api/auth/me` | Protected | Returns claims and verified user profile for the current authenticated token |
 | `GET` | `/api/users/profile/:id` | Protected | Retrieves full profile details for user `id` (restricted to self or admin) |
@@ -56,6 +62,16 @@ For browser file downloads (Excel sheets or PDF leases), client applications may
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
+*Note: Response also emits `Set-Cookie: token=<jwt>; Path=/; HttpOnly; SameSite=Lax`.*
+
+#### `POST /api/auth/logout`
+**Response (200 OK):**
+```json
+{
+  "message": "Logout berhasil"
+}
+```
+*Note: Emits `Set-Cookie: token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly`.*
 
 ---
 

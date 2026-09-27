@@ -28,6 +28,7 @@ The frontend implements defense-in-depth error handling to provide self-healing 
 
 ### 2.2 Resilient API Client Layer (`src/services/apiClient.ts`)
 - **Typed `ApiError` Class:** Captures HTTP `status`, domain `code`, structured `details`, correlation `requestId`, and server `timestamp`.
+- **HttpOnly Cookie Integration:** Sets `credentials: 'include'` by default for seamless transmission of RFC 6265 session cookies across API calls and blob downloads.
 - **Automatic Exponential Backoff Retry:** `requestWithRetry<T>()` safely retries idempotent GET requests on transient network drops or HTTP 503 errors.
 - **Timeout Management:** Configurable `timeoutMs` utilizing native `AbortController`.
 - **Classification Utilities:** `isApiError()`, `isNetworkError()`, `isAuthError()`, and `getErrorMessage()`.
@@ -45,30 +46,35 @@ The frontend implements defense-in-depth error handling to provide self-healing 
 ## 3. Directory Structure
 
 ```
-frontend/src/
-├── components/                 # Reusable UI components
-│   ├── __tests__/              # Vitest component unit tests & Curator audits
-│   ├── BookingModal/           # 3-step contract and booking wizard
-│   ├── ErrorBoundary.tsx       # Fault-tolerant React error boundary
-│   ├── KosCard.tsx             # Mamikos/Airbnb style listing card
-│   ├── ProtectedRoute.tsx      # Declarative role-based routing guard
-│   └── SearchFilterBar.tsx     # Dual-budget range and facility filters
-├── context/                    # React Context Providers
-│   ├── CurrencyContext.tsx     # Reactive IDR / USD currency switcher
-│   ├── ErrorContext.tsx        # Application error and toast dispatcher
-│   ├── LanguageContext.tsx     # Indonesian / English localization
-│   └── ThemeContext.tsx        # Dark / Light theme tokens
-├── pages/                      # Central Page Views
-│   ├── AdminDashboard.tsx      # Platform administration & analytics
-│   ├── LandlordDashboard.tsx   # Property & room inventory management
-│   ├── LandingPage.tsx         # Catalog discovery & booking entrypoint
-│   ├── Login.tsx               # Authentication portal
-│   └── TenantDashboard.tsx     # Tenancy contract & payment dashboard
-├── services/                   # HTTP client & API adapters
-│   ├── apiClient.ts            # Resilient API client with ApiError
-│   ├── photosApi.ts            # Property photo gallery API adapter
-│   └── roomsApi.ts             # Discrete room inventory API adapter
-└── types/                      # Domain TypeScript interfaces
+frontend/
+├── Dockerfile                  # Multi-stage production Nginx container
+├── nginx.conf                  # Nginx proxy, compression & caching configuration
+├── src/
+│   ├── components/             # Reusable UI components
+│   │   ├── __tests__/          # Vitest component unit tests & Curator audits
+│   │   ├── BookingModal/       # 3-step contract and booking wizard
+│   │   ├── ErrorBoundary.tsx   # Fault-tolerant React error boundary
+│   │   ├── KosCard.tsx         # Mamikos/Airbnb style listing card
+│   │   ├── ProtectedRoute.tsx  # Declarative role-based routing guard
+│   │   └── SearchFilterBar.tsx # Dual-budget range and facility filters
+│   ├── context/                # React Context Providers
+│   │   ├── CurrencyContext.tsx # Reactive IDR / USD currency switcher
+│   │   ├── ErrorContext.tsx    # Application error and toast dispatcher
+│   │   ├── LanguageContext.tsx # Indonesian / English localization
+│   │   └── ThemeContext.tsx    # Dark / Light theme tokens
+│   ├── pages/                  # Central Page Views
+│   │   ├── AdminDashboard.tsx  # Platform administration & analytics
+│   │   ├── LandlordDashboard.tsx# Property & room inventory management
+│   │   ├── LandingPage.tsx     # Catalog discovery & booking entrypoint
+│   │   ├── Login.tsx           # Authentication portal
+│   │   └── TenantDashboard.tsx # Tenancy contract & payment dashboard
+│   ├── services/               # HTTP client & API adapters
+│   │   ├── apiClient.ts        # Resilient API client with ApiError & credentials: 'include'
+│   │   ├── photosApi.ts        # Property photo gallery API adapter
+│   │   └── roomsApi.ts         # Discrete room inventory API adapter
+│   ├── types/                  # Domain TypeScript interfaces
+│   └── App.tsx                 # Root application router with AppErrorBoundary
+└── vite.config.ts              # Vite bundler configuration & API proxy
 ```
 
 ---
@@ -85,3 +91,16 @@ npm test -- --run
 # Production bundling check
 npm run build
 ```
+
+---
+
+## 5. Docker Containerization
+
+```bash
+# Build production Nginx SPA container
+docker build -t kosmo-frontend .
+
+# Run container on port 80
+docker run -p 80:80 kosmo-frontend
+```
+

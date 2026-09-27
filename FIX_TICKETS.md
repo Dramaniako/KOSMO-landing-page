@@ -54,3 +54,12 @@ Master backlog of engineering tickets generated from the technical audit report.
 - [x] `TICKET-P1-018`: Universal Runtime Environment Compatibility (Vite + Node.js) & Multi-Format Message Extraction (`frontend/src/services/apiClient.ts`).
 - [x] `TICKET-P1-019`: Authentic Curator Agent Evaluation replacing mocked passes with functional assertions across all 5 pillars (`scripts/curator_error_handling.ts`).
 
+### Phase 7: Core Architecture Decoupling, Containerization & Auth Hardening (P1–P5)
+- [x] `TICKET-P1-020`: Repository Pattern Decoupling for Contracts & Rentals (`backend/repositories/contracts.repository.ts`, `backend/repositories/rentals.repository.ts`)
+- [x] `TICKET-P1-021`: Business Logic Isolation into Domain Services (`backend/services/contract.service.ts`, `backend/services/rental.service.ts`)
+- [x] `TICKET-P1-022`: Modular Route Delegation & Thin Controllers (`backend/routes/contracts.routes.ts`, `backend/routes/rentals.routes.ts`)
+- [x] `TICKET-P1-023`: RFC 6265 HttpOnly Cookie Authentication Support & Logout Route (`backend/middleware/auth.ts`, `backend/routes/auth.routes.ts`, `frontend/src/services/apiClient.ts`)
+- [x] `TICKET-P1-024`: Production Multi-Stage Docker Containerization & Compose Service Mesh (`Dockerfile`, `docker-compose.yml`, `frontend/Dockerfile`, `frontend/nginx.conf`)
+- [x] `TICKET-P1-025`: JSDOM / Vitest Warmup Render Harness & Sub-Millisecond JIT Test Stabilization (`frontend/src/components/__tests__/perf_components.test.tsx`, `tests/auth.test.ts`)
+
+

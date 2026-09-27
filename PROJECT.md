@@ -37,6 +37,10 @@
 | 20 | Milestone 5: GitHub Resolution & Sync Report | Generate `GITHUB_TRIAGE_REPORT.md` documenting disposition of all 13 issues and 8 PRs with copy-pasteable remote sync commands | M5 | Mandate |
 | 21 | Milestone 6: Professional Error Architecture | Implement centralized `AppError` typed hierarchy, RFC 7807 response schema, request correlation tracing (`X-Request-Id`), driver translation (Zod, MySQL, Multer, JWT), and self-healing frontend `ErrorBoundary` | M6 | Mandate |
 | 22 | Milestone 6: Curator Agent Certification | Build autonomous Error Handling Curator Agent (`scripts/curator_error_handling.ts`, `tests/curator_error_handling.test.ts`) rating error architecture across 5 dimensions (Score 10.0/10) | M6 | Mandate |
+| 23 | Milestone 7: 3-Tier Layered Architecture Decoupling | Extract data access into `backend/repositories/` (`contracts.repository.ts`, `rentals.repository.ts`) and business services into `backend/services/` (`contract.service.ts`, `rental.service.ts`) | M7 | Core Refactor |
+| 24 | Milestone 7: RFC 6265 HttpOnly Cookie Auth & Logout | Implement `parseCookies`, dual token parsing, cookie credentials inclusion, and `POST /api/auth/logout` | M7 | Core Refactor |
+| 25 | Milestone 7: Production Docker & Compose Orchestration | Multi-stage backend `Dockerfile`, frontend Nginx container `frontend/Dockerfile`, and `docker-compose.yml` service mesh | M7 | Core Refactor |
+| 26 | Milestone 7: Test Warmup & Performance Suite Stabilization | Add JSDOM warmup renders and JIT warmup loops in `perf_components.test.tsx` and auth cookie tests | M7 | Core Refactor |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
@@ -47,6 +51,7 @@
 | M4 | Verification, Automated Tests & Forensic Audit | Write automated tests in `tests/` and frontend test suite; run full verify pipeline; run Forensic Auditor | M2, M3 | DONE |
 | M5 | GitHub Resolution & Remote Sync Report | Generate comprehensive audit markdown report with copy-pasteable closure/merge commands | M4 | DONE |
 | M6 | Enterprise Error Handling & Curator Audit | Centralized AppError architecture, RFC 7807 schemas, ErrorBoundary self-healing, Curator Agent rating | M4 | DONE |
+| M7 | Core Architecture, Containerization & Auth Hardening | Repository-Service pattern, Docker Compose, HttpOnly cookie sessions, and JSDOM warmup tests | M6 | DONE |
 
 ## Interface Contracts
 
@@ -81,15 +86,25 @@
 
 ## Code Layout
 - `backend/errors/index.ts`: Centralized `AppError` typed hierarchy & `ErrorCode` constants.
+- `backend/repositories/contracts.repository.ts`: Data persistence for digital contracts.
+- `backend/repositories/rentals.repository.ts`: Data persistence for rental transactions and room state.
+- `backend/services/contract.service.ts`: Business domain logic and PDF contract orchestration.
+- `backend/services/rental.service.ts`: Rental workflow management, active tenancy checks, and payments.
+- `backend/routes/contracts.routes.ts`: Lease generation, PDF previews, digital signing.
+- `backend/routes/rentals.routes.ts`: Tenancy management, termination, payments.
+- `backend/routes/photos.routes.ts`: Property and room photo gallery endpoints.
+- `backend/routes/rooms.routes.ts`: Discrete room endpoints and caching.
+- `backend/middleware/auth.ts`: Authentication middleware, cookie parsing & JWT secret handling.
 - `backend/middleware/errorHandler.ts`: Express centralized error handler & driver normalizer.
 - `backend/middleware/notFoundHandler.ts`: 404 JSON handler for unmapped `/api` routes.
 - `backend/middleware/requestId.ts`: Request correlation ID generation and propagation.
 - `backend/utils/asyncHandler.ts`: Higher-order wrapper routing async exceptions to `next(err)`.
 - `backend/utils/processSafety.ts`: Process safety net for `uncaughtException` & `unhandledRejection`.
-- `backend/middleware/auth.ts`: Authentication middleware & JWT secret handling.
 - `backend/db.ts`: Database connection, DDL, migrations, index definitions (`ensureIndexes`).
-- `backend/routes/photos.routes.ts`: Property and room photo gallery endpoints.
-- `backend/routes/rooms.routes.ts`: Discrete room endpoints and caching.
+- `Dockerfile`: Production backend Node.js Alpine container definition.
+- `docker-compose.yml`: Multi-container orchestration (Backend + Frontend Nginx + MySQL).
+- `frontend/Dockerfile`: Production frontend multi-stage Nginx container.
+- `frontend/nginx.conf`: Nginx SPA reverse proxy and caching rules.
 - `frontend/src/components/ErrorBoundary.tsx`: React ErrorBoundary with reset recovery and diagnostics.
 - `frontend/src/context/ErrorContext.tsx`: Application-wide async error toast notification provider.
 - `frontend/src/services/apiClient.ts`: Typed `ApiError` parser and `requestWithRetry` backoff.

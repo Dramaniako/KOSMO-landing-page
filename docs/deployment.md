@@ -132,6 +132,38 @@ Add all variables from the `.env` matrix to **Project Settings > Environment Var
 
 ---
 
+### Strategy C: Enterprise Docker & Docker Compose Containerization
+
+KOSMO provides automated multi-stage Docker packaging and service mesh orchestration:
+- **`backend`:** Multi-stage Node.js 20 Alpine container running under unprivileged user `node`, exposed on port `5000`.
+- **`frontend`:** Multi-stage Vite production build served via Nginx 1.27 Alpine with Gzip compression, asset caching headers, and SPA fallback on port `80`.
+- **`db`:** Optional local containerized MySQL 8.0 instance configured with healthchecks and persistent volume storage.
+
+#### 1. Quickstart Orchestration
+```bash
+# Build images and start all containers in detached mode
+docker compose up --build -d
+
+# Verify container statuses and healthchecks
+docker compose ps
+
+# Inspect live container logs
+docker compose logs -f backend
+```
+
+#### 2. Service Endpoints
+- **Web Application (Nginx SPA):** `http://localhost` (Port 80)
+- **REST API Backend:** `http://localhost:5000/api`
+- **Health Probe:** `http://localhost:5000/api/health`
+
+#### 3. Database Seeding Inside Container
+```bash
+# Run schema migration and seed Bali listings inside the backend container
+docker compose exec backend npm run db:seed
+```
+
+---
+
 ## 3. Database Maintenance & Diagnostics
 
 ### Connection Health Check
