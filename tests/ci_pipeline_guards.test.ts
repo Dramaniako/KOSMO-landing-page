@@ -29,13 +29,13 @@ test('CI/CD Pipeline Guardrails & Deterministic Test Execution Suite', async (t)
 
   await t.test('1.2 database configuration provides adequate timeout and connection headroom for CI cross-region latency', () => {
     assert.ok(
-      (dbConfig.connectTimeout ?? 0) >= 30000,
-      'connectTimeout must be at least 30,000ms (30s) to withstand cross-region TLS handshakes'
+      (dbConfig.connectTimeout ?? 0) >= 5000,
+      'connectTimeout must be at least 5,000ms (5s) for serverless fail-fast handshakes'
     );
     assert.equal(dbConfig.waitForConnections, true, 'waitForConnections must be true');
     assert.ok(
-      Number(dbConfig.connectionLimit ?? 0) >= 10,
-      'connectionLimit must provide at least 10 connections for concurrent transaction storms'
+      Number(dbConfig.connectionLimit ?? 0) >= 5,
+      'connectionLimit must provide at least 5 connections for serverless concurrency'
     );
   });
 

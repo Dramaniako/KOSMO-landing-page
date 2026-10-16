@@ -1,5 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import crypto from 'node:crypto';
+import express from 'express';
+import bodyParser from 'body-parser';
+import bcrypt from 'bcryptjs';
+import router from '../backend/router';
+import { pool, ensureDbReady } from '../backend/db';
+import { generateJwtToken } from '../backend/middleware/auth';
+import type { RowDataPacket } from 'mysql2/promise';
 
 interface LandlordAccount {
   id: string;
@@ -257,3 +266,149 @@ test('Landlord withdrawals and financial calculations', async (t) => {
     assert.equal(calculateOccupancyRate(5, 5), 100.0);
   });
 });
+
+test('Admin withdrawal rejection password confirmation gate (Issue 04)', async (t) => {
+  try {
+    await ensureDbReady();
+  } catch (err) {
+    console.warn('Database initialization warning in test setup:', err);
+  }
+
+  const app = express();
+  app.use(bodyParser.json({ limit: '1mb' }));
+  app.use(bodyParser.urlencoded({ limit: '1mb', extended: true }));
+  app.use('/api', router);
+
+  const server = http.createServer(app);
+  let serverPort = 0;
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      if (addr && typeof addr === 'object') {
+        serverPort = addr.port;
+      }
+      resolve();
+    });
+  });
+
+  const baseUrl = `http://127.0.0.1:${serverPort}/api`;
+  const tag = crypto.randomBytes(4).toString('hex');
+  const adminPassword = 'AdminSecretPassword123!';
+  const adminPasswordHash = bcrypt.hashSync(adminPassword, 10);
+
+  const testAdmin = {
+    id: `test-sec-adm-${tag}`,
+    email: `test-sec-adm-${tag}@kosmo.test`,
+    role: 'admin' as const,
+    name: 'Security Test Admin'
+  };
+
+  const testLandlord = {
+    id: `test-sec-ll-${tag}`,
+    email: `test-sec-ll-${tag}@kosmo.test`,
+    role: 'landlord' as const,
+    name: 'Security Test Landlord'
+  };
+
+  const tokenAdmin = generateJwtToken(testAdmin);
+  const withdrawalId = `test-w-${tag}`;
+  const initialBalance = 5000000;
+  const withdrawAmount = 2000000;
+
+  // Seed test records
+  await pool.query(
+    `INSERT INTO users (id, name, email, password, role, balance, totalRevenue, totalWithdrawn)
+     VALUES (?, ?, ?, ?, 'admin', 0, 0, 0),
+            (?, ?, ?, '$2a$10$dummyhash', 'landlord', ?, 10000000, 0)`,
+    [
+      testAdmin.id, testAdmin.name, testAdmin.email, adminPasswordHash,
+      testLandlord.id, testLandlord.name, testLandlord.email, initialBalance
+    ]
+  );
+
+  await pool.query(
+    `INSERT INTO withdrawals (id, userId, bankName, accountNumber, accountHolder, amount, date, status)
+     VALUES (?, ?, 'BCA', '1234567890', 'Security Landlord', ?, CURDATE(), 'pending')`,
+    [withdrawalId, testLandlord.id, withdrawAmount]
+  );
+
+  t.after(async () => {
+    server.close();
+    try {
+      await pool.query('DELETE FROM withdrawals WHERE id = ?', [withdrawalId]);
+      await pool.query('DELETE FROM users WHERE id IN (?, ?)', [testAdmin.id, testLandlord.id]);
+    } catch (cleanupErr) {
+      console.warn('Test cleanup warning:', cleanupErr);
+    }
+  });
+
+  // 1. Rejection without password returns HTTP 400
+  await t.test('rejects withdrawal without password with 400 Bad Request', async () => {
+    const res = await fetch(`${baseUrl}/admin/withdrawals/${withdrawalId}/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAdmin}`
+      },
+      body: JSON.stringify({ reason: 'Informasi rekening tidak sesuai' })
+    });
+
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { message?: string };
+    assert.match(String(body.message || ''), /Password konfirmasi administrator diperlukan/i);
+  });
+
+  // 2. Rejection with invalid password returns HTTP 401
+  await t.test('rejects withdrawal with invalid password with 401 Unauthorized', async () => {
+    const res = await fetch(`${baseUrl}/admin/withdrawals/${withdrawalId}/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAdmin}`
+      },
+      body: JSON.stringify({
+        password: 'wrongPassword999',
+        reason: 'Informasi rekening tidak sesuai'
+      })
+    });
+
+    assert.equal(res.status, 401);
+    const body = (await res.json()) as { message?: string };
+    assert.match(String(body.message || ''), /Password administrator salah/i);
+
+    // Verify balance is unchanged in database
+    const [userRows] = await pool.query<RowDataPacket[]>('SELECT balance FROM users WHERE id = ?', [testLandlord.id]);
+    assert.equal(Number(userRows[0].balance), initialBalance);
+  });
+
+  // 3. Rejection with valid password returns HTTP 200 and refunds balance atomically
+  await t.test('rejects withdrawal with valid password with 200 and refunds balance atomically', async () => {
+    const res = await fetch(`${baseUrl}/admin/withdrawals/${withdrawalId}/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAdmin}`
+      },
+      body: JSON.stringify({
+        password: adminPassword,
+        reason: 'Nomor rekening bank salah'
+      })
+    });
+
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { status: string; withdrawalId: string };
+    assert.equal(body.status, 'rejected');
+    assert.equal(body.withdrawalId, withdrawalId);
+
+    // Verify withdrawal status in database
+    const [wRows] = await pool.query<RowDataPacket[]>('SELECT status, rejectionReason FROM withdrawals WHERE id = ?', [withdrawalId]);
+    assert.equal(wRows[0].status, 'rejected');
+    assert.equal(wRows[0].rejectionReason, 'Nomor rekening bank salah');
+
+    // Verify balance refund in database: initialBalance + withdrawAmount
+    const [userRows] = await pool.query<RowDataPacket[]>('SELECT balance FROM users WHERE id = ?', [testLandlord.id]);
+    assert.equal(Number(userRows[0].balance), initialBalance + withdrawAmount);
+  });
+});
+

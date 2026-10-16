@@ -19,9 +19,14 @@ import {
   verifyPasswordSchema,
   processWithdrawalSchema,
   rejectWithdrawalSchema,
-  createRentalSchema
+  createRentalSchema,
+  sanitizeText,
+  createPaymentTokenSchema,
+  paymentNotificationSchema,
+  visitorTrackingSchema
 } from '../backend/middleware/validation';
 import { isUserProfileComplete } from '../backend/types/index';
+import { shouldSkipRateLimit } from '../backend/middleware/rateLimiter';
 import type { Request, Response, NextFunction } from 'express';
 
 test('Zod request body validation middleware & schemas', async (t) => {
@@ -52,6 +57,230 @@ test('Zod request body validation middleware & schemas', async (t) => {
     middleware(mockReq, mockRes, mockNext);
 
     assert.equal(nextCalled, true);
+  });
+
+  await t.test('validateBody properly mutates req.body to match sanitized and transformed data', () => {
+    // 1. XSS Tag Sanitization on req.body
+    let nextCalled = false;
+    const mockReqXss = {
+      body: {
+        propertyId: 'prop-101',
+        comment: '<script>alert("XSS")</script>Kos sangat bersih dan nyaman!',
+        rating: 5
+      }
+    } as unknown as Request;
+
+    const mockRes = {
+      status: () => mockRes,
+      json: () => mockRes
+    } as unknown as Response;
+
+    const middlewareXss = validateBody(reviewSchema);
+    middlewareXss(mockReqXss, mockRes, () => {
+      nextCalled = true;
+    });
+
+    assert.equal(nextCalled, true);
+    assert.equal(
+      mockReqXss.body.comment,
+      'Kos sangat bersih dan nyaman!',
+      'validateBody must mutate req.body.comment to strip script tags via sanitizeText'
+    );
+    assert.ok(!mockReqXss.body.comment.includes('<script>'));
+
+    // 2. Default Value Population on req.body
+    let nextCalledDefaults = false;
+    const mockReqDefaults = {
+      body: {
+        propertyId: 'prop-101'
+      }
+    } as unknown as Request;
+
+    const middlewareDefaults = validateBody(previewContractSchema);
+    middlewareDefaults(mockReqDefaults, mockRes, () => {
+      nextCalledDefaults = true;
+    });
+
+    assert.equal(nextCalledDefaults, true);
+    assert.equal(
+      mockReqDefaults.body.durationMonths,
+      1,
+      'validateBody must populate default values (durationMonths = 1) onto req.body'
+    );
+
+    // 3. Unrecognized Key Stripping (Mass-Assignment Protection)
+    let nextCalledPruning = false;
+    const mockReqExtra = {
+      body: {
+        email: 'tenant@kosmo.id',
+        password: 'password123',
+        injectedRole: 'admin',
+        injectedBalance: 10000000
+      }
+    } as unknown as Request;
+
+    const middlewareLogin = validateBody(loginSchema);
+    middlewareLogin(mockReqExtra, mockRes, () => {
+      nextCalledPruning = true;
+    });
+
+    assert.equal(nextCalledPruning, true);
+    assert.equal(mockReqExtra.body.email, 'tenant@kosmo.id');
+    assert.equal(mockReqExtra.body.password, 'password123');
+    assert.equal(
+      (mockReqExtra.body as Record<string, unknown>).injectedRole,
+      undefined,
+      'validateBody must strip unknown fields to prevent mass assignment'
+    );
+    assert.equal(
+      (mockReqExtra.body as Record<string, unknown>).injectedBalance,
+      undefined,
+      'validateBody must strip unknown fields to prevent mass assignment'
+    );
+
+    // 4. Passthrough Schema Field Preservation
+    let nextCalledPassthrough = false;
+    const mockReqWebhook = {
+      body: {
+        order_id: 'rent-101',
+        status_code: '200',
+        gross_amount: '3500000.00',
+        signature_key: 'abc123sha512',
+        va_numbers: [{ bank: 'bca', va_number: '12345678' }],
+        custom_midtrans_meta: 'gateway_metadata'
+      }
+    } as unknown as Request;
+
+    const middlewareWebhook = validateBody(paymentNotificationSchema);
+    middlewareWebhook(mockReqWebhook, mockRes, () => {
+      nextCalledPassthrough = true;
+    });
+
+    assert.equal(nextCalledPassthrough, true);
+    assert.deepEqual(
+      (mockReqWebhook.body as Record<string, unknown>).va_numbers,
+      [{ bank: 'bca', va_number: '12345678' }],
+      'validateBody must preserve passthrough fields on paymentNotificationSchema'
+    );
+    assert.equal(
+      (mockReqWebhook.body as Record<string, unknown>).custom_midtrans_meta,
+      'gateway_metadata'
+    );
+  });
+
+  await t.test('propertySchema passthrough preserves additional creation fields', () => {
+    const rawData = {
+      name: 'Kos Canggu Modern',
+      district: 'Badung',
+      address: 'Jl. Pantai Batu Bolong No. 10',
+      price: 4500000,
+      totalRooms: 10,
+      description: 'Kos eksklusif dekat pantai',
+      facilities: ['WiFi 100 Mbps', 'AC', 'Water Heater'],
+      latitude: -8.6500,
+      longitude: 115.1300,
+      image: 'https://res.cloudinary.com/demo/image/upload/sample.webp'
+    };
+    const parsed = propertySchema.safeParse(rawData);
+    assert.equal(parsed.success, true);
+    if (parsed.success) {
+      assert.equal((parsed.data as Record<string, unknown>).description, 'Kos eksklusif dekat pantai');
+      assert.deepEqual((parsed.data as Record<string, unknown>).facilities, ['WiFi 100 Mbps', 'AC', 'Water Heater']);
+      assert.equal((parsed.data as Record<string, unknown>).latitude, -8.6500);
+      assert.equal((parsed.data as Record<string, unknown>).longitude, 115.1300);
+      assert.equal((parsed.data as Record<string, unknown>).image, 'https://res.cloudinary.com/demo/image/upload/sample.webp');
+    }
+  });
+
+  await t.test('Rate Limiter Bypass Security: shouldSkipRateLimit guardrails', () => {
+    const env = process.env as Record<string, string | undefined>;
+    const originalNodeEnv = env.NODE_ENV;
+    const originalNoListen = env.NO_LISTEN;
+    const originalSecret = env.RATE_LIMIT_BYPASS_SECRET;
+
+    try {
+      // 1. Production Mode: Reject x-test-bypass: true
+      env.NODE_ENV = 'production';
+      delete env.NO_LISTEN;
+      delete env.RATE_LIMIT_BYPASS_SECRET;
+
+      const reqBypassTrue = { headers: { 'x-test-bypass': 'true' } } as unknown as Request;
+      assert.equal(
+        shouldSkipRateLimit(reqBypassTrue),
+        false,
+        'shouldSkipRateLimit must strictly reject x-test-bypass: true in production'
+      );
+
+      // 2. Production Mode: Reject x-bypass-rate-limit: true
+      const reqBypassAlt = { headers: { 'x-bypass-rate-limit': 'true' } } as unknown as Request;
+      assert.equal(
+        shouldSkipRateLimit(reqBypassAlt),
+        false,
+        'shouldSkipRateLimit must strictly reject x-bypass-rate-limit: true in production'
+      );
+
+      // 3. Production Mode: Reject array header
+      const reqBypassArray = { headers: { 'x-test-bypass': ['true'] } } as unknown as Request;
+      assert.equal(
+        shouldSkipRateLimit(reqBypassArray),
+        false,
+        'shouldSkipRateLimit must reject array header in production'
+      );
+
+      // 4. Production Mode: Reject normal request
+      const reqNormal = { headers: {} } as unknown as Request;
+      assert.equal(
+        shouldSkipRateLimit(reqNormal),
+        false,
+        'shouldSkipRateLimit must reject unauthenticated request in production'
+      );
+
+      // 5. Test Environment Safety: Bypasses when NODE_ENV === "test"
+      env.NODE_ENV = 'test';
+      delete env.NO_LISTEN;
+      assert.equal(
+        shouldSkipRateLimit(reqNormal),
+        true,
+        'shouldSkipRateLimit must allow bypass when NODE_ENV === "test" to prevent test suite false-failures'
+      );
+
+      // 6. Test Environment Safety: Bypasses when NO_LISTEN === "true"
+      env.NODE_ENV = 'production';
+      env.NO_LISTEN = 'true';
+      assert.equal(
+        shouldSkipRateLimit(reqNormal),
+        true,
+        'shouldSkipRateLimit must allow bypass when NO_LISTEN === "true"'
+      );
+
+      // 7. Development Environment: Allows "true" bypass without secret
+      env.NODE_ENV = 'development';
+      delete env.NO_LISTEN;
+      assert.equal(
+        shouldSkipRateLimit(reqBypassTrue),
+        true,
+        'shouldSkipRateLimit permits x-test-bypass: true in development mode'
+      );
+
+      // 8. Development Environment: Allows secret match
+      env.RATE_LIMIT_BYPASS_SECRET = 'dev-secret-token';
+      const reqSecretMatch = { headers: { 'x-test-bypass': 'dev-secret-token' } } as unknown as Request;
+      assert.equal(
+        shouldSkipRateLimit(reqSecretMatch),
+        true,
+        'shouldSkipRateLimit permits valid bypass secret in development mode'
+      );
+      const reqSecretMismatch = { headers: { 'x-test-bypass': 'wrong-token' } } as unknown as Request;
+      assert.equal(
+        shouldSkipRateLimit(reqSecretMismatch),
+        false,
+        'shouldSkipRateLimit rejects invalid bypass secret in development mode'
+      );
+    } finally {
+      env.NODE_ENV = originalNodeEnv;
+      env.NO_LISTEN = originalNoListen;
+      env.RATE_LIMIT_BYPASS_SECRET = originalSecret;
+    }
   });
 
   await t.test('validateBody middleware returns 400 and structured error on invalid payload', () => {
@@ -568,10 +797,32 @@ test('Zod request body validation middleware & schemas', async (t) => {
     const invalidProcessStatus = processWithdrawalSchema.safeParse({ status: 'rejected' });
     assert.equal(invalidProcessStatus.success, false);
 
-    const validReject = rejectWithdrawalSchema.safeParse({ reason: 'Nomor rekening tidak valid' });
+    const validReject = rejectWithdrawalSchema.safeParse({
+      password: 'adminSecretPassword',
+      reason: 'Nomor rekening tidak valid'
+    });
     assert.equal(validReject.success, true);
 
-    const emptyRejectReason = rejectWithdrawalSchema.safeParse({ reason: '' });
+    const validRejectNoReason = rejectWithdrawalSchema.safeParse({
+      password: 'adminSecretPassword'
+    });
+    assert.equal(validRejectNoReason.success, true);
+
+    const missingRejectPassword = rejectWithdrawalSchema.safeParse({
+      reason: 'Nomor rekening tidak valid'
+    });
+    assert.equal(missingRejectPassword.success, false);
+
+    const emptyRejectPassword = rejectWithdrawalSchema.safeParse({
+      password: '',
+      reason: 'Nomor rekening tidak valid'
+    });
+    assert.equal(emptyRejectPassword.success, false);
+
+    const emptyRejectReason = rejectWithdrawalSchema.safeParse({
+      password: 'adminSecretPassword',
+      reason: ''
+    });
     assert.equal(emptyRejectReason.success, false);
   });
 
@@ -593,5 +844,66 @@ test('Zod request body validation middleware & schemas', async (t) => {
       durationMonths: 0
     });
     assert.equal(invalidDuration.success, false);
+  });
+
+  await t.test('visitorTrackingSchema accepts empty, optional, and valid telemetry payloads', () => {
+    const emptyPayload = visitorTrackingSchema.safeParse({});
+    assert.equal(emptyPayload.success, true);
+
+    const undefinedPayload = visitorTrackingSchema.safeParse(undefined);
+    assert.equal(undefinedPayload.success, true);
+
+    const validPayload = visitorTrackingSchema.safeParse({
+      pageUrl: 'https://kosmobali.my.id/property/prop-101',
+      referrer: 'https://google.com',
+      sessionId: 'sess-xyz-123',
+      deviceType: 'mobile'
+    });
+    assert.equal(validPayload.success, true);
+
+    const oversizedUrl = visitorTrackingSchema.safeParse({
+      pageUrl: 'a'.repeat(501)
+    });
+    assert.equal(oversizedUrl.success, false);
+  });
+
+  await t.test('sanitizeText strips script and HTML tags while preserving text', () => {
+    assert.equal(sanitizeText('<script>alert(1)</script>Kos Nyaman'), 'Kos Nyaman');
+    assert.equal(sanitizeText('<img src=x onerror=alert("XSS")>'), '');
+    assert.equal(sanitizeText('<b>Bagus</b> sekali & ramah!'), 'Bagus sekali & ramah!');
+    assert.equal(sanitizeText('Jl. Sunset Road\0 No. 10'), 'Jl. Sunset Road No. 10');
+  });
+
+  await t.test('createPaymentTokenSchema validates required fields and defaults duration', () => {
+    const valid = createPaymentTokenSchema.safeParse({
+      propertyId: 'prop-01',
+      tenantId: 'user-01'
+    });
+    assert.equal(valid.success, true);
+    if (valid.success) {
+      assert.equal(valid.data.durationMonths, 1);
+    }
+
+    const missingProp = createPaymentTokenSchema.safeParse({ tenantId: 'user-01' });
+    assert.equal(missingProp.success, false);
+  });
+
+  await t.test('paymentNotificationSchema validates webhook payload and passes through extra gateway fields', () => {
+    const valid = paymentNotificationSchema.safeParse({
+      order_id: 'rent-101',
+      status_code: '200',
+      gross_amount: '3500000.00',
+      signature_key: 'abcdef123456',
+      transaction_status: 'settlement',
+      va_numbers: [{ bank: 'bca', va_number: '12345678' }]
+    });
+    assert.equal(valid.success, true);
+
+    const missingSig = paymentNotificationSchema.safeParse({
+      order_id: 'rent-101',
+      status_code: '200',
+      gross_amount: '3500000.00'
+    });
+    assert.equal(missingSig.success, false);
   });
 });

@@ -1,7 +1,7 @@
 import type { Request, Response, Router } from 'express';
 import bcrypt from 'bcryptjs';
-import rateLimit from 'express-rate-limit';
 import type { RowDataPacket } from 'mysql2/promise';
+import { authLimiter } from '../middleware/rateLimiter';
 import { pool } from '../db';
 import { generateJwtToken, authenticateToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -16,14 +16,8 @@ import type { UserRole, IdentityType } from '../types/index';
 import { isUserProfileComplete } from '../types/index';
 import { generateId } from '../utils/id';
 
-// Rate Limiter for Authentication Endpoints
-export const authLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 500,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Terlalu banyak percobaan masuk/daftar. Silakan coba lagi dalam 1 menit.' }
-});
+// Centralized Auth Limiter re-export for router.ts and consumer consistency
+export { authLimiter };
 
 export interface UserRow extends RowDataPacket {
   id: string;

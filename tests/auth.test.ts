@@ -1,3 +1,6 @@
+(process.env as Record<string, string | undefined>).NO_LISTEN = 'true';
+(process.env as Record<string, string | undefined>).NODE_ENV = 'test';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
@@ -386,5 +389,58 @@ test('Authentication logic, password security gates & JWT', async (t) => {
 
     assert.equal(statusCode, 403);
     assert.ok(jsonBody && typeof jsonBody === 'object' && (jsonBody as { code: string }).code === 'AUTH_TOKEN_INVALID');
+  });
+
+  await t.test('Centralized authLimiter and shouldSkipRateLimit security invariants', async () => {
+    const { shouldSkipRateLimit, authLimiter: centralizedLimiter } = await import('../backend/middleware/rateLimiter');
+    const { authLimiter: exportedLimiter } = await import('../backend/routes/auth.routes');
+
+    // Verify auth.routes re-exports the centralized limiter
+    assert.equal(centralizedLimiter, exportedLimiter, 'auth.routes must re-export the centralized authLimiter instance');
+
+    // Test 1: Bypasses in test environment
+    const dummyReq = { headers: {} } as unknown as Request;
+    assert.equal(shouldSkipRateLimit(dummyReq), true, 'Bypasses rate limit in test environment');
+
+    // Test 2: In production, external bypass headers must NEVER bypass rate limits
+    const prevEnv = process.env.NODE_ENV;
+    const prevNoListen = process.env.NO_LISTEN;
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
+      delete (process.env as Record<string, string | undefined>).NO_LISTEN;
+
+      const bypassReq1 = { headers: { 'x-test-bypass': 'true' } } as unknown as Request;
+      assert.equal(shouldSkipRateLimit(bypassReq1), false, 'Production must reject x-test-bypass: true');
+
+      const bypassReq2 = { headers: { 'x-bypass-rate-limit': 'true' } } as unknown as Request;
+      assert.equal(shouldSkipRateLimit(bypassReq2), false, 'Production must reject x-bypass-rate-limit: true');
+
+      const bypassReqArray = { headers: { 'x-test-bypass': ['true'] } } as unknown as Request;
+      assert.equal(shouldSkipRateLimit(bypassReqArray), false, 'Production must reject array x-test-bypass: ["true"]');
+
+      const normalReq = { headers: {} } as unknown as Request;
+      assert.equal(shouldSkipRateLimit(normalReq), false, 'Production must apply rate limits to normal requests');
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+      (process.env as Record<string, string | undefined>).NO_LISTEN = prevNoListen;
+    }
+
+    // Test 3: In non-production (development), bypass headers are accepted
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = 'development';
+      delete (process.env as Record<string, string | undefined>).NO_LISTEN;
+
+      const devBypassReq = { headers: { 'x-test-bypass': 'true' } } as unknown as Request;
+      assert.equal(shouldSkipRateLimit(devBypassReq), true, 'Development must accept x-test-bypass: true');
+
+      const devBypassReq2 = { headers: { 'x-bypass-rate-limit': 'true' } } as unknown as Request;
+      assert.equal(shouldSkipRateLimit(devBypassReq2), true, 'Development must accept x-bypass-rate-limit: true');
+
+      const devNormalReq = { headers: {} } as unknown as Request;
+      assert.equal(shouldSkipRateLimit(devNormalReq), false, 'Development must enforce limits when header is absent');
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+      (process.env as Record<string, string | undefined>).NO_LISTEN = prevNoListen;
+    }
   });
 });

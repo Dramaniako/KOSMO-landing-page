@@ -11,6 +11,12 @@ import type { RoomRow } from '../types/index';
 import { generateId } from '../utils/id';
 import type { UserRow } from './auth.routes';
 import type { RentalRow } from './rentals.routes';
+import {
+  validateBody,
+  createPaymentTokenSchema,
+  paymentNotificationSchema
+} from '../middleware/validation';
+import { mutationLimiter } from '../middleware/rateLimiter';
 
 const MIDTRANS_PLACEHOLDERS = [
   'placeholder',
@@ -403,17 +409,23 @@ const handlePaymentNotification = async (req: Request<Record<string, never>, unk
 };
 
 export function registerPaymentRoutes(router: Router): void {
-  router.post('/payment/token', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
-    const { propertyId, tenantId, durationMonths, roomId } = req.body;
-    const authUser = req.user;
-    if (!propertyId || !tenantId) {
-      return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
-    }
+  router.post(
+    '/payment/token',
+    authenticateToken,
+    mutationLimiter,
+    validateBody(createPaymentTokenSchema),
+    async (req: AuthenticatedRequest, res: Response) => {
+      const { propertyId, durationMonths, roomId } = req.body;
+      const authUser = req.user;
+      const tenantId = req.body.tenantId || authUser?.id;
+      if (!propertyId || !tenantId) {
+        return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
+      }
 
-    // Authorization check: non-admins can only generate tokens for themselves
-    if (authUser?.role !== 'admin' && authUser?.id !== tenantId) {
-      return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat membuat token atas nama akun lain." });
-    }
+      // Authorization check: non-admins can only generate tokens for themselves
+      if (authUser?.role !== 'admin' && authUser?.id !== tenantId) {
+        return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat membuat token atas nama akun lain." });
+      }
 
     const duration = durationMonths && durationMonths > 0 ? durationMonths : 1;
     const customRentalId = (req.body.customRentalId || req.body.rentalId);
@@ -632,8 +644,8 @@ export function registerPaymentRoutes(router: Router): void {
     });
   });
 
-  router.post('/payment/webhook', handlePaymentNotification);
-  router.post('/payment/notification', handlePaymentNotification);
+  router.post('/payment/webhook', validateBody(paymentNotificationSchema), handlePaymentNotification);
+  router.post('/payment/notification', validateBody(paymentNotificationSchema), handlePaymentNotification);
 
   router.post('/payment/finish', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
     const { rentalId } = req.body;

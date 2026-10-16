@@ -1,20 +1,14 @@
 import type { Request, Response, Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import type { RowDataPacket } from 'mysql2/promise';
 import { pool } from '../db';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireRole } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { uploadImageStream } from '../services/cloudinary';
+import { validateImageMagicBytes } from '../middleware/upload';
+import { uploadLimiter } from '../middleware/rateLimiter';
 
-// Rate Limiter for Uploads
-export const uploadLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Terlalu banyak unggahan berkas. Silakan coba lagi nanti.' }
-});
+export { uploadLimiter };
 
 export const ALLOWED_IMAGE_MIMETYPES = [
   'image/jpeg',
@@ -55,7 +49,9 @@ export function registerSystemRoutes(router: Router): void {
         }
       });
     } catch (error: unknown) {
-      const errorMsg = error instanceof Error ? error.message : 'Database ping failed';
+      const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+      const rawErrorMsg = error instanceof Error ? error.message : 'Database ping failed';
+      const errorMsg = isProduction ? 'Database unavailable' : rawErrorMsg;
       res.status(503).json({
         status: 'degraded',
         service: 'kosmo-api',
@@ -69,10 +65,11 @@ export function registerSystemRoutes(router: Router): void {
     }
   });
 
-  // Generic Upload endpoint
+  // Generic Upload endpoint (Restricted to landlords and admins, with magic-byte verification)
   router.post(
     '/upload',
     authenticateToken,
+    requireRole(['admin', 'landlord', 'owner']),
     uploadLimiter,
     upload.single('image'),
     async (req: AuthenticatedRequest & MulterRequest, res: Response) => {
@@ -80,9 +77,9 @@ export function registerSystemRoutes(router: Router): void {
         return res.status(400).json({ message: 'Tidak ada file yang diunggah.' });
       }
 
-      if (!validateImageMimeType(req.file.mimetype)) {
+      if (!validateImageMimeType(req.file.mimetype) || !validateImageMagicBytes(req.file.buffer)) {
         return res.status(400).json({
-          message: 'Format file tidak didukung. Harap unggah gambar (JPEG, PNG, WebP, GIF).'
+          message: 'Format file tidak didukung atau header berkas tidak valid. Harap unggah gambar (JPEG, PNG, WebP, GIF).'
         });
       }
 

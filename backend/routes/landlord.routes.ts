@@ -1,5 +1,6 @@
 import type { Request, Response, Router } from 'express';
 import type { RowDataPacket } from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
 import { pool } from '../db';
 import { apiCache } from '../services/cache';
 import { authenticateToken, requireRole } from '../middleware/auth';
@@ -482,61 +483,93 @@ export function registerLandlordRoutes(router: Router): void {
     }
   });
 
-  router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['admin']), validateBody(rejectWithdrawalSchema), async (req: Request<{ id: string }, unknown, { reason?: string }>, res: Response) => {
-    const { id } = req.params;
-    const { reason } = req.body;
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
+  router.post(
+    '/admin/withdrawals/:id/reject',
+    authenticateToken,
+    requireRole(['admin']),
+    validateBody(rejectWithdrawalSchema),
+    async (
+      req: AuthenticatedRequest & Request<{ id: string }, unknown, { reason?: string; password?: string }>,
+      res: Response
+    ) => {
+      const { id } = req.params;
+      const { reason, password } = (req.body || {}) as { reason?: string; password?: string };
+      const authUser = req.user;
 
-      const [rows] = await connection.query<WithdrawalRow[]>('SELECT * FROM withdrawals WHERE id = ? FOR UPDATE', [id]);
-      const withdrawal = rows[0];
-      if (!withdrawal) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+      if (!password) {
+        return res.status(400).json({ message: "Password konfirmasi administrator diperlukan." });
       }
 
-      if (withdrawal.status === 'rejected') {
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        // 1. Re-verify authenticated administrator password via bcrypt
+        const [adminRows] = await connection.query<UserRow[]>(
+          'SELECT password FROM users WHERE id = ?',
+          [authUser?.id]
+        );
+        const admin = adminRows[0];
+        const isMatch = admin && admin.password ? await bcrypt.compare(password, admin.password) : false;
+        if (!admin || !admin.password || !isMatch) {
+          await connection.rollback();
+          return res.status(401).json({ message: "Password administrator salah." });
+        }
+
+        // 2. Fetch withdrawal record with pessimistic row lock
+        const [rows] = await connection.query<WithdrawalRow[]>(
+          'SELECT * FROM withdrawals WHERE id = ? FOR UPDATE',
+          [id]
+        );
+        const withdrawal = rows[0];
+        if (!withdrawal) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+        }
+
+        if (withdrawal.status === 'rejected') {
+          await connection.rollback();
+          return res.status(400).json({ message: "Penarikan sudah pernah ditolak." });
+        }
+
+        if (withdrawal.status === 'completed') {
+          await connection.rollback();
+          return res.status(400).json({ message: "Penarikan yang sudah selesai tidak dapat ditolak." });
+        }
+
+        const withdrawAmount = parseFloat(String(withdrawal.amount));
+
+        // 3. Reverse balance deduction atomically to landlord's account
+        await connection.query(
+          'UPDATE users SET balance = balance + ? WHERE id = ?',
+          [withdrawAmount, withdrawal.userId]
+        );
+
+        const rejectionReason = reason || "Pencairan dana ditolak oleh administrator";
+        const processedAt = new Date().toISOString();
+
+        // 4. Update withdrawal record status to 'rejected'
+        await connection.query(
+          "UPDATE withdrawals SET status = 'rejected', rejectionReason = ?, processedAt = ? WHERE id = ?",
+          [rejectionReason, processedAt, id]
+        );
+
+        await connection.commit();
+        apiCache.invalidatePattern('landlord:');
+        res.json({
+          message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
+          withdrawalId: id,
+          status: 'rejected',
+          reason: rejectionReason,
+          processedAt
+        });
+      } catch (err: unknown) {
         await connection.rollback();
-        return res.status(400).json({ message: "Penarikan sudah pernah ditolak." });
+        console.error("Reject withdrawal error:", err);
+        res.status(500).json({ message: "Gagal menolak penarikan dana." });
+      } finally {
+        connection.release();
       }
-
-      if (withdrawal.status === 'completed') {
-        await connection.rollback();
-        return res.status(400).json({ message: "Penarikan yang sudah selesai tidak dapat ditolak." });
-      }
-
-      const withdrawAmount = parseFloat(String(withdrawal.amount));
-
-      // Reverse balance deduction
-      await connection.query(
-        'UPDATE users SET balance = balance + ? WHERE id = ?',
-        [withdrawAmount, withdrawal.userId]
-      );
-
-      const rejectionReason = reason || "Pencairan dana ditolak oleh administrator";
-      const processedAt = new Date().toISOString();
-
-      await connection.query(
-        "UPDATE withdrawals SET status = 'rejected', rejectionReason = ?, processedAt = ? WHERE id = ?", 
-        [rejectionReason, processedAt, id]
-      );
-
-      await connection.commit();
-      apiCache.invalidatePattern('landlord:');
-      res.json({
-        message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
-        withdrawalId: id,
-        status: 'rejected',
-        reason: rejectionReason,
-        processedAt
-      });
-    } catch (err: unknown) {
-      await connection.rollback();
-      console.error("Reject withdrawal error:", err);
-      res.status(500).json({ message: "Gagal menolak penarikan dana." });
-    } finally {
-      connection.release();
     }
-  });
+  );
 }

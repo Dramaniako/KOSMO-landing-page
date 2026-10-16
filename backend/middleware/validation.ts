@@ -1,6 +1,21 @@
 import { z } from 'zod';
 import type { Request, Response, NextFunction } from 'express';
 
+/**
+ * In-memory XSS sanitization helper that strips null bytes, script/style tags with inner content,
+ * HTML markup tags, and javascript: pseudo-protocols while preserving safe plain text.
+ */
+export function sanitizeText(input: string): string {
+  if (typeof input !== 'string') return input;
+  return input
+    .replace(/\0/g, '')
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/<[^>]*>?/gm, '')
+    .replace(/javascript:/gi, '')
+    .trim();
+}
+
 export const loginSchema = z.object({
   email: z.string().email('Format email tidak valid'),
   password: z.string().min(1, 'Password wajib diisi')
@@ -40,7 +55,11 @@ export const adminUpdateUserSchema = z.object({
 });
 
 export const updateProfileSchema = z.object({
-  name: z.string().min(2, 'Nama minimal 2 karakter').optional(),
+  name: z
+    .string()
+    .transform((val) => sanitizeText(val))
+    .refine((val) => val.length >= 2, { message: 'Nama minimal 2 karakter' })
+    .optional(),
   phone: z
     .string()
     .trim()
@@ -70,10 +89,25 @@ export const updateProfileSchema = z.object({
     )
     .optional()
     .or(z.literal('')),
-  address: z.string().min(5, 'Alamat domisili minimal 5 karakter').optional().or(z.literal('')),
-  occupation: z.string().min(2, 'Pekerjaan/Profesi minimal 2 karakter').optional().or(z.literal('')),
-  emergency_contact_name: z.string().min(2, 'Nama kontak darurat minimal 2 karakter').optional().or(z.literal('')),
-  emergency_contact_relation: z.string().optional().or(z.literal('')),
+  address: z
+    .string()
+    .transform((val) => sanitizeText(val))
+    .refine((val) => val === '' || val.length >= 5, { message: 'Alamat domisili minimal 5 karakter' })
+    .optional()
+    .or(z.literal('')),
+  occupation: z
+    .string()
+    .transform((val) => sanitizeText(val))
+    .refine((val) => val === '' || val.length >= 2, { message: 'Pekerjaan/Profesi minimal 2 karakter' })
+    .optional()
+    .or(z.literal('')),
+  emergency_contact_name: z
+    .string()
+    .transform((val) => sanitizeText(val))
+    .refine((val) => val === '' || val.length >= 2, { message: 'Nama kontak darurat minimal 2 karakter' })
+    .optional()
+    .or(z.literal('')),
+  emergency_contact_relation: z.string().transform((val) => sanitizeText(val)).optional().or(z.literal('')),
   emergency_contact_phone: z
     .string()
     .trim()
@@ -96,7 +130,7 @@ export const propertySchema = z.object({
   price: z.number().positive('Harga harus lebih besar dari 0'),
   totalRooms: z.number().int().positive('Total kamar harus lebih besar dari 0'),
   ownerId: z.string().min(1, 'ownerId wajib diisi').optional()
-});
+}).passthrough();
 
 export const withdrawalSchema = z.object({
   amount: z.preprocess(
@@ -111,7 +145,10 @@ export const withdrawalSchema = z.object({
 
 export const reviewSchema = z.object({
   propertyId: z.string().min(1, 'propertyId wajib diisi'),
-  comment: z.string().min(1, 'Komentar ulasan wajib diisi'),
+  comment: z
+    .string()
+    .transform((val) => sanitizeText(val))
+    .refine((val) => val.length > 0, { message: 'Komentar ulasan wajib diisi' }),
   rating: z.number().int().min(1, 'Rating minimal 1').max(5, 'Rating maksimal 5')
 });
 
@@ -198,6 +235,7 @@ export function validateBody<T extends z.ZodTypeAny>(schema: T) {
       });
       return;
     }
+    req.body = result.data;
     next();
   };
 }
@@ -312,7 +350,11 @@ export const updatePropertySchema = propertyUpdateSchema;
 export const reviewUpdateSchema = z.object({
   rating: z
     .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().int().min(1, 'Rating minimal 1').max(5, 'Rating maksimal 5').optional()),
-  comment: z.string().trim().min(1, 'Komentar ulasan tidak boleh kosong').optional()
+  comment: z
+    .string()
+    .transform((val) => sanitizeText(val))
+    .refine((val) => val.length > 0, { message: 'Komentar ulasan tidak boleh kosong' })
+    .optional()
 }).refine((data) => data.rating !== undefined || data.comment !== undefined, {
   message: 'Minimal salah satu dari rating atau comment harus diisi'
 });
@@ -329,6 +371,9 @@ export const processWithdrawalSchema = z.object({
 });
 
 export const rejectWithdrawalSchema = z.object({
+  password: z
+    .string({ message: 'Password konfirmasi administrator diperlukan' })
+    .min(1, 'Password konfirmasi administrator diperlukan'),
   reason: z.string().trim().min(1, 'Alasan penolakan wajib diisi').optional()
 });
 
@@ -376,3 +421,37 @@ export const interactionTelemetrySchema = z.object({
   deviceToken: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional()
 });
+
+export const createPaymentTokenSchema = z.object({
+  propertyId: z.string().min(1, 'propertyId wajib diisi'),
+  tenantId: z.string().optional(),
+  propertyName: z.string().optional(),
+  price: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().positive('Harga sewa harus lebih besar dari 0').optional()),
+  durationMonths: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : 1), z.number().int().min(1, 'Durasi sewa minimal 1 bulan').max(120).optional().default(1)),
+  roomId: z.string().optional().nullable(),
+  customRentalId: z.string().optional(),
+  rentalId: z.string().optional(),
+  startDate: z.string().optional()
+});
+
+export const paymentNotificationSchema = z.object({
+  order_id: z.string().min(1, 'order_id wajib diisi'),
+  status_code: z.string().min(1, 'status_code wajib diisi'),
+  gross_amount: z.string().min(1, 'gross_amount wajib diisi'),
+  signature_key: z.string().min(1, 'signature_key wajib diisi'),
+  transaction_status: z.string().optional(),
+  fraud_status: z.string().optional(),
+  payment_type: z.string().optional(),
+  transaction_time: z.string().optional(),
+  transaction_id: z.string().optional()
+}).passthrough();
+
+export const visitorTrackingSchema = z.object({
+  pageUrl: z.string().trim().max(500).optional(),
+  referrer: z.string().trim().max(500).optional(),
+  sessionId: z.string().trim().max(100).optional(),
+  deviceType: z.string().trim().max(50).optional()
+}).optional().default({});
+

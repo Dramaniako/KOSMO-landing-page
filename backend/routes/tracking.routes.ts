@@ -8,17 +8,11 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import type { PropertyRow } from '../services/transformers';
 import type { UserRow } from './auth.routes';
 import { apiCache } from '../services/cache';
-import { validateBody, interactionTelemetrySchema } from '../middleware/validation';
+import { validateBody, interactionTelemetrySchema, visitorTrackingSchema } from '../middleware/validation';
 import { recommendationService, type InteractionType } from '../services/recommendation.service';
+import { trackingLimiter } from '../middleware/rateLimiter';
 
-// Rate Limiter for Visitor Tracking
-export const trackingLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Terlalu banyak permintaan pelacakan.' }
-});
+export { trackingLimiter };
 
 interface CountRow extends RowDataPacket {
   count: number;
@@ -49,6 +43,68 @@ interface RentalRow extends RowDataPacket {
   startDate?: string;
   status: 'active' | 'terminated' | 'pending' | 'cancelled';
 }
+
+export const handleRecordVisit = async (req: Request, res: Response): Promise<Response | void> => {
+  const rawIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+  const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+  const ip = firstIp.split(',')[0].trim().substring(0, 255);
+  const userAgent = String(req.headers['user-agent'] || '').substring(0, 1000);
+
+  const cacheKey = `tracking:ip:${ip}`;
+
+  // 1. In-Memory Cache Deduplication Check (Fast-path: TTL 15 minutes = 900s)
+  if (apiCache.get<boolean>(cacheKey)) {
+    return res.status(200).json({
+      success: true,
+      message: 'Kunjungan telah dicatat.',
+      deduplicated: true
+    });
+  }
+
+  // Acquire optimistic cache reservation immediately upon receiving the request
+  // before the asynchronous database query/insert.
+  // This eliminates the TOCTOU window under concurrent flood.
+  apiCache.set(cacheKey, true, 900);
+
+  try {
+    // 2. Database Fallback Deduplication Check (within last 15 minutes)
+    const [recentVisits] = await pool.query<RowDataPacket[]>(
+      'SELECT id FROM visitor_tracking WHERE ip_address = ? AND visited_at >= NOW() - INTERVAL 15 MINUTE LIMIT 1',
+      [ip]
+    );
+
+    if (recentVisits.length > 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'Kunjungan telah dicatat.',
+        deduplicated: true
+      });
+    }
+
+    // 3. Insert fresh visit record
+    await pool.query(
+      'INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)',
+      [ip, userAgent]
+    );
+
+    // 4. Invalidate admin stats
+    apiCache.del('admin:stats');
+
+    return res.status(201).json({
+      success: true,
+      message: 'Kunjungan berhasil dilacak.'
+    });
+  } catch (err: unknown) {
+    // Release the reservation if the database insertion throws an error
+    if (typeof (apiCache as unknown as { invalidate?: (k: string) => void }).invalidate === 'function') {
+      (apiCache as unknown as { invalidate: (k: string) => void }).invalidate(cacheKey);
+    } else {
+      apiCache.del(cacheKey);
+    }
+    console.error('Error in visitor tracking:', err);
+    return res.status(500).json({ error: 'Internal Server Error', message: 'Gagal melacak kunjungan.' });
+  }
+};
 
 export function registerTrackingRoutes(router: Router): void {
   router.post(
@@ -101,23 +157,11 @@ export function registerTrackingRoutes(router: Router): void {
     }
   );
 
-  router.post('/tracking/visit', trackingLimiter, async (req: Request, res: Response) => {
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-    const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
-    const ip = firstIp.split(',')[0].trim().substring(0, 255);
-    const userAgent = String(req.headers['user-agent'] || '').substring(0, 1000);
-    try {
-      await pool.query(
-        'INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)',
-        [ip, userAgent]
-      );
-      apiCache.del('admin:stats');
-      res.status(201).json({ message: "Kunjungan berhasil dilacak." });
-    } catch (err: unknown) {
-      console.error("Error in POST /api/tracking/visit:", err);
-      res.status(500).json({ error: 'Internal Server Error', message: "Gagal melacak kunjungan." });
-    }
-  });
+  const trackVisitHandler = handleRecordVisit;
+
+  // Mount on both /tracking and /tracking/visit
+  router.post('/tracking', trackingLimiter, validateBody(visitorTrackingSchema), trackVisitHandler);
+  router.post('/tracking/visit', trackingLimiter, validateBody(visitorTrackingSchema), trackVisitHandler);
 
   router.get('/admin/stats', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
     try {

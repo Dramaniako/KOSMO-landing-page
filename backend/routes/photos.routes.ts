@@ -9,6 +9,7 @@ import {
   handleMultiPhotoUpload,
   extractUploadedFiles,
   validateImageMimeType,
+  validateImageMagicBytes,
   type MulterFilesRequest
 } from '../middleware/upload';
 import { uploadImageStream, deleteCloudinaryImage } from '../services/cloudinary';
@@ -83,7 +84,15 @@ export async function processImageVariants(buffer: Buffer): Promise<{
         .toBuffer()
     ]);
     return { thumbnail, hero };
-  } catch {
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    // If Sharp is installed and failed because of corrupted or malformed image data, throw error
+    if (!errMsg.includes('Cannot find') && !errMsg.includes('ERR_MODULE_NOT_FOUND')) {
+      const error = new Error(`Berkas gambar rusak atau tidak dapat diproses: ${errMsg}`);
+      (error as unknown as { statusCode: number }).statusCode = 400;
+      throw error;
+    }
+    // If Sharp package is not installed in the current environment, fallback gracefully
     return {};
   }
 }
@@ -295,9 +304,9 @@ export function registerPhotoRoutes(router: Router): void {
       }
 
       for (const file of files) {
-        if (!validateImageMimeType(file.mimetype)) {
+        if (!validateImageMimeType(file.mimetype) || !validateImageMagicBytes(file.buffer)) {
           return res.status(400).json({
-            message: `Format file '${file.originalname}' tidak didukung. Harap unggah gambar (JPEG, PNG, WebP, GIF).`
+            message: `Format file '${file.originalname}' tidak didukung atau header berkas tidak valid. Harap unggah gambar (JPEG, PNG, WebP, GIF).`
           });
         }
       }
@@ -338,17 +347,28 @@ export function registerPhotoRoutes(router: Router): void {
         }
       }
 
-      // Stream buffers to Cloudinary (in-memory Sharp WebP processing with graceful fallback)
+      // Stream buffers to Cloudinary (in-memory Sharp WebP processing with explicit 400 rejection on corrupted buffer)
       let uploadResults;
       try {
         uploadResults = await Promise.all(
           files.map(async (file) => {
-            const variants = await processImageVariants(file.buffer);
+            let variants;
+            try {
+              variants = await processImageVariants(file.buffer);
+            } catch (err: unknown) {
+              const error = new Error('Berkas gambar rusak atau tidak dapat diproses.');
+              (error as unknown as { statusCode: number }).statusCode = 400;
+              throw error;
+            }
             const targetBuffer = variants.hero || file.buffer;
             return uploadImageStream(targetBuffer, 'kosmo_properties');
           })
         );
-      } catch (cloudErr) {
+      } catch (cloudErr: unknown) {
+        const errObj = cloudErr as { statusCode?: number; message?: string };
+        if (errObj?.statusCode === 400 || errObj?.message?.includes('rusak')) {
+          return res.status(400).json({ message: errObj.message || 'Berkas gambar rusak atau tidak dapat diproses.' });
+        }
         console.error('Cloudinary multi-photo upload error:', cloudErr);
         return res.status(500).json({ message: 'Gagal mengunggah foto ke Cloudinary.' });
       }

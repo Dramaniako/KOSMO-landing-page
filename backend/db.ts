@@ -36,7 +36,7 @@ const sslOption = isSSLFalse
   ? undefined
   : {
       minVersion: 'TLSv1.2',
-      rejectUnauthorized: false
+      rejectUnauthorized: true
     };
 
 export const dbConfig: ConnectionOptions = {
@@ -46,9 +46,9 @@ export const dbConfig: ConnectionOptions = {
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'kosmo_db',
   ...(sslOption ? { ssl: sslOption } : {}),
-  connectTimeout: 30000,
+  connectTimeout: 5000,
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || (isTiDB ? '15' : '10'), 10),
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '5', 10),
   maxIdle: 5,
   idleTimeout: 60000,
   enableKeepAlive: true,
@@ -83,30 +83,37 @@ export interface CustomConnection extends Connection {
 
 export type QueryExecutor = mysql.Pool | mysql.Connection;
 
-let activePool: mysql.Pool | null = null;
+declare global {
+  // eslint-disable-next-line no-var
+  var __kosmo_tidb_pool: mysql.Pool | undefined;
+}
 
 export function getPool(): mysql.Pool {
-  if (!activePool) {
+  if (!globalThis.__kosmo_tidb_pool) {
     validateDatabaseConfig(dbConfig);
     const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-    activePool = mysql.createPool({
+    const poolInstance = mysql.createPool({
       ...dbConfig,
-      connectionLimit: isServerless ? 2 : parseInt(process.env.DB_CONNECTION_LIMIT || (isTiDB ? '15' : '10'), 10),
-      maxIdle: isServerless ? 1 : 5,
+      connectionLimit: isServerless ? 5 : parseInt(process.env.DB_CONNECTION_LIMIT || '5', 10),
+      connectTimeout: 5000,
+      waitForConnections: true,
+      maxIdle: isServerless ? 2 : 5,
       idleTimeout: isServerless ? 10000 : 60000,
       queueLimit: 0
     });
 
-    const rawPool = (activePool as unknown as { pool?: { on?: (event: string, cb: (err: Error) => void) => void } })?.pool;
+    const rawPool = (poolInstance as unknown as { pool?: { on?: (event: string, cb: (err: Error) => void) => void } })?.pool;
     rawPool?.on?.('error', (err: Error) => {
       console.error('MySQL/TiDB Pool Error Event:', err?.message || err);
       const code = (err as { code?: string })?.code;
       if (code === 'PROTOCOL_CONNECTION_LOST' || code === 'ECONNRESET') {
-        activePool = null;
+        globalThis.__kosmo_tidb_pool = undefined;
       }
     });
+
+    globalThis.__kosmo_tidb_pool = poolInstance;
   }
-  return activePool;
+  return globalThis.__kosmo_tidb_pool;
 }
 
 export const pool: mysql.Pool = getPool();
@@ -146,8 +153,12 @@ export async function ensureIndexes(executor: QueryExecutor = pool): Promise<voi
     "ALTER TABLE property_photos ADD INDEX idx_photos_prop_cat (propertyId, category, orderIndex)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_prop_room (propertyId, roomId, orderIndex)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
+    "ALTER TABLE visitor_tracking ADD INDEX idx_visitor_tracking_ip_time (ip_address, visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
+    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_status (status)",
+    "ALTER TABLE users ADD INDEX idx_users_role (role)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_status (status)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)",
     "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_tenant (tenantId)",
@@ -195,7 +206,8 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         emergency_contact_relation VARCHAR(50) DEFAULT '',
         emergency_contact_phone VARCHAR(50) DEFAULT '',
         date_of_birth VARCHAR(30) DEFAULT '',
-        gender VARCHAR(20) DEFAULT ''
+        gender VARCHAR(20) DEFAULT '',
+        INDEX idx_users_role (role)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `),
     executor.query(`
@@ -204,7 +216,8 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         ip_address VARCHAR(255),
         user_agent TEXT,
         visited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_visited_at (visited_at)
+        INDEX idx_visited_at (visited_at),
+        INDEX idx_visitor_tracking_ip_time (ip_address, visited_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
   ]);
@@ -252,6 +265,7 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         processedAt VARCHAR(50) DEFAULT '',
         INDEX idx_withdrawals_user_date (userId, date),
         INDEX idx_withdrawals_user_status (userId, status),
+        INDEX idx_withdrawals_status (status),
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
@@ -327,6 +341,7 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         INDEX idx_rentals_contract_hash (contract_hash),
         INDEX idx_rentals_signed_at (contract_signed_at),
         INDEX idx_rentals_terminated_at (terminated_at),
+        INDEX idx_rentals_status (status),
         FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -38,6 +38,7 @@ try {
 }
 
 const app: Application = express();
+app.set('trust proxy', 1);
 const PORT: number = parseInt(process.env.PORT || '5000', 10);
 
 // Performance & Compression Middleware (Mounted first)
@@ -62,7 +63,11 @@ export function isOriginAllowed(origin: string | undefined): boolean {
     'https://kosmobali.my.id',
     'https://www.kosmobali.my.id',
     'http://kosmobali.my.id',
-    'http://www.kosmobali.my.id'
+    'http://www.kosmobali.my.id',
+    'https://juragankost.net',
+    'https://www.juragankost.net',
+    'http://juragankost.net',
+    'http://www.juragankost.net'
   ];
 
   const allowedOrigins = [...defaultAllowed, ...envAllowed];
@@ -70,7 +75,6 @@ export function isOriginAllowed(origin: string | undefined): boolean {
 
   const isExactMatch = allowedOrigins.some((allowed: string) => {
     const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, '');
-    if (normalizedAllowed === '*' && process.env.NODE_ENV !== 'production') return true;
     return normalizedAllowed === normalizedOrigin;
   });
 
@@ -83,6 +87,8 @@ export function isOriginAllowed(origin: string | undefined): boolean {
     if (
       hostname === 'kosmobali.my.id' ||
       hostname.endsWith('.kosmobali.my.id') ||
+      hostname === 'juragankost.net' ||
+      hostname.endsWith('.juragankost.net') ||
       hostname.endsWith('.vercel.app')
     ) {
       return true;
@@ -114,14 +120,67 @@ export const corsOptions: CorsOptions = {
 app.use(requestIdMiddleware);
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "'unsafe-eval'",
+          'https://app.midtrans.com',
+          'https://app.sandbox.midtrans.com',
+          'https://api.midtrans.com'
+        ],
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          'https://fonts.googleapis.com'
+        ],
+        fontSrc: [
+          "'self'",
+          'https://fonts.gstatic.com',
+          'data:'
+        ],
+        imgSrc: [
+          "'self'",
+          'data:',
+          'blob:',
+          'https://res.cloudinary.com',
+          'https://*.tile.openstreetmap.org',
+          'https://unpkg.com'
+        ],
+        connectSrc: [
+          "'self'",
+          'https://res.cloudinary.com',
+          'https://api.midtrans.com',
+          'https://app.midtrans.com',
+          'https://app.sandbox.midtrans.com',
+          'https://*.tile.openstreetmap.org'
+        ],
+        frameSrc: [
+          "'self'",
+          'https://app.midtrans.com',
+          'https://app.sandbox.midtrans.com'
+        ],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null
+      }
+    },
     crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: { policy: 'cross-origin' }
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    },
+    noSniff: true,
+    frameguard: { action: 'sameorigin' },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
   })
 );
 app.use(cors(corsOptions));
-app.use(bodyParser.json({ limit: '5mb' }));
-app.use(bodyParser.urlencoded({ limit: '5mb', extended: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(morgan('dev'));
 app.use('/uploads', express.static(uploadsDir));
 

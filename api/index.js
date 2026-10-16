@@ -3,7 +3,6 @@ import express2 from "express";
 import compression from "compression";
 import cors from "cors";
 import helmet from "helmet";
-import bodyParser from "body-parser";
 import morgan from "morgan";
 
 // backend/db.ts
@@ -38,7 +37,7 @@ var isTiDB = host.includes("tidbcloud.com");
 var isSSLFalse = process.env.DB_SSL === "false";
 var sslOption = isSSLFalse ? void 0 : {
   minVersion: "TLSv1.2",
-  rejectUnauthorized: false
+  rejectUnauthorized: true
 };
 var dbConfig = {
   host,
@@ -47,9 +46,9 @@ var dbConfig = {
   password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "kosmo_db",
   ...sslOption ? { ssl: sslOption } : {},
-  connectTimeout: 3e4,
+  connectTimeout: 5e3,
   waitForConnections: true,
-  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || (isTiDB ? "15" : "10"), 10),
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || "5", 10),
   maxIdle: 5,
   idleTimeout: 6e4,
   enableKeepAlive: true,
@@ -74,28 +73,30 @@ function validateDatabaseConfig(config) {
     }
   }
 }
-var activePool = null;
 function getPool() {
-  if (!activePool) {
+  if (!globalThis.__kosmo_tidb_pool) {
     validateDatabaseConfig(dbConfig);
     const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-    activePool = mysql.createPool({
+    const poolInstance = mysql.createPool({
       ...dbConfig,
-      connectionLimit: isServerless ? 2 : parseInt(process.env.DB_CONNECTION_LIMIT || (isTiDB ? "15" : "10"), 10),
-      maxIdle: isServerless ? 1 : 5,
+      connectionLimit: isServerless ? 5 : parseInt(process.env.DB_CONNECTION_LIMIT || "5", 10),
+      connectTimeout: 5e3,
+      waitForConnections: true,
+      maxIdle: isServerless ? 2 : 5,
       idleTimeout: isServerless ? 1e4 : 6e4,
       queueLimit: 0
     });
-    const rawPool = activePool?.pool;
+    const rawPool = poolInstance?.pool;
     rawPool?.on?.("error", (err) => {
       console.error("MySQL/TiDB Pool Error Event:", err?.message || err);
       const code = err?.code;
       if (code === "PROTOCOL_CONNECTION_LOST" || code === "ECONNRESET") {
-        activePool = null;
+        globalThis.__kosmo_tidb_pool = void 0;
       }
     });
+    globalThis.__kosmo_tidb_pool = poolInstance;
   }
-  return activePool;
+  return globalThis.__kosmo_tidb_pool;
 }
 var pool = getPool();
 var initPromise = null;
@@ -129,8 +130,12 @@ async function ensureIndexes(executor = pool) {
     "ALTER TABLE property_photos ADD INDEX idx_photos_prop_cat (propertyId, category, orderIndex)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_prop_room (propertyId, roomId, orderIndex)",
     "ALTER TABLE visitor_tracking ADD INDEX idx_visited_at (visited_at)",
+    "ALTER TABLE visitor_tracking ADD INDEX idx_visitor_tracking_ip_time (ip_address, visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
+    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_status (status)",
+    "ALTER TABLE users ADD INDEX idx_users_role (role)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_status (status)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)",
     "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_tenant (tenantId)",
@@ -174,7 +179,8 @@ async function createTables(executor = pool) {
         emergency_contact_relation VARCHAR(50) DEFAULT '',
         emergency_contact_phone VARCHAR(50) DEFAULT '',
         date_of_birth VARCHAR(30) DEFAULT '',
-        gender VARCHAR(20) DEFAULT ''
+        gender VARCHAR(20) DEFAULT '',
+        INDEX idx_users_role (role)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `),
     executor.query(`
@@ -183,7 +189,8 @@ async function createTables(executor = pool) {
         ip_address VARCHAR(255),
         user_agent TEXT,
         visited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_visited_at (visited_at)
+        INDEX idx_visited_at (visited_at),
+        INDEX idx_visitor_tracking_ip_time (ip_address, visited_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
   ]);
@@ -229,6 +236,7 @@ async function createTables(executor = pool) {
         processedAt VARCHAR(50) DEFAULT '',
         INDEX idx_withdrawals_user_date (userId, date),
         INDEX idx_withdrawals_user_status (userId, status),
+        INDEX idx_withdrawals_status (status),
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `)
@@ -302,6 +310,7 @@ async function createTables(executor = pool) {
         INDEX idx_rentals_contract_hash (contract_hash),
         INDEX idx_rentals_signed_at (contract_signed_at),
         INDEX idx_rentals_terminated_at (terminated_at),
+        INDEX idx_rentals_status (status),
         FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -993,8 +1002,7 @@ function isOperationalError(error) {
 }
 
 // backend/routes/system.routes.ts
-import rateLimit from "express-rate-limit";
-import multer from "multer";
+import multer2 from "multer";
 
 // backend/services/cloudinary.ts
 import crypto2 from "crypto";
@@ -1166,14 +1174,8 @@ function deleteCloudinaryImage(publicId) {
   });
 }
 
-// backend/routes/system.routes.ts
-var uploadLimiter = rateLimit({
-  windowMs: 60 * 1e3,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: "Terlalu banyak unggahan berkas. Silakan coba lagi nanti." }
-});
+// backend/middleware/upload.ts
+import multer from "multer";
 var ALLOWED_IMAGE_MIMETYPES = [
   "image/jpeg",
   "image/png",
@@ -1183,10 +1185,181 @@ var ALLOWED_IMAGE_MIMETYPES = [
 ];
 function validateImageMimeType(mimetype) {
   if (!mimetype) return false;
-  return ALLOWED_IMAGE_MIMETYPES.includes(mimetype.toLowerCase());
+  return ALLOWED_IMAGE_MIMETYPES.includes(
+    mimetype.toLowerCase()
+  );
 }
-var upload = multer({
+function validateImageMagicBytes(buffer) {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 12) {
+    return false;
+  }
+  if (buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255) {
+    return true;
+  }
+  if (buffer[0] === 137 && buffer[1] === 80 && buffer[2] === 78 && buffer[3] === 71) {
+    return true;
+  }
+  if (buffer[0] === 82 && buffer[1] === 73 && buffer[2] === 70 && buffer[3] === 70 && buffer[8] === 87 && buffer[9] === 69 && buffer[10] === 66 && buffer[11] === 80) {
+    return true;
+  }
+  if (buffer[0] === 71 && buffer[1] === 73 && buffer[2] === 70 && buffer[3] === 56) {
+    return true;
+  }
+  return false;
+}
+var memoryUpload = multer({
   storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    // 5MB per file
+    files: 10
+  },
+  fileFilter: (_req, file, cb) => {
+    if (!validateImageMimeType(file.mimetype)) {
+      return cb(
+        new Error("Format file tidak didukung. Harap unggah gambar (JPEG, PNG, WebP, GIF).")
+      );
+    }
+    cb(null, true);
+  }
+});
+var multiPhotoUpload = memoryUpload.fields([
+  { name: "images", maxCount: 10 },
+  { name: "image", maxCount: 10 }
+]);
+function handleMultiPhotoUpload(req, res, next) {
+  multiPhotoUpload(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).json({
+            message: "Ukuran file melebihi batas maksimum 5MB per file."
+          });
+        }
+        if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+          return res.status(400).json({
+            message: 'Jumlah file melebihi batas maksimum atau field tidak valid (maksimal 10 foto pada field "images").'
+          });
+        }
+        return res.status(400).json({
+          message: `Gagal memproses file upload: ${err.message}`
+        });
+      }
+      if (err instanceof Error) {
+        return res.status(400).json({ message: err.message });
+      }
+      return res.status(400).json({ message: "Gagal memproses unggahan berkas." });
+    }
+    next();
+  });
+}
+function extractUploadedFiles(req) {
+  const result = [];
+  if (Array.isArray(req.files)) {
+    result.push(...req.files);
+  } else if (req.files && typeof req.files === "object") {
+    const fieldObj = req.files;
+    if (Array.isArray(fieldObj.images)) result.push(...fieldObj.images);
+    if (Array.isArray(fieldObj.image)) result.push(...fieldObj.image);
+  } else if (req.file) {
+    result.push(req.file);
+  }
+  return result;
+}
+
+// backend/middleware/rateLimiter.ts
+import rateLimit from "express-rate-limit";
+function shouldSkipRateLimit(req) {
+  if (process.env.NODE_ENV === "test" || process.env.NO_LISTEN === "true") {
+    return true;
+  }
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+  const rawHeader = req.headers["x-test-bypass"] ?? req.headers["x-bypass-rate-limit"];
+  const bypassHeader = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  if (bypassHeader) {
+    if (bypassHeader === "true") {
+      return true;
+    }
+    const bypassSecret = process.env.RATE_LIMIT_BYPASS_SECRET;
+    if (bypassSecret && bypassHeader === bypassSecret) {
+      return true;
+    }
+  }
+  return false;
+}
+var authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1e3,
+  // 15 minutes
+  max: process.env.NODE_ENV === "test" ? 1e4 : 10,
+  skip: shouldSkipRateLimit,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: "fail",
+    statusCode: 429,
+    code: "RATE_LIMIT_EXCEEDED",
+    message: "Terlalu banyak percobaan masuk/daftar. Silakan coba lagi dalam 15 menit."
+  }
+});
+var trackingLimiter = rateLimit({
+  windowMs: 60 * 1e3,
+  // 1 minute
+  max: process.env.NODE_ENV === "test" ? 1e4 : 30,
+  skip: shouldSkipRateLimit,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: "fail",
+    statusCode: 429,
+    code: "RATE_LIMIT_EXCEEDED",
+    message: "Terlalu banyak permintaan pelacakan."
+  }
+});
+var uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1e3,
+  // 15 minutes
+  max: process.env.NODE_ENV === "test" ? 1e4 : 30,
+  skip: shouldSkipRateLimit,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: "fail",
+    statusCode: 429,
+    code: "RATE_LIMIT_EXCEEDED",
+    message: "Terlalu banyak unggahan berkas. Silakan coba lagi nanti."
+  }
+});
+var mutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1e3,
+  // 15 minutes
+  max: process.env.NODE_ENV === "test" ? 1e4 : 30,
+  skip: shouldSkipRateLimit,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: "fail",
+    statusCode: 429,
+    code: "RATE_LIMIT_EXCEEDED",
+    message: "Terlalu banyak permintaan transaksi atau perubahan data. Silakan coba lagi nanti."
+  }
+});
+
+// backend/routes/system.routes.ts
+var ALLOWED_IMAGE_MIMETYPES2 = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/jpg",
+  "image/gif"
+];
+function validateImageMimeType2(mimetype) {
+  if (!mimetype) return false;
+  return ALLOWED_IMAGE_MIMETYPES2.includes(mimetype.toLowerCase());
+}
+var upload = multer2({
+  storage: multer2.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }
   // 5MB limit
 });
@@ -1205,7 +1378,9 @@ function registerSystemRoutes(router2) {
         }
       });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Database ping failed";
+      const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+      const rawErrorMsg = error instanceof Error ? error.message : "Database ping failed";
+      const errorMsg = isProduction ? "Database unavailable" : rawErrorMsg;
       res.status(503).json({
         status: "degraded",
         service: "kosmo-api",
@@ -1221,15 +1396,16 @@ function registerSystemRoutes(router2) {
   router2.post(
     "/upload",
     authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
     uploadLimiter,
     upload.single("image"),
     async (req, res) => {
       if (!req.file) {
         return res.status(400).json({ message: "Tidak ada file yang diunggah." });
       }
-      if (!validateImageMimeType(req.file.mimetype)) {
+      if (!validateImageMimeType2(req.file.mimetype) || !validateImageMagicBytes(req.file.buffer)) {
         return res.status(400).json({
-          message: "Format file tidak didukung. Harap unggah gambar (JPEG, PNG, WebP, GIF)."
+          message: "Format file tidak didukung atau header berkas tidak valid. Harap unggah gambar (JPEG, PNG, WebP, GIF)."
         });
       }
       try {
@@ -1248,10 +1424,13 @@ function registerSystemRoutes(router2) {
 
 // backend/routes/auth.routes.ts
 import bcrypt2 from "bcryptjs";
-import rateLimit2 from "express-rate-limit";
 
 // backend/middleware/validation.ts
 import { z } from "zod";
+function sanitizeText(input) {
+  if (typeof input !== "string") return input;
+  return input.replace(/\0/g, "").replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "").replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "").replace(/<[^>]*>?/gm, "").replace(/javascript:/gi, "").trim();
+}
 var loginSchema = z.object({
   email: z.string().email("Format email tidak valid"),
   password: z.string().min(1, "Password wajib diisi")
@@ -1282,7 +1461,7 @@ var adminUpdateUserSchema = z.object({
   paymentMethod: z.string().optional().or(z.literal(""))
 });
 var updateProfileSchema = z.object({
-  name: z.string().min(2, "Nama minimal 2 karakter").optional(),
+  name: z.string().transform((val) => sanitizeText(val)).refine((val) => val.length >= 2, { message: "Nama minimal 2 karakter" }).optional(),
   phone: z.string().trim().min(9, "Nomor telepon minimal 9 digit").max(20, "Nomor telepon maksimal 20 digit").regex(
     /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
     "Format nomor telepon tidak valid (contoh: 08123456789 atau +628123456789)"
@@ -1299,10 +1478,10 @@ var updateProfileSchema = z.object({
     /^(?:\d{16}|[A-Za-z0-9]{6,12})$/,
     "NIK harus 16 digit angka atau Paspor 6-12 karakter alfanumerik"
   ).optional().or(z.literal("")),
-  address: z.string().min(5, "Alamat domisili minimal 5 karakter").optional().or(z.literal("")),
-  occupation: z.string().min(2, "Pekerjaan/Profesi minimal 2 karakter").optional().or(z.literal("")),
-  emergency_contact_name: z.string().min(2, "Nama kontak darurat minimal 2 karakter").optional().or(z.literal("")),
-  emergency_contact_relation: z.string().optional().or(z.literal("")),
+  address: z.string().transform((val) => sanitizeText(val)).refine((val) => val === "" || val.length >= 5, { message: "Alamat domisili minimal 5 karakter" }).optional().or(z.literal("")),
+  occupation: z.string().transform((val) => sanitizeText(val)).refine((val) => val === "" || val.length >= 2, { message: "Pekerjaan/Profesi minimal 2 karakter" }).optional().or(z.literal("")),
+  emergency_contact_name: z.string().transform((val) => sanitizeText(val)).refine((val) => val === "" || val.length >= 2, { message: "Nama kontak darurat minimal 2 karakter" }).optional().or(z.literal("")),
+  emergency_contact_relation: z.string().transform((val) => sanitizeText(val)).optional().or(z.literal("")),
   emergency_contact_phone: z.string().trim().min(9, "Nomor telepon kontak darurat minimal 9 digit").max(20, "Nomor telepon kontak darurat maksimal 20 digit").regex(
     /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
     "Format nomor telepon kontak darurat tidak valid"
@@ -1317,7 +1496,7 @@ var propertySchema = z.object({
   price: z.number().positive("Harga harus lebih besar dari 0"),
   totalRooms: z.number().int().positive("Total kamar harus lebih besar dari 0"),
   ownerId: z.string().min(1, "ownerId wajib diisi").optional()
-});
+}).passthrough();
 var withdrawalSchema = z.object({
   amount: z.preprocess(
     (val) => typeof val === "string" && val.trim() !== "" ? Number(val) : val,
@@ -1330,7 +1509,7 @@ var withdrawalSchema = z.object({
 });
 var reviewSchema = z.object({
   propertyId: z.string().min(1, "propertyId wajib diisi"),
-  comment: z.string().min(1, "Komentar ulasan wajib diisi"),
+  comment: z.string().transform((val) => sanitizeText(val)).refine((val) => val.length > 0, { message: "Komentar ulasan wajib diisi" }),
   rating: z.number().int().min(1, "Rating minimal 1").max(5, "Rating maksimal 5")
 });
 var previewContractSchema = z.object({
@@ -1381,6 +1560,7 @@ function validateBody(schema) {
       });
       return;
     }
+    req.body = result.data;
     next();
   };
 }
@@ -1463,7 +1643,7 @@ var propertyUpdateSchema = z.object({
 });
 var reviewUpdateSchema = z.object({
   rating: z.preprocess((val) => val !== void 0 && val !== null && val !== "" ? Number(val) : void 0, z.number().int().min(1, "Rating minimal 1").max(5, "Rating maksimal 5").optional()),
-  comment: z.string().trim().min(1, "Komentar ulasan tidak boleh kosong").optional()
+  comment: z.string().transform((val) => sanitizeText(val)).refine((val) => val.length > 0, { message: "Komentar ulasan tidak boleh kosong" }).optional()
 }).refine((data) => data.rating !== void 0 || data.comment !== void 0, {
   message: "Minimal salah satu dari rating atau comment harus diisi"
 });
@@ -1476,6 +1656,7 @@ var processWithdrawalSchema = z.object({
   referenceId: z.string().optional()
 });
 var rejectWithdrawalSchema = z.object({
+  password: z.string({ message: "Password konfirmasi administrator diperlukan" }).min(1, "Password konfirmasi administrator diperlukan"),
   reason: z.string().trim().min(1, "Alasan penolakan wajib diisi").optional()
 });
 var createRentalSchema = z.object({
@@ -1511,6 +1692,34 @@ var interactionTelemetrySchema = z.object({
   deviceToken: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional()
 });
+var createPaymentTokenSchema = z.object({
+  propertyId: z.string().min(1, "propertyId wajib diisi"),
+  tenantId: z.string().optional(),
+  propertyName: z.string().optional(),
+  price: z.preprocess((val) => val !== void 0 && val !== null && val !== "" ? Number(val) : void 0, z.number().positive("Harga sewa harus lebih besar dari 0").optional()),
+  durationMonths: z.preprocess((val) => val !== void 0 && val !== null && val !== "" ? Number(val) : 1, z.number().int().min(1, "Durasi sewa minimal 1 bulan").max(120).optional().default(1)),
+  roomId: z.string().optional().nullable(),
+  customRentalId: z.string().optional(),
+  rentalId: z.string().optional(),
+  startDate: z.string().optional()
+});
+var paymentNotificationSchema = z.object({
+  order_id: z.string().min(1, "order_id wajib diisi"),
+  status_code: z.string().min(1, "status_code wajib diisi"),
+  gross_amount: z.string().min(1, "gross_amount wajib diisi"),
+  signature_key: z.string().min(1, "signature_key wajib diisi"),
+  transaction_status: z.string().optional(),
+  fraud_status: z.string().optional(),
+  payment_type: z.string().optional(),
+  transaction_time: z.string().optional(),
+  transaction_id: z.string().optional()
+}).passthrough();
+var visitorTrackingSchema = z.object({
+  pageUrl: z.string().trim().max(500).optional(),
+  referrer: z.string().trim().max(500).optional(),
+  sessionId: z.string().trim().max(100).optional(),
+  deviceType: z.string().trim().max(50).optional()
+}).optional().default({});
 
 // backend/types/index.ts
 function isUserProfileComplete(user) {
@@ -1591,13 +1800,6 @@ var generateId = (prefix) => {
 };
 
 // backend/routes/auth.routes.ts
-var authLimiter = rateLimit2({
-  windowMs: 60 * 1e3,
-  max: 500,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: "Terlalu banyak percobaan masuk/daftar. Silakan coba lagi dalam 1 menit." }
-});
 function formatSafeUser(user) {
   const safeUser = { ...user };
   delete safeUser.password;
@@ -2879,16 +3081,56 @@ function registerReviewRoutes(router2) {
   });
 }
 
+// backend/routes/landlord.routes.ts
+import bcrypt6 from "bcryptjs";
+
 // backend/routes/tracking.routes.ts
-import rateLimit3 from "express-rate-limit";
 import XLSX from "xlsx";
-var trackingLimiter = rateLimit3({
-  windowMs: 60 * 1e3,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: "Terlalu banyak permintaan pelacakan." }
-});
+var handleRecordVisit = async (req, res) => {
+  const rawIp = req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+  const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+  const ip = firstIp.split(",")[0].trim().substring(0, 255);
+  const userAgent = String(req.headers["user-agent"] || "").substring(0, 1e3);
+  const cacheKey = `tracking:ip:${ip}`;
+  if (apiCache.get(cacheKey)) {
+    return res.status(200).json({
+      success: true,
+      message: "Kunjungan telah dicatat.",
+      deduplicated: true
+    });
+  }
+  apiCache.set(cacheKey, true, 900);
+  try {
+    const [recentVisits] = await pool.query(
+      "SELECT id FROM visitor_tracking WHERE ip_address = ? AND visited_at >= NOW() - INTERVAL 15 MINUTE LIMIT 1",
+      [ip]
+    );
+    if (recentVisits.length > 0) {
+      return res.status(200).json({
+        success: true,
+        message: "Kunjungan telah dicatat.",
+        deduplicated: true
+      });
+    }
+    await pool.query(
+      "INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)",
+      [ip, userAgent]
+    );
+    apiCache.del("admin:stats");
+    return res.status(201).json({
+      success: true,
+      message: "Kunjungan berhasil dilacak."
+    });
+  } catch (err) {
+    if (typeof apiCache.invalidate === "function") {
+      apiCache.invalidate(cacheKey);
+    } else {
+      apiCache.del(cacheKey);
+    }
+    console.error("Error in visitor tracking:", err);
+    return res.status(500).json({ error: "Internal Server Error", message: "Gagal melacak kunjungan." });
+  }
+};
 function registerTrackingRoutes(router2) {
   router2.post(
     "/tracking/interaction",
@@ -2928,23 +3170,9 @@ function registerTrackingRoutes(router2) {
       }
     }
   );
-  router2.post("/tracking/visit", trackingLimiter, async (req, res) => {
-    const rawIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
-    const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
-    const ip = firstIp.split(",")[0].trim().substring(0, 255);
-    const userAgent = String(req.headers["user-agent"] || "").substring(0, 1e3);
-    try {
-      await pool.query(
-        "INSERT INTO visitor_tracking (ip_address, user_agent) VALUES (?, ?)",
-        [ip, userAgent]
-      );
-      apiCache.del("admin:stats");
-      res.status(201).json({ message: "Kunjungan berhasil dilacak." });
-    } catch (err) {
-      console.error("Error in POST /api/tracking/visit:", err);
-      res.status(500).json({ error: "Internal Server Error", message: "Gagal melacak kunjungan." });
-    }
-  });
+  const trackVisitHandler = handleRecordVisit;
+  router2.post("/tracking", trackingLimiter, validateBody(visitorTrackingSchema), trackVisitHandler);
+  router2.post("/tracking/visit", trackingLimiter, validateBody(visitorTrackingSchema), trackVisitHandler);
   router2.get("/admin/stats", authenticateToken, requireRole(["admin"]), async (_req, res) => {
     try {
       const cacheKey = "admin:stats";
@@ -3677,193 +3905,200 @@ var handlePaymentNotification = async (req, res) => {
   res.json({ message: "Status notifikasi diterima." });
 };
 function registerPaymentRoutes(router2) {
-  router2.post("/payment/token", authenticateToken, async (req, res) => {
-    const { propertyId, tenantId, durationMonths, roomId } = req.body;
-    const authUser = req.user;
-    if (!propertyId || !tenantId) {
-      return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
-    }
-    if (authUser?.role !== "admin" && authUser?.id !== tenantId) {
-      return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat membuat token atas nama akun lain." });
-    }
-    const duration = durationMonths && durationMonths > 0 ? durationMonths : 1;
-    const customRentalId = req.body.customRentalId || req.body.rentalId;
-    const resolvedRentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
-    const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-    let tenantName = "";
-    let tenantEmail = "";
-    let tenantPhone = "";
-    let propertyName = "";
-    let monthlyRent = 0;
-    let adminFee = 5e3;
-    let resolvedDuration = duration;
-    let totalAmount = 0;
-    let targetRoomId = null;
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [userRows] = await connection.query(
-        "SELECT id, name, email, phone FROM users WHERE id = ? FOR UPDATE",
-        [tenantId]
-      );
-      const tenant = userRows[0];
-      if (!tenant) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Tenant tidak ditemukan." });
+  router2.post(
+    "/payment/token",
+    authenticateToken,
+    mutationLimiter,
+    validateBody(createPaymentTokenSchema),
+    async (req, res) => {
+      const { propertyId, durationMonths, roomId } = req.body;
+      const authUser = req.user;
+      const tenantId = req.body.tenantId || authUser?.id;
+      if (!propertyId || !tenantId) {
+        return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
       }
-      tenantName = tenant.name;
-      tenantEmail = tenant.email;
-      tenantPhone = tenant.phone || "";
-      const [propRows] = await connection.query(
-        "SELECT id, name, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
-        [propertyId]
-      );
-      const property = propRows[0];
-      if (!property) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Properti tidak ditemukan." });
+      if (authUser?.role !== "admin" && authUser?.id !== tenantId) {
+        return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat membuat token atas nama akun lain." });
       }
-      propertyName = property.name;
-      if (property.occupiedRooms >= property.totalRooms) {
-        await connection.rollback();
-        return res.status(400).json({ message: "Kamar kos sudah penuh." });
-      }
-      let lockedRoom;
-      const requestedRoomId = roomId && typeof roomId === "string" && roomId.trim() !== "" ? roomId.trim() : void 0;
-      if (requestedRoomId) {
-        const [roomRows] = await connection.query(
-          "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE",
-          [requestedRoomId, propertyId]
+      const duration = durationMonths && durationMonths > 0 ? durationMonths : 1;
+      const customRentalId = req.body.customRentalId || req.body.rentalId;
+      const resolvedRentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
+      const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      let tenantName = "";
+      let tenantEmail = "";
+      let tenantPhone = "";
+      let propertyName = "";
+      let monthlyRent = 0;
+      let adminFee = 5e3;
+      let resolvedDuration = duration;
+      let totalAmount = 0;
+      let targetRoomId = null;
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [userRows] = await connection.query(
+          "SELECT id, name, email, phone FROM users WHERE id = ? FOR UPDATE",
+          [tenantId]
         );
-        lockedRoom = roomRows[0];
-        if (!lockedRoom) {
+        const tenant = userRows[0];
+        if (!tenant) {
           await connection.rollback();
-          return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
+          return res.status(404).json({ message: "Tenant tidak ditemukan." });
         }
-        if (lockedRoom.status !== "available") {
-          await connection.rollback();
-          return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
-        }
-        targetRoomId = lockedRoom.id;
-      } else {
-        const [discreteCountRows] = await connection.query(
-          "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+        tenantName = tenant.name;
+        tenantEmail = tenant.email;
+        tenantPhone = tenant.phone || "";
+        const [propRows] = await connection.query(
+          "SELECT id, name, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
           [propertyId]
         );
-        const discreteCount = Number(discreteCountRows[0]?.count || 0);
-        if (discreteCount > 0) {
-          const [availableRooms] = await connection.query(
-            "SELECT id, price, status FROM rooms WHERE propertyId = ? AND status = 'available' LIMIT 1 FOR UPDATE",
-            [propertyId]
+        const property = propRows[0];
+        if (!property) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Properti tidak ditemukan." });
+        }
+        propertyName = property.name;
+        if (property.occupiedRooms >= property.totalRooms) {
+          await connection.rollback();
+          return res.status(400).json({ message: "Kamar kos sudah penuh." });
+        }
+        let lockedRoom;
+        const requestedRoomId = roomId && typeof roomId === "string" && roomId.trim() !== "" ? roomId.trim() : void 0;
+        if (requestedRoomId) {
+          const [roomRows] = await connection.query(
+            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE",
+            [requestedRoomId, propertyId]
           );
-          if (availableRooms.length === 0) {
+          lockedRoom = roomRows[0];
+          if (!lockedRoom) {
+            await connection.rollback();
+            return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
+          }
+          if (lockedRoom.status !== "available") {
             await connection.rollback();
             return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
           }
+          targetRoomId = lockedRoom.id;
+        } else {
+          const [discreteCountRows] = await connection.query(
+            "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+            [propertyId]
+          );
+          const discreteCount = Number(discreteCountRows[0]?.count || 0);
+          if (discreteCount > 0) {
+            const [availableRooms] = await connection.query(
+              "SELECT id, price, status FROM rooms WHERE propertyId = ? AND status = 'available' LIMIT 1 FOR UPDATE",
+              [propertyId]
+            );
+            if (availableRooms.length === 0) {
+              await connection.rollback();
+              return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
+            }
+          }
         }
-      }
-      let activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE";
-      const queryParams = [tenantId];
-      if (customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "") {
-        activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? FOR UPDATE";
-        queryParams.push(customRentalId.trim());
-      }
-      const [activeRentals] = await connection.query(activeRentalsQuery, queryParams);
-      if (activeRentals.length > 0) {
+        let activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE";
+        const queryParams = [tenantId];
+        if (customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "") {
+          activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? FOR UPDATE";
+          queryParams.push(customRentalId.trim());
+        }
+        const [activeRentals] = await connection.query(activeRentalsQuery, queryParams);
+        if (activeRentals.length > 0) {
+          await connection.rollback();
+          return res.status(409).json({
+            message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
+          });
+        }
+        const [existingRentalRows] = await connection.query(
+          "SELECT * FROM rentals WHERE id = ? FOR UPDATE",
+          [resolvedRentalId]
+        );
+        const existingRental = existingRentalRows[0];
+        const roomPriceOverride = lockedRoom && typeof lockedRoom.price === "number" && lockedRoom.price > 0 ? Number(lockedRoom.price) : null;
+        monthlyRent = Number(existingRental?.price || roomPriceOverride || property.price);
+        adminFee = Number(existingRental?.admin_fee_amount || 5e3);
+        resolvedDuration = existingRental && existingRental.duration_months ? Number(existingRental.duration_months) : duration;
+        totalAmount = monthlyRent * resolvedDuration + adminFee;
+        if (!existingRental) {
+          await connection.query(
+            `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+            [resolvedRentalId, tenantId, propertyId, targetRoomId, property.name, monthlyRent, startDate, adminFee, resolvedDuration]
+          );
+        } else if (targetRoomId && !existingRental.roomId) {
+          await connection.query(
+            "UPDATE rentals SET roomId = ? WHERE id = ?",
+            [targetRoomId, resolvedRentalId]
+          );
+        }
+        await connection.commit();
+      } catch (err) {
         await connection.rollback();
-        return res.status(409).json({
-          message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
+        console.error("Create payment token transaction error:", err);
+        return res.status(500).json({ message: "Gagal memproses transaksi pembuatan token pembayaran." });
+      } finally {
+        connection.release();
+      }
+      const attemptOrderId = `${resolvedRentalId}-${Date.now()}`;
+      const parameter = {
+        transaction_details: {
+          order_id: attemptOrderId,
+          gross_amount: totalAmount
+        },
+        customer_details: {
+          first_name: tenantName,
+          email: tenantEmail,
+          phone: tenantPhone
+        },
+        item_details: [
+          {
+            id: propertyId,
+            price: monthlyRent,
+            quantity: resolvedDuration,
+            name: propertyName.substring(0, 50)
+          },
+          {
+            id: "ADMIN_FEE",
+            price: adminFee,
+            quantity: 1,
+            name: "Biaya Administrasi & Meterai"
+          }
+        ],
+        custom_field1: resolvedRentalId
+      };
+      const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
+      const hasMidtransConfig = isMidtransConfigured();
+      if (!hasMidtransConfig && isProduction) {
+        return res.status(500).json({
+          message: "Konfigurasi payment gateway Midtrans (MIDTRANS_SERVER_KEY / MIDTRANS_CLIENT_KEY) belum diatur di server produksi."
         });
       }
-      const [existingRentalRows] = await connection.query(
-        "SELECT * FROM rentals WHERE id = ? FOR UPDATE",
-        [resolvedRentalId]
-      );
-      const existingRental = existingRentalRows[0];
-      const roomPriceOverride = lockedRoom && typeof lockedRoom.price === "number" && lockedRoom.price > 0 ? Number(lockedRoom.price) : null;
-      monthlyRent = Number(existingRental?.price || roomPriceOverride || property.price);
-      adminFee = Number(existingRental?.admin_fee_amount || 5e3);
-      resolvedDuration = existingRental && existingRental.duration_months ? Number(existingRental.duration_months) : duration;
-      totalAmount = monthlyRent * resolvedDuration + adminFee;
-      if (!existingRental) {
-        await connection.query(
-          `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-          [resolvedRentalId, tenantId, propertyId, targetRoomId, property.name, monthlyRent, startDate, adminFee, resolvedDuration]
-        );
-      } else if (targetRoomId && !existingRental.roomId) {
-        await connection.query(
-          "UPDATE rentals SET roomId = ? WHERE id = ?",
-          [targetRoomId, resolvedRentalId]
-        );
-      }
-      await connection.commit();
-    } catch (err) {
-      await connection.rollback();
-      console.error("Create payment token transaction error:", err);
-      return res.status(500).json({ message: "Gagal memproses transaksi pembuatan token pembayaran." });
-    } finally {
-      connection.release();
-    }
-    const attemptOrderId = `${resolvedRentalId}-${Date.now()}`;
-    const parameter = {
-      transaction_details: {
-        order_id: attemptOrderId,
-        gross_amount: totalAmount
-      },
-      customer_details: {
-        first_name: tenantName,
-        email: tenantEmail,
-        phone: tenantPhone
-      },
-      item_details: [
-        {
-          id: propertyId,
-          price: monthlyRent,
-          quantity: resolvedDuration,
-          name: propertyName.substring(0, 50)
-        },
-        {
-          id: "ADMIN_FEE",
-          price: adminFee,
-          quantity: 1,
-          name: "Biaya Administrasi & Meterai"
+      let transactionToken = `snap-token-${resolvedRentalId}`;
+      let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${resolvedRentalId}`;
+      if (hasMidtransConfig) {
+        try {
+          const transaction = await snap.createTransaction(parameter);
+          transactionToken = transaction.token;
+          redirectUrl = transaction.redirect_url;
+        } catch (snapErr) {
+          console.error("Midtrans createTransaction error:", snapErr);
+          const errMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
+          return res.status(502).json({
+            message: `Gagal membuat transaksi di Midtrans: ${errMsg}`
+          });
         }
-      ],
-      custom_field1: resolvedRentalId
-    };
-    const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
-    const hasMidtransConfig = isMidtransConfigured();
-    if (!hasMidtransConfig && isProduction) {
-      return res.status(500).json({
-        message: "Konfigurasi payment gateway Midtrans (MIDTRANS_SERVER_KEY / MIDTRANS_CLIENT_KEY) belum diatur di server produksi."
+      }
+      return res.json({
+        message: "Token pembayaran berhasil dibuat.",
+        token: transactionToken,
+        redirect_url: redirectUrl,
+        rentalId: resolvedRentalId,
+        orderId: attemptOrderId
       });
     }
-    let transactionToken = `snap-token-${resolvedRentalId}`;
-    let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${resolvedRentalId}`;
-    if (hasMidtransConfig) {
-      try {
-        const transaction = await snap.createTransaction(parameter);
-        transactionToken = transaction.token;
-        redirectUrl = transaction.redirect_url;
-      } catch (snapErr) {
-        console.error("Midtrans createTransaction error:", snapErr);
-        const errMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
-        return res.status(502).json({
-          message: `Gagal membuat transaksi di Midtrans: ${errMsg}`
-        });
-      }
-    }
-    return res.json({
-      message: "Token pembayaran berhasil dibuat.",
-      token: transactionToken,
-      redirect_url: redirectUrl,
-      rentalId: resolvedRentalId,
-      orderId: attemptOrderId
-    });
-  });
-  router2.post("/payment/webhook", handlePaymentNotification);
-  router2.post("/payment/notification", handlePaymentNotification);
+  );
+  router2.post("/payment/webhook", validateBody(paymentNotificationSchema), handlePaymentNotification);
+  router2.post("/payment/notification", validateBody(paymentNotificationSchema), handlePaymentNotification);
   router2.post("/payment/finish", authenticateToken, async (req, res) => {
     const { rentalId } = req.body;
     const authUser = req.user;
@@ -4783,54 +5018,77 @@ function registerLandlordRoutes(router2) {
       connection.release();
     }
   });
-  router2.post("/admin/withdrawals/:id/reject", authenticateToken, requireRole(["admin"]), validateBody(rejectWithdrawalSchema), async (req, res) => {
-    const { id } = req.params;
-    const { reason } = req.body;
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [rows] = await connection.query("SELECT * FROM withdrawals WHERE id = ? FOR UPDATE", [id]);
-      const withdrawal = rows[0];
-      if (!withdrawal) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+  router2.post(
+    "/admin/withdrawals/:id/reject",
+    authenticateToken,
+    requireRole(["admin"]),
+    validateBody(rejectWithdrawalSchema),
+    async (req, res) => {
+      const { id } = req.params;
+      const { reason, password } = req.body || {};
+      const authUser = req.user;
+      if (!password) {
+        return res.status(400).json({ message: "Password konfirmasi administrator diperlukan." });
       }
-      if (withdrawal.status === "rejected") {
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [adminRows] = await connection.query(
+          "SELECT password FROM users WHERE id = ?",
+          [authUser?.id]
+        );
+        const admin = adminRows[0];
+        const isMatch = admin && admin.password ? await bcrypt6.compare(password, admin.password) : false;
+        if (!admin || !admin.password || !isMatch) {
+          await connection.rollback();
+          return res.status(401).json({ message: "Password administrator salah." });
+        }
+        const [rows] = await connection.query(
+          "SELECT * FROM withdrawals WHERE id = ? FOR UPDATE",
+          [id]
+        );
+        const withdrawal = rows[0];
+        if (!withdrawal) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+        }
+        if (withdrawal.status === "rejected") {
+          await connection.rollback();
+          return res.status(400).json({ message: "Penarikan sudah pernah ditolak." });
+        }
+        if (withdrawal.status === "completed") {
+          await connection.rollback();
+          return res.status(400).json({ message: "Penarikan yang sudah selesai tidak dapat ditolak." });
+        }
+        const withdrawAmount = parseFloat(String(withdrawal.amount));
+        await connection.query(
+          "UPDATE users SET balance = balance + ? WHERE id = ?",
+          [withdrawAmount, withdrawal.userId]
+        );
+        const rejectionReason = reason || "Pencairan dana ditolak oleh administrator";
+        const processedAt = (/* @__PURE__ */ new Date()).toISOString();
+        await connection.query(
+          "UPDATE withdrawals SET status = 'rejected', rejectionReason = ?, processedAt = ? WHERE id = ?",
+          [rejectionReason, processedAt, id]
+        );
+        await connection.commit();
+        apiCache.invalidatePattern("landlord:");
+        res.json({
+          message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
+          withdrawalId: id,
+          status: "rejected",
+          reason: rejectionReason,
+          processedAt
+        });
+      } catch (err) {
         await connection.rollback();
-        return res.status(400).json({ message: "Penarikan sudah pernah ditolak." });
+        console.error("Reject withdrawal error:", err);
+        res.status(500).json({ message: "Gagal menolak penarikan dana." });
+      } finally {
+        connection.release();
       }
-      if (withdrawal.status === "completed") {
-        await connection.rollback();
-        return res.status(400).json({ message: "Penarikan yang sudah selesai tidak dapat ditolak." });
-      }
-      const withdrawAmount = parseFloat(String(withdrawal.amount));
-      await connection.query(
-        "UPDATE users SET balance = balance + ? WHERE id = ?",
-        [withdrawAmount, withdrawal.userId]
-      );
-      const rejectionReason = reason || "Pencairan dana ditolak oleh administrator";
-      const processedAt = (/* @__PURE__ */ new Date()).toISOString();
-      await connection.query(
-        "UPDATE withdrawals SET status = 'rejected', rejectionReason = ?, processedAt = ? WHERE id = ?",
-        [rejectionReason, processedAt, id]
-      );
-      await connection.commit();
-      apiCache.invalidatePattern("landlord:");
-      res.json({
-        message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
-        withdrawalId: id,
-        status: "rejected",
-        reason: rejectionReason,
-        processedAt
-      });
-    } catch (err) {
-      await connection.rollback();
-      console.error("Reject withdrawal error:", err);
-      res.status(500).json({ message: "Gagal menolak penarikan dana." });
-    } finally {
-      connection.release();
     }
-  });
+  );
 }
 
 // backend/services/contract.ts
@@ -5656,7 +5914,7 @@ function registerContractRoutes(router2) {
 }
 
 // backend/routes/rooms.routes.ts
-import bcrypt6 from "bcryptjs";
+import bcrypt7 from "bcryptjs";
 function formatRoomResponse(room, basePropertyPrice, photos = []) {
   const numPrice = room.price !== null && room.price !== void 0 ? Number(room.price) : null;
   const effectivePrice = numPrice !== null && numPrice > 0 ? numPrice : Number(basePropertyPrice || 0);
@@ -6118,7 +6376,7 @@ function registerRoomRoutes(router2) {
       }
       const [userRows] = await connection.query("SELECT password FROM users WHERE id = ?", [authUser?.id]);
       const caller = userRows[0];
-      const isMatch = caller && caller.password ? await bcrypt6.compare(password, caller.password) : false;
+      const isMatch = caller && caller.password ? await bcrypt7.compare(password, caller.password) : false;
       if (!caller || !caller.password || !isMatch) {
         await connection.rollback();
         return res.status(401).json({ message: "Password salah." });
@@ -6172,81 +6430,6 @@ function registerRoomRoutes(router2) {
   );
 }
 
-// backend/middleware/upload.ts
-import multer2 from "multer";
-var ALLOWED_IMAGE_MIMETYPES2 = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/jpg",
-  "image/gif"
-];
-function validateImageMimeType2(mimetype) {
-  if (!mimetype) return false;
-  return ALLOWED_IMAGE_MIMETYPES2.includes(
-    mimetype.toLowerCase()
-  );
-}
-var memoryUpload = multer2({
-  storage: multer2.memoryStorage(),
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-    // 5MB per file
-    files: 10
-  },
-  fileFilter: (_req, file, cb) => {
-    if (!validateImageMimeType2(file.mimetype)) {
-      return cb(
-        new Error("Format file tidak didukung. Harap unggah gambar (JPEG, PNG, WebP, GIF).")
-      );
-    }
-    cb(null, true);
-  }
-});
-var multiPhotoUpload = memoryUpload.fields([
-  { name: "images", maxCount: 10 },
-  { name: "image", maxCount: 10 }
-]);
-function handleMultiPhotoUpload(req, res, next) {
-  multiPhotoUpload(req, res, (err) => {
-    if (err) {
-      if (err instanceof multer2.MulterError) {
-        if (err.code === "LIMIT_FILE_SIZE") {
-          return res.status(400).json({
-            message: "Ukuran file melebihi batas maksimum 5MB per file."
-          });
-        }
-        if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
-          return res.status(400).json({
-            message: 'Jumlah file melebihi batas maksimum atau field tidak valid (maksimal 10 foto pada field "images").'
-          });
-        }
-        return res.status(400).json({
-          message: `Gagal memproses file upload: ${err.message}`
-        });
-      }
-      if (err instanceof Error) {
-        return res.status(400).json({ message: err.message });
-      }
-      return res.status(400).json({ message: "Gagal memproses unggahan berkas." });
-    }
-    next();
-  });
-}
-function extractUploadedFiles(req) {
-  const result = [];
-  if (Array.isArray(req.files)) {
-    result.push(...req.files);
-  } else if (req.files && typeof req.files === "object") {
-    const fieldObj = req.files;
-    if (Array.isArray(fieldObj.images)) result.push(...fieldObj.images);
-    if (Array.isArray(fieldObj.image)) result.push(...fieldObj.image);
-  } else if (req.file) {
-    result.push(req.file);
-  }
-  return result;
-}
-
 // backend/routes/photos.routes.ts
 function generateCloudinaryVariantUrls(url) {
   if (url.includes("/upload/")) {
@@ -6275,7 +6458,13 @@ async function processImageVariants(buffer) {
       sharp(buffer).rotate().resize(1200, 800, { fit: "cover", position: "center" }).webp({ quality: 80 }).toBuffer()
     ]);
     return { thumbnail, hero };
-  } catch {
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (!errMsg.includes("Cannot find") && !errMsg.includes("ERR_MODULE_NOT_FOUND")) {
+      const error = new Error(`Berkas gambar rusak atau tidak dapat diproses: ${errMsg}`);
+      error.statusCode = 400;
+      throw error;
+    }
     return {};
   }
 }
@@ -6437,9 +6626,9 @@ function registerPhotoRoutes(router2) {
         return res.status(400).json({ message: "Maksimal 10 file foto dapat diunggah sekaligus." });
       }
       for (const file of files) {
-        if (!validateImageMimeType2(file.mimetype)) {
+        if (!validateImageMimeType(file.mimetype) || !validateImageMagicBytes(file.buffer)) {
           return res.status(400).json({
-            message: `Format file '${file.originalname}' tidak didukung. Harap unggah gambar (JPEG, PNG, WebP, GIF).`
+            message: `Format file '${file.originalname}' tidak didukung atau header berkas tidak valid. Harap unggah gambar (JPEG, PNG, WebP, GIF).`
           });
         }
       }
@@ -6476,12 +6665,23 @@ function registerPhotoRoutes(router2) {
       try {
         uploadResults = await Promise.all(
           files.map(async (file) => {
-            const variants = await processImageVariants(file.buffer);
+            let variants;
+            try {
+              variants = await processImageVariants(file.buffer);
+            } catch (err) {
+              const error = new Error("Berkas gambar rusak atau tidak dapat diproses.");
+              error.statusCode = 400;
+              throw error;
+            }
             const targetBuffer = variants.hero || file.buffer;
             return uploadImageStream(targetBuffer, "kosmo_properties");
           })
         );
       } catch (cloudErr) {
+        const errObj = cloudErr;
+        if (errObj?.statusCode === 400 || errObj?.message?.includes("rusak")) {
+          return res.status(400).json({ message: errObj.message || "Berkas gambar rusak atau tidak dapat diproses." });
+        }
         console.error("Cloudinary multi-photo upload error:", cloudErr);
         return res.status(500).json({ message: "Gagal mengunggah foto ke Cloudinary." });
       }
@@ -7276,6 +7476,7 @@ try {
 } catch {
 }
 var app = express2();
+app.set("trust proxy", 1);
 var PORT = parseInt(process.env.PORT || "5000", 10);
 app.use(compression());
 function isOriginAllowed(origin) {
@@ -7291,20 +7492,23 @@ function isOriginAllowed(origin) {
     "https://kosmobali.my.id",
     "https://www.kosmobali.my.id",
     "http://kosmobali.my.id",
-    "http://www.kosmobali.my.id"
+    "http://www.kosmobali.my.id",
+    "https://juragankost.net",
+    "https://www.juragankost.net",
+    "http://juragankost.net",
+    "http://www.juragankost.net"
   ];
   const allowedOrigins = [...defaultAllowed, ...envAllowed];
   const normalizedOrigin = origin.toLowerCase().replace(/\/$/, "");
   const isExactMatch = allowedOrigins.some((allowed) => {
     const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, "");
-    if (normalizedAllowed === "*" && process.env.NODE_ENV !== "production") return true;
     return normalizedAllowed === normalizedOrigin;
   });
   if (isExactMatch) return true;
   try {
     const parsed = new URL(origin);
     const hostname = parsed.hostname.toLowerCase();
-    if (hostname === "kosmobali.my.id" || hostname.endsWith(".kosmobali.my.id") || hostname.endsWith(".vercel.app")) {
+    if (hostname === "kosmobali.my.id" || hostname.endsWith(".kosmobali.my.id") || hostname === "juragankost.net" || hostname.endsWith(".juragankost.net") || hostname.endsWith(".vercel.app")) {
       return true;
     }
   } catch {
@@ -7329,14 +7533,67 @@ var corsOptions = {
 app.use(requestIdMiddleware);
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "'unsafe-eval'",
+          "https://app.midtrans.com",
+          "https://app.sandbox.midtrans.com",
+          "https://api.midtrans.com"
+        ],
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://fonts.googleapis.com"
+        ],
+        fontSrc: [
+          "'self'",
+          "https://fonts.gstatic.com",
+          "data:"
+        ],
+        imgSrc: [
+          "'self'",
+          "data:",
+          "blob:",
+          "https://res.cloudinary.com",
+          "https://*.tile.openstreetmap.org",
+          "https://unpkg.com"
+        ],
+        connectSrc: [
+          "'self'",
+          "https://res.cloudinary.com",
+          "https://api.midtrans.com",
+          "https://app.midtrans.com",
+          "https://app.sandbox.midtrans.com",
+          "https://*.tile.openstreetmap.org"
+        ],
+        frameSrc: [
+          "'self'",
+          "https://app.midtrans.com",
+          "https://app.sandbox.midtrans.com"
+        ],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: process.env.NODE_ENV === "production" ? [] : null
+      }
+    },
     crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: { policy: "cross-origin" }
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    hsts: {
+      maxAge: 31536e3,
+      includeSubDomains: true,
+      preload: true
+    },
+    noSniff: true,
+    frameguard: { action: "sameorigin" },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" }
   })
 );
 app.use(cors(corsOptions));
-app.use(bodyParser.json({ limit: "5mb" }));
-app.use(bodyParser.urlencoded({ limit: "5mb", extended: true }));
+app.use(express2.json({ limit: "1mb" }));
+app.use(express2.urlencoded({ extended: true, limit: "1mb" }));
 app.use(morgan("dev"));
 app.use("/uploads", express2.static(uploadsDir));
 async function dbReadinessMiddleware(req, res, next, dbReadyFn = ensureDbReady) {
