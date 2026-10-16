@@ -367,4 +367,114 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
 
     await pool.query('DELETE FROM properties WHERE id = ?', [foreignPropId]);
   });
+
+  // =========================================================================
+  // STORM 5: POST /api/payment/token Concurrency, Locking & Tenancy Guard
+  // =========================================================================
+  await t.test('Storm 5: POST /api/payment/token enforces row-level locking and single active tenancy', async (t5) => {
+    // 5.1 Single Active Tenancy Guard returns HTTP 409 when tenant already has active lease
+    await t5.test('5.1 Rejects token request with 409 Conflict if tenant already has an active lease', async () => {
+      // Seed an active rental for Tenant 0
+      const activeRentId = `rent-active-guard-${tag}`;
+      await pool.query(
+        "INSERT INTO rentals (id, tenantId, propertyId, propertyName, price, startDate, status) VALUES (?, ?, ?, 'KOSMO Haven', 3500000, '2026-10-01', 'active')",
+        [activeRentId, tenantIds[0], propId]
+      );
+
+      const res = await fetch(`${baseUrl}/payment/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tenantTokens[0]}`
+        },
+        body: JSON.stringify({
+          propertyId: propId,
+          tenantId: tenantIds[0],
+          durationMonths: 1,
+          roomId: room102Id
+        })
+      });
+
+      assert.equal(res.status, 409, 'Must return HTTP 409 Conflict when tenant has active lease');
+      const body = (await res.json()) as { message?: string };
+      assert.match(body.message || '', /Single Active Tenancy Violation/);
+
+      // Clean up active rental
+      await pool.query('DELETE FROM rentals WHERE id = ?', [activeRentId]);
+    });
+
+    // 5.2 Room Availability Guard returns HTTP 409 when roomId is occupied or in maintenance
+    await t5.test('5.2 Rejects token request with 409 Conflict if target roomId is in maintenance or occupied', async () => {
+      await pool.query("UPDATE rooms SET status = 'maintenance' WHERE id = ?", [room102Id]);
+
+      const res = await fetch(`${baseUrl}/payment/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tenantTokens[1]}`
+        },
+        body: JSON.stringify({
+          propertyId: propId,
+          tenantId: tenantIds[1],
+          durationMonths: 1,
+          roomId: room102Id
+        })
+      });
+
+      assert.equal(res.status, 409, 'Must return HTTP 409 when room is in maintenance');
+      await pool.query("UPDATE rooms SET status = 'available' WHERE id = ?", [room102Id]);
+    });
+
+    // 5.3 Cross-Property Room Mismatch Guard returns HTTP 404
+    await t5.test('5.3 Rejects token request with 404 when roomId does not belong to propertyId', async () => {
+      const foreignPropId = `prop-tok-foreign-${tag}`;
+      await pool.query(
+        "INSERT INTO properties (id, name, district, address, price, totalRooms, occupiedRooms, ownerId) VALUES (?, 'Foreign', 'Ubud', 'Jl. Raya Ubud', 4000000, 2, 0, ?)",
+        [foreignPropId, landlordId]
+      );
+
+      const res = await fetch(`${baseUrl}/payment/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tenantTokens[1]}`
+        },
+        body: JSON.stringify({
+          propertyId: foreignPropId,
+          tenantId: tenantIds[1],
+          durationMonths: 1,
+          roomId: room102Id // belongs to propId, not foreignPropId
+        })
+      });
+
+      assert.equal(res.status, 404, 'Must return HTTP 404 when room does not belong to property');
+      await pool.query('DELETE FROM properties WHERE id = ?', [foreignPropId]);
+    });
+
+    // 5.4 High-Concurrency Token Generation: concurrent requests without 500 error or deadlock
+    await t5.test('5.4 Concurrent token generation requests execute cleanly without deadlock (zero Error 1213)', async () => {
+      const tokenPromises = tenantTokens.slice(2, 7).map(async (tok, idx) => {
+        const actualIdx = idx + 2;
+        const res = await fetch(`${baseUrl}/payment/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tok}`
+          },
+          body: JSON.stringify({
+            propertyId: propId,
+            tenantId: tenantIds[actualIdx],
+            durationMonths: 1
+          })
+        });
+        return { status: res.status, body: await res.json() };
+      });
+
+      const results = await Promise.all(tokenPromises);
+      assert.ok(
+        results.every((r) => r.status === 200 || r.status === 409),
+        `All token requests must return 200 or 409, no 500 permitted. Got statuses: ${results.map((r) => r.status).join(',')}`
+      );
+    });
+  });
 });

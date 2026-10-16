@@ -142,6 +142,13 @@ export interface Property {
   document?: string;
   rooms?: Room[];
   photos?: PropertyPhoto[];
+  is_featured?: boolean;
+  isFeatured?: boolean;
+  featured_until?: string | Date | null;
+  featuredUntil?: string | Date | null;
+  verified_water_tank?: boolean;
+  verified_wifi_speedtest?: boolean;
+  suitabilityScore?: number;
 }
 
 export interface Review {
@@ -188,6 +195,9 @@ export interface Rental {
   leaseEndDate?: string;
   leaseEndDateISO?: string;
   totalDurationMonths?: number;
+  tenantName?: string;
+  tenantPhone?: string;
+  tenantEmail?: string;
 }
 
 export interface UtilityQuotas {

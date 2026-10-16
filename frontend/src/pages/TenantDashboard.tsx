@@ -7,6 +7,7 @@ import { useRentalContractDownload } from './TenantDashboard/hooks/useRentalCont
 import { usePendingPayment } from './TenantDashboard/hooks/usePendingPayment';
 import { useTerminateRental } from './TenantDashboard/hooks/useTerminateRental';
 import { useTenantReviews } from './TenantDashboard/hooks/useTenantReviews';
+import { useLeaseRenewal } from './TenantDashboard/hooks/useLeaseRenewal';
 
 import { TenantSidebar } from './TenantDashboard/components/TenantSidebar';
 import { TenantHeader } from './TenantDashboard/components/TenantHeader';
@@ -74,6 +75,14 @@ export default function TenantDashboard() {
     handleOpenPendingPayment,
     handleProcessPendingPayment
   } = usePendingPayment({
+    currentUser,
+    onRefreshRentals: fetchMyRentals
+  });
+
+  const {
+    isRenewing,
+    handleRenewRental
+  } = useLeaseRenewal({
     currentUser,
     onRefreshRentals: fetchMyRentals
   });
@@ -182,6 +191,8 @@ export default function TenantDashboard() {
               onViewContractDetails={setViewingContractRental}
               onOpenTerminate={openTerminateModal}
               onExplore={() => navigate('/')}
+              onRenewRental={handleRenewRental}
+              isRenewing={isRenewing}
             />
 
             <RentalHistorySection

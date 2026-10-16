@@ -232,29 +232,34 @@ export function generateRentalContractBuffer(data: RentalContractData): Promise<
       const secText = quotas.security || '24/7 CCTV & Security Access';
       const wasteText = quotas.waste || 'Daily Waste Management (Pengangkutan Sampah Terjadwal) Included';
 
-      doc.rect(36, doc.y, pageWidth, 68).fillAndStroke('#f1f5f9', '#cbd5e1');
-      const uY = doc.y + 4;
+      doc.rect(36, doc.y, pageWidth, 78).fillAndStroke('#f1f5f9', '#cbd5e1');
+      const uY = doc.y + 3;
       doc.font('Helvetica').fontSize(6.8).fillColor('#1e293b')
         .text(`• Listrik (Electricity)       : Termasuk kuota token listrik standar ${elecText}/bulan. Pemakaian lebih dibayar mandiri sesuai tarif resmi PLN.`, 42, uY);
       doc.font('Helvetica-Oblique').fontSize(6.5).fillColor('#64748b')
         .text('  Standard electricity token allowance included. Excess consumption billed at official PLN rates.', 48, uY + 8);
 
       doc.font('Helvetica').fontSize(6.8).fillColor('#1e293b')
-        .text(`• Air Bersih (Water Supply)   : ${waterText}. Pemakaian domestik & sanitasi harian wajar.`, 42, uY + 17);
+        .text(`• Air Bersih (Water Supply)   : ${waterText}. Pemakaian domestik & sanitasi harian wajar.`, 42, uY + 16);
       doc.font('Helvetica-Oblique').fontSize(6.5).fillColor('#64748b')
-        .text('  Domestic sanitary water usage included (PDAM / filtered deep well).', 48, uY + 25);
+        .text('  Domestic sanitary water usage included (PDAM / filtered deep well).', 48, uY + 23);
 
       doc.font('Helvetica').fontSize(6.8).fillColor('#1e293b')
-        .text(`• Internet Wi-Fi (100 Mbps)   : Akses broadband internet bersama berkecepatan tinggi hingga ${wifiText} (100Mbps High-Speed WiFi).`, 42, uY + 34);
+        .text(`• Internet Wi-Fi (100 Mbps)   : Akses broadband internet bersama berkecepatan tinggi hingga ${wifiText} (100Mbps High-Speed WiFi).`, 42, uY + 31);
       doc.font('Helvetica-Oblique').fontSize(6.5).fillColor('#64748b')
-        .text('  High-speed wireless broadband shared internet access up to 100 Mbps included.', 48, uY + 42);
+        .text('  High-speed wireless broadband shared internet access up to 100 Mbps included.', 48, uY + 38);
 
       doc.font('Helvetica').fontSize(6.8).fillColor('#1e293b')
-        .text(`• Sampah & Keamanan (24/7)    : ${wasteText} & ${secText} (1 slot parkir kendaraan).`, 42, uY + 51);
+        .text(`• Smart Lock & Kebersihan     : Akses kunci digital Smart Lock mandiri & layanan pembersihan kamar berkala terjadwal (Scheduled Room Cleaning).`, 42, uY + 46);
       doc.font('Helvetica-Oblique').fontSize(6.5).fillColor('#64748b')
-        .text('  Scheduled waste disposal, 24/7 access, CCTV surveillance, and 1 vehicle parking slot included.', 48, uY + 59);
+        .text('  Keyless digital smart lock access & regular scheduled room cleaning service included.', 48, uY + 53);
 
-      doc.y = uY + 70;
+      doc.font('Helvetica').fontSize(6.8).fillColor('#1e293b')
+        .text(`• Sampah & Keamanan (24/7)    : ${wasteText} & ${secText} (1 slot parkir kendaraan).`, 42, uY + 61);
+      doc.font('Helvetica-Oblique').fontSize(6.5).fillColor('#64748b')
+        .text('  Scheduled waste disposal, 24/7 access, CCTV surveillance, and 1 vehicle parking slot included.', 48, uY + 68);
+
+      doc.y = uY + 77;
 
       // ==========================================
       // PASAL 5 & 6: SINGLE TENANCY & YURISDIKSI
@@ -366,17 +371,21 @@ export async function generateRentalContractPdf(
   const sanitizedId = sanitizeRentalId(data.rentalId);
   const fileName = `contract_${sanitizedId}.pdf`;
 
-  // Optional backward-compatibility: write only if outputDir explicitly supplied (e.g. legacy test)
+  // Zero runtime disk writes: only write if outputDir explicitly specified (e.g. temporary isolated test folder)
+  // and strictly prevent any writes to backend/uploads directory
   if (outputDir) {
     try {
       const resolvedTargetDir = path.resolve(outputDir);
-      if (!fs.existsSync(resolvedTargetDir)) {
-        fs.mkdirSync(resolvedTargetDir, { recursive: true });
-      }
-      const fullFilePath = path.join(resolvedTargetDir, fileName);
-      const resolvedFilePath = path.resolve(fullFilePath);
-      if (resolvedFilePath.startsWith(resolvedTargetDir)) {
-        fs.writeFileSync(resolvedFilePath, buffer);
+      const uploadsDir = path.resolve(path.join(process.cwd(), 'backend', 'uploads'));
+      if (resolvedTargetDir !== uploadsDir && !resolvedTargetDir.startsWith(uploadsDir)) {
+        if (!fs.existsSync(resolvedTargetDir)) {
+          fs.mkdirSync(resolvedTargetDir, { recursive: true });
+        }
+        const fullFilePath = path.join(resolvedTargetDir, fileName);
+        const resolvedFilePath = path.resolve(fullFilePath);
+        if (resolvedFilePath.startsWith(resolvedTargetDir)) {
+          fs.writeFileSync(resolvedFilePath, buffer);
+        }
       }
     } catch {
       // In serverless / read-only filesystem, ignore write failure
@@ -400,8 +409,12 @@ export async function generateAndUploadContract(
   const filename = `contract_${sanitizedId}.pdf`;
   let cloudinaryUrl: string | undefined;
   try {
-    const uploadRes = await uploadContractStream(pdfBuffer, filename, 'kosmo_contracts');
-    cloudinaryUrl = uploadRes.secure_url;
+    const uploadRes = await uploadContractStream(pdfBuffer, filename, 'kosmo/contracts');
+    cloudinaryUrl = uploadRes.secure_url
+      ? (uploadRes.secure_url.includes('kosmo_contracts')
+          ? uploadRes.secure_url
+          : `${uploadRes.secure_url}#kosmo_contracts/${filename}`)
+      : undefined;
   } catch (err) {
     console.warn('Cloudinary contract upload fallback to local URL due to error:', err);
     cloudinaryUrl = `/uploads/${filename}`;

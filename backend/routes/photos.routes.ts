@@ -36,6 +36,58 @@ interface PhotoWithPropertyRow extends RowDataPacket {
   propertyImage: string | null;
 }
 
+export function generateCloudinaryVariantUrls(url: string): { thumbnail: string; hero: string } {
+  if (url.includes('/upload/')) {
+    const thumbnail = url.replace(
+      /\/upload\/(?:v\d+\/)?/,
+      (match) => (match.includes('v') ? match.replace('/upload/', '/upload/c_fill,w_400,h_300,f_webp,q_80/') : '/upload/c_fill,w_400,h_300,f_webp,q_80/')
+    );
+    const hero = url.replace(
+      /\/upload\/(?:v\d+\/)?/,
+      (match) => (match.includes('v') ? match.replace('/upload/', '/upload/c_fill,w_1200,h_800,f_webp,q_80/') : '/upload/c_fill,w_1200,h_800,f_webp,q_80/')
+    );
+    return { thumbnail, hero };
+  }
+  return {
+    thumbnail: `${url}?w=400&h=300&fmt=webp&q=80`,
+    hero: `${url}?w=1200&h=800&fmt=webp&q=80`
+  };
+}
+
+export async function processImageVariants(buffer: Buffer): Promise<{
+  thumbnail?: Buffer;
+  hero?: Buffer;
+}> {
+  try {
+    const importDynamic = new Function('modulePath', 'return import(modulePath)');
+    const sharpModule = (await importDynamic('sharp')) as { default?: (buf: Buffer) => unknown };
+    const sharp = (sharpModule.default || sharpModule) as (buf: Buffer) => {
+      rotate: () => {
+        resize: (w: number, h: number, opts: Record<string, unknown>) => {
+          webp: (opts: Record<string, unknown>) => {
+            toBuffer: () => Promise<Buffer>;
+          };
+        };
+      };
+    };
+    const [thumbnail, hero] = await Promise.all([
+      sharp(buffer)
+        .rotate()
+        .resize(400, 300, { fit: 'cover', position: 'center' })
+        .webp({ quality: 80 })
+        .toBuffer(),
+      sharp(buffer)
+        .rotate()
+        .resize(1200, 800, { fit: 'cover', position: 'center' })
+        .webp({ quality: 80 })
+        .toBuffer()
+    ]);
+    return { thumbnail, hero };
+  } catch {
+    return {};
+  }
+}
+
 export function formatPhotoResponse(row: {
   id: string;
   propertyId: string;
@@ -47,18 +99,20 @@ export function formatPhotoResponse(row: {
   orderIndex: number;
   createdAt?: Date | string;
   updatedAt?: Date | string;
-}): PropertyPhoto {
+}): PropertyPhoto & { variants?: { thumbnail: string; hero: string } } {
+  const url = String(row.url);
   return {
     id: String(row.id),
     propertyId: String(row.propertyId),
     roomId: row.roomId ? String(row.roomId) : null,
-    url: String(row.url),
+    url,
     publicId: row.publicId ? String(row.publicId) : null,
     category: row.category as PhotoCategory,
     caption: row.caption ? String(row.caption) : '',
     orderIndex: Number(row.orderIndex),
     createdAt: row.createdAt,
-    updatedAt: row.updatedAt
+    updatedAt: row.updatedAt,
+    variants: generateCloudinaryVariantUrls(url)
   };
 }
 
@@ -284,11 +338,15 @@ export function registerPhotoRoutes(router: Router): void {
         }
       }
 
-      // Stream buffers to Cloudinary
+      // Stream buffers to Cloudinary (in-memory Sharp WebP processing with graceful fallback)
       let uploadResults;
       try {
         uploadResults = await Promise.all(
-          files.map((file) => uploadImageStream(file.buffer, 'kosmo_properties'))
+          files.map(async (file) => {
+            const variants = await processImageVariants(file.buffer);
+            const targetBuffer = variants.hero || file.buffer;
+            return uploadImageStream(targetBuffer, 'kosmo_properties');
+          })
         );
       } catch (cloudErr) {
         console.error('Cloudinary multi-photo upload error:', cloudErr);

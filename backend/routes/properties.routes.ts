@@ -7,7 +7,8 @@ import { normalizeProperty, normalizePropertySummary } from '../services/transfo
 import type { PropertyRow } from '../services/transformers';
 import { authenticateToken, requireRole } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
-import { propertySchema, validateBody } from '../middleware/validation';
+import { propertySchema, propertyUpdateSchema, featurePropertySchema, validateBody } from '../middleware/validation';
+import { recommendationService } from '../services/recommendation.service';
 import { generateId } from '../utils/id';
 import type { UserRow } from './auth.routes';
 
@@ -37,10 +38,26 @@ interface DeletePropertyBody {
 
 export function registerPropertyRoutes(router: Router): void {
   router.get('/properties', async (req: Request, res: Response) => {
-    const { district, priceMin, priceMax, minPrice, maxPrice, facility, ownerId, owner } = req.query;
+    const {
+      district,
+      priceMin,
+      priceMax,
+      minPrice,
+      maxPrice,
+      facility,
+      ownerId,
+      owner,
+      is_featured,
+      featured,
+      verified_water_tank,
+      verified_wifi_speedtest
+    } = req.query;
     const targetOwner = ownerId || owner;
     const effectiveMin = priceMin !== undefined ? priceMin : minPrice;
     const effectiveMax = priceMax !== undefined ? priceMax : maxPrice;
+    const wantsFeatured = is_featured === 'true' || is_featured === '1' || featured === 'true' || featured === '1';
+    const wantsWaterTank = verified_water_tank === 'true' || verified_water_tank === '1';
+    const wantsWifiSpeedtest = verified_wifi_speedtest === 'true' || verified_wifi_speedtest === '1';
 
     const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
     const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
@@ -59,8 +76,10 @@ export function registerPropertyRoutes(router: Router): void {
       : [];
     const uniqueFacilitiesList = Array.from(new Set(rawFacilities.map(f => f.trim().toLowerCase()).filter(Boolean)));
     const sortedFacilityKey = uniqueFacilitiesList.slice().sort().join(',');
+    const featuredKey = wantsFeatured ? 'featured' : 'all';
+    const badgeKey = `${wantsWaterTank ? 'wt1' : 'wt0'}-${wantsWifiSpeedtest ? 'wf1' : 'wf0'}`;
 
-    const cacheKey = `properties:${district || 'all'}:${effectiveMin || 0}:${effectiveMax || 0}:${sortedFacilityKey || 'all'}:${targetOwner || 'all'}:${limitParam || 'all'}:${offsetParam || 0}`;
+    const cacheKey = `properties:${district || 'all'}:${effectiveMin || 0}:${effectiveMax || 0}:${sortedFacilityKey || 'all'}:${targetOwner || 'all'}:${featuredKey}:${badgeKey}:${limitParam || 'all'}:${offsetParam || 0}`;
 
     const cachedData = apiCache.get<PropertyRow[]>(cacheKey);
     if (cachedData) {
@@ -93,6 +112,15 @@ export function registerPropertyRoutes(router: Router): void {
         sql += ' AND p.price <= ?';
         params.push(parseInt(String(effectiveMax), 10));
       }
+      if (wantsFeatured) {
+        sql += ' AND p.is_featured = 1 AND (p.featured_until IS NULL OR p.featured_until > NOW())';
+      }
+      if (wantsWaterTank) {
+        sql += ' AND p.verified_water_tank = 1';
+      }
+      if (wantsWifiSpeedtest) {
+        sql += ' AND p.verified_wifi_speedtest = 1';
+      }
 
       if (uniqueFacilitiesList.length > 0) {
         const placeholders = uniqueFacilitiesList.map(() => '?').join(', ');
@@ -106,7 +134,7 @@ export function registerPropertyRoutes(router: Router): void {
         params.push(...uniqueFacilitiesList, uniqueFacilitiesList.length);
       }
 
-      sql += ' GROUP BY p.id';
+      sql += ' GROUP BY p.id ORDER BY (p.is_featured = 1 AND (p.featured_until IS NULL OR p.featured_until > NOW())) DESC, p.id DESC';
 
       if (limitParam && limitParam > 0) {
         sql += ' LIMIT ? OFFSET ?';
@@ -128,6 +156,40 @@ export function registerPropertyRoutes(router: Router): void {
     } catch (err: unknown) {
       console.error("Error in GET /api/properties:", err);
       res.status(500).json({ error: 'Internal Server Error', message: "Gagal mengambil properti." });
+    }
+  });
+
+  router.get('/properties/recommended', async (req: Request, res: Response) => {
+    try {
+      const latParam = req.query.lat ? parseFloat(String(req.query.lat)) : undefined;
+      const lngParam = req.query.lng ? parseFloat(String(req.query.lng)) : undefined;
+      const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : 10;
+      const userKey = String(req.query.userId || req.query.deviceToken || req.headers['x-device-token'] || '');
+
+      const [properties] = await pool.query<(PropertyRow & { facilitiesString?: string })[]>(`
+        SELECT p.*, GROUP_CONCAT(pf.facility SEPARATOR ',') as facilitiesString
+        FROM properties p
+        LEFT JOIN property_facilities pf ON p.id = pf.propertyId
+        GROUP BY p.id
+      `);
+
+      for (const prop of properties) {
+        prop.facilities = prop.facilitiesString ? prop.facilitiesString.split(',').filter(Boolean) : [];
+        delete prop.facilitiesString;
+      }
+
+      const normalized = properties.map(normalizePropertySummary);
+      const ranked = recommendationService.rankProperties(normalized, {
+        userKey: userKey || undefined,
+        targetLat: latParam,
+        targetLng: lngParam,
+        limit: limitParam > 0 ? limitParam : 10
+      });
+
+      res.json(ranked);
+    } catch (err: unknown) {
+      console.error("Error in GET /api/properties/recommended:", err);
+      res.status(500).json({ message: "Gagal mengambil rekomendasi properti." });
     }
   });
 
@@ -210,7 +272,7 @@ export function registerPropertyRoutes(router: Router): void {
     }
   );
 
-  router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
+  router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord', 'owner']), validateBody(propertyUpdateSchema), async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
     const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, occupiedRooms, image } = req.body;
     const authUser = req.user;
@@ -335,4 +397,73 @@ export function registerPropertyRoutes(router: Router): void {
       connection.release();
     }
   });
+
+  router.post(
+    '/properties/:id/feature',
+    authenticateToken,
+    requireRole(['admin', 'landlord', 'owner']),
+    validateBody(featurePropertySchema),
+    async (req: AuthenticatedRequest, res: Response) => {
+      const { id } = req.params;
+      const { isFeatured, durationDays, featuredUntil } = req.body;
+      const authUser = req.user;
+
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        const [rows] = await connection.query<PropertyRow[]>(
+          'SELECT id, name, ownerId, is_featured, featured_until FROM properties WHERE id = ? FOR UPDATE',
+          [id]
+        );
+        const property = rows[0];
+        if (!property) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Properti tidak ditemukan." });
+        }
+
+        if (authUser?.role !== 'admin' && property.ownerId !== authUser?.id) {
+          await connection.rollback();
+          return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+        }
+
+        let newFeaturedUntil: string | null = null;
+        const willBeFeatured = isFeatured !== false;
+
+        if (willBeFeatured) {
+          if (featuredUntil) {
+            newFeaturedUntil = new Date(String(featuredUntil)).toISOString().slice(0, 19).replace('T', ' ');
+          } else {
+            const days = durationDays && Number(durationDays) > 0 ? Number(durationDays) : 30;
+            const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+            newFeaturedUntil = expiry.toISOString().slice(0, 19).replace('T', ' ');
+          }
+        }
+
+        await connection.query(
+          'UPDATE properties SET is_featured = ?, featured_until = ? WHERE id = ?',
+          [willBeFeatured ? 1 : 0, newFeaturedUntil, id]
+        );
+
+        await connection.commit();
+        apiCache.invalidatePattern('properties');
+
+        return res.json({
+          success: true,
+          message: willBeFeatured ? "Status featured properti berhasil diaktifkan." : "Status featured properti dinonaktifkan.",
+          propertyId: id,
+          is_featured: willBeFeatured,
+          isFeatured: willBeFeatured,
+          featured_until: newFeaturedUntil,
+          featuredUntil: newFeaturedUntil
+        });
+      } catch (err: unknown) {
+        await connection.rollback();
+        console.error("Error setting property featured status:", err);
+        return res.status(500).json({ message: "Gagal memperbarui status featured properti." });
+      } finally {
+        connection.release();
+      }
+    }
+  );
 }

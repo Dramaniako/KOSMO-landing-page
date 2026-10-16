@@ -166,4 +166,42 @@ test('Property search and filter query logic', async (t) => {
 
     assert.equal(queryString, '?priceMin=1000000&priceMax=5000000&district=Badung&facility=Wifi&facility=AC');
   });
+
+  await t.test('SAW multi-criteria recommendation engine normalizes weights and adapts preferences with alpha = 0.7', async () => {
+    const {
+      normalizeWeights,
+      adaptUserWeights,
+      DEFAULT_RECOMMENDATION_WEIGHTS,
+      recommendationService
+    } = await import('../backend/services/recommendation.service');
+
+    const normalized = normalizeWeights(DEFAULT_RECOMMENDATION_WEIGHTS);
+    const sum = Object.values(normalized).reduce((acc, val) => acc + val, 0);
+    assert.ok(Math.abs(sum - 1.0) < 1e-6);
+
+    const adapted = adaptUserWeights(DEFAULT_RECOMMENDATION_WEIGHTS, { price: 0.5, facilities: 0.4 }, 0.7);
+    const adaptedSum = Object.values(adapted).reduce((acc, val) => acc + val, 0);
+    assert.ok(Math.abs(adaptedSum - 1.0) < 1e-6);
+
+    const ranked = recommendationService.rankProperties(
+      sampleProperties.map((p) => ({
+        ...p,
+        address: 'Jl. Pantai Batu Bolong, Bali',
+        image: 'https://example.com/kos.webp',
+        description: 'Premium Bali co-living',
+        ownerId: 'user-l1',
+        document: 'doc.pdf',
+        rating: 4.8,
+        totalRooms: 10,
+        occupiedRooms: 3,
+        latitude: '-8.6500',
+        longitude: '115.1300'
+      })),
+      { userKey: 'test-saw-user', targetLat: -8.65, targetLng: 115.13 }
+    );
+
+    assert.equal(ranked.length, 4);
+    assert.ok(ranked[0].suitabilityScore >= ranked[1].suitabilityScore);
+    assert.ok(ranked[0].suitabilityScore >= 0 && ranked[0].suitabilityScore <= 1);
+  });
 });

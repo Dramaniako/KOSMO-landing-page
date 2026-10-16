@@ -88,4 +88,34 @@ describe('ActiveRentalSection Component Suite', () => {
     expect(screen.getByText(/Anda belum memiliki sewa kos aktif/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Jelajahi Kos/i })).toBeInTheDocument();
   });
+
+  it('renders "Menjelang Jatuh Tempo" and "Bayar Sewa Bulan Berikutnya" button when daysRemaining <= 3', () => {
+    const nearDueRental = { ...mockActiveRentalWithRoom, daysRemaining: 2 };
+    const onRenewRental = vi.fn();
+
+    renderComponent({
+      activeRental: nearDueRental,
+      onRenewRental
+    });
+
+    expect(screen.getByTestId('near-due-urgency-banner')).toBeInTheDocument();
+    expect(screen.getAllByText(/Menjelang Jatuh Tempo/i).length).toBeGreaterThan(0);
+
+    const renewBtn = screen.getByTestId('renew-rental-urgent-btn');
+    expect(renewBtn).toBeInTheDocument();
+    expect(screen.getAllByText(/Bayar Sewa Bulan Berikutnya/i).length).toBeGreaterThan(0);
+
+    fireEvent.click(renewBtn);
+    expect(onRenewRental).toHaveBeenCalledWith(nearDueRental);
+  });
+
+  it('does NOT render urgency banner when daysRemaining > 3', () => {
+    const safeRental = { ...mockActiveRentalWithRoom, daysRemaining: 15 };
+    renderComponent({
+      activeRental: safeRental
+    });
+
+    expect(screen.queryByTestId('near-due-urgency-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('renew-rental-urgent-btn')).not.toBeInTheDocument();
+  });
 });

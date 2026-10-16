@@ -12,7 +12,14 @@ import {
   withdrawalSchema,
   reviewSchema,
   previewContractSchema,
-  signContractSchema
+  signContractSchema,
+  terminateRentalSchema,
+  propertyUpdateSchema,
+  reviewUpdateSchema,
+  verifyPasswordSchema,
+  processWithdrawalSchema,
+  rejectWithdrawalSchema,
+  createRentalSchema
 } from '../backend/middleware/validation';
 import { isUserProfileComplete } from '../backend/types/index';
 import type { Request, Response, NextFunction } from 'express';
@@ -474,5 +481,117 @@ test('Zod request body validation middleware & schemas', async (t) => {
       password: ''
     });
     assert.equal(validWithEmptyPassword.success, true);
+  });
+
+  await t.test('terminateRentalSchema requires password confirmation', () => {
+    const valid = terminateRentalSchema.safeParse({
+      password: 'mypassword123',
+      reason: 'Pindah kerja'
+    });
+    assert.equal(valid.success, true);
+
+    const missingPassword = terminateRentalSchema.safeParse({});
+    assert.equal(missingPassword.success, false);
+
+    const emptyPassword = terminateRentalSchema.safeParse({ password: '' });
+    assert.equal(emptyPassword.success, false);
+  });
+
+  await t.test('propertyUpdateSchema validates partial property update payloads', () => {
+    const validPartial = propertyUpdateSchema.safeParse({
+      name: 'Villa Baru',
+      price: 3500000,
+      facilities: ['Wifi', 'AC', 'Kolam']
+    });
+    assert.equal(validPartial.success, true);
+
+    const validFacilitiesOnly = propertyUpdateSchema.safeParse({
+      facilities: ['Wifi', 'Air', 'Gym']
+    });
+    assert.equal(validFacilitiesOnly.success, true);
+
+    const invalidPrice = propertyUpdateSchema.safeParse({
+      price: -500
+    });
+    assert.equal(invalidPrice.success, false);
+
+    const invalidRooms = propertyUpdateSchema.safeParse({
+      totalRooms: 0
+    });
+    assert.equal(invalidRooms.success, false);
+  });
+
+  await t.test('reviewUpdateSchema validates partial review updates', () => {
+    const validRating = reviewUpdateSchema.safeParse({ rating: 4 });
+    assert.equal(validRating.success, true);
+
+    const validComment = reviewUpdateSchema.safeParse({ comment: 'Sangat nyaman dan tenang' });
+    assert.equal(validComment.success, true);
+
+    const validBoth = reviewUpdateSchema.safeParse({ rating: 5, comment: 'Luar biasa!' });
+    assert.equal(validBoth.success, true);
+
+    const invalidRatingLow = reviewUpdateSchema.safeParse({ rating: 0 });
+    assert.equal(invalidRatingLow.success, false);
+
+    const invalidRatingHigh = reviewUpdateSchema.safeParse({ rating: 6 });
+    assert.equal(invalidRatingHigh.success, false);
+
+    const emptyBoth = reviewUpdateSchema.safeParse({});
+    assert.equal(emptyBoth.success, false);
+  });
+
+  await t.test('verifyPasswordSchema strictly requires non-empty password', () => {
+    const valid = verifyPasswordSchema.safeParse({ password: 'secretpassword' });
+    assert.equal(valid.success, true);
+
+    const validWithUserId = verifyPasswordSchema.safeParse({ password: 'secretpassword', userId: 'user-123' });
+    assert.equal(validWithUserId.success, true);
+
+    const missingPassword = verifyPasswordSchema.safeParse({});
+    assert.equal(missingPassword.success, false);
+
+    const emptyPassword = verifyPasswordSchema.safeParse({ password: '' });
+    assert.equal(emptyPassword.success, false);
+  });
+
+  await t.test('processWithdrawalSchema and rejectWithdrawalSchema validate status and reasons', () => {
+    const validProcess = processWithdrawalSchema.safeParse({ status: 'completed', referenceId: 'REF-001' });
+    assert.equal(validProcess.success, true);
+
+    const defaultProcess = processWithdrawalSchema.safeParse({});
+    assert.equal(defaultProcess.success, true);
+    if (defaultProcess.success) {
+      assert.equal(defaultProcess.data.status, 'completed');
+    }
+
+    const invalidProcessStatus = processWithdrawalSchema.safeParse({ status: 'rejected' });
+    assert.equal(invalidProcessStatus.success, false);
+
+    const validReject = rejectWithdrawalSchema.safeParse({ reason: 'Nomor rekening tidak valid' });
+    assert.equal(validReject.success, true);
+
+    const emptyRejectReason = rejectWithdrawalSchema.safeParse({ reason: '' });
+    assert.equal(emptyRejectReason.success, false);
+  });
+
+  await t.test('createRentalSchema validates booking creation parameters', () => {
+    const valid = createRentalSchema.safeParse({
+      propertyId: 'prop-101',
+      price: 2500000,
+      durationMonths: 3
+    });
+    assert.equal(valid.success, true);
+
+    const missingProp = createRentalSchema.safeParse({
+      price: 2500000
+    });
+    assert.equal(missingProp.success, false);
+
+    const invalidDuration = createRentalSchema.safeParse({
+      propertyId: 'prop-101',
+      durationMonths: 0
+    });
+    assert.equal(invalidDuration.success, false);
   });
 });

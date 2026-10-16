@@ -178,6 +178,20 @@ export class ContractService {
       signerUserAgent
     } = input;
 
+    const duration = Number(durationMonths) || 1;
+    const adminFee = 5000;
+    let rentalId: string;
+    let selectedRoom: RoomRow | undefined;
+    let contractData: RentalContractData;
+    let signedAtDate: Date;
+    let signedAtIso: string;
+    let rentalPrice: number;
+    let totalAmount: number;
+
+    // =========================================================================
+    // PHASE A: Database Transaction 1 (Validation, Row Locks & Pending Reservation)
+    // Row locks held strictly for validation and pending record creation (< 5ms)
+    // =========================================================================
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -224,7 +238,6 @@ export class ContractService {
       }
 
       // Guard 3: Discrete room selection & row lock
-      let selectedRoom: RoomRow | undefined;
       if (roomId && typeof roomId === 'string' && roomId.trim() !== '') {
         selectedRoom = await this.repo.findRoomById(roomId.trim(), propertyId, connection, true);
         if (!selectedRoom) {
@@ -248,26 +261,24 @@ export class ContractService {
         }
       }
 
-      let landlord = property.ownerId
+      const landlord = property.ownerId
         ? await this.repo.findUserById(property.ownerId, connection)
         : undefined;
 
-      const signedAtDate = new Date();
-      const signedAtIso = signedAtDate.toISOString();
-      const duration = Number(durationMonths) || 1;
-      const rentalPrice =
+      signedAtDate = new Date();
+      signedAtIso = signedAtDate.toISOString();
+      rentalPrice =
         selectedRoom && typeof selectedRoom.price === 'number' && selectedRoom.price > 0
           ? Number(selectedRoom.price)
           : Number(property.price) || 0;
-      const adminFee = 5000;
-      const totalAmount = rentalPrice * duration + adminFee;
+      totalAmount = rentalPrice * duration + adminFee;
       const startDateStr = startDate || signedAtIso.split('T')[0];
-      const rentalId =
+      rentalId =
         customRentalId && typeof customRentalId === 'string' && customRentalId.trim() !== ''
           ? customRentalId.trim()
           : generateId('rent');
 
-      const contractData: RentalContractData = {
+      contractData = {
         rentalId,
         roomId: selectedRoom ? selectedRoom.id : undefined,
         roomNumber: selectedRoom ? selectedRoom.roomNumber : undefined,
@@ -304,55 +315,109 @@ export class ContractService {
         }
       };
 
-      const uploadResult = await generateAndUploadContract(contractData);
-      const contractUrl =
-        uploadResult.cloudinaryUrl || `/uploads/contract_${sanitizeRentalId(rentalId)}.pdf`;
-      const contractHash = uploadResult.contractHash;
-
-      await this.repo.insertContractRental(
-        {
-          rentalId,
-          tenantId: authUser.id,
+      // Fast pending insert in Phase A (< 5ms)
+      await connection.query(
+        `INSERT INTO rentals (
+          id,
+          tenantId,
           propertyId,
-          roomId: selectedRoom ? selectedRoom.id : null,
-          propertyName: property.name,
+          roomId,
+          propertyName,
+          price,
+          startDate,
+          status,
+          signer_ip,
+          signer_user_agent,
+          tenant_nik_passport,
+          tenant_signature_data,
+          admin_fee_amount,
+          duration_months
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+        [
+          rentalId,
+          authUser.id,
+          propertyId,
+          selectedRoom ? selectedRoom.id : null,
+          property.name,
           rentalPrice,
           startDateStr,
-          contractUrl,
-          contractHash,
-          signedAtDate,
           signerIp,
           signerUserAgent,
-          tenantNikPassport: tenantNikPassport || tenant.identity_number || '-',
+          tenantNikPassport || tenant.identity_number || '-',
           signatureBase64,
           adminFee,
           duration
-        },
-        connection
+        ]
       );
 
+      // Commit Phase A: releases all row locks (users, properties, rooms, rentals)
       await connection.commit();
-      apiCache.invalidatePattern('properties');
-      apiCache.invalidatePattern('rentals');
-
-      return {
-        success: true,
-        message: 'Kontrak digital berhasil ditandatangani. Silakan selesaikan pembayaran.',
-        rentalId,
-        roomId: selectedRoom ? selectedRoom.id : null,
-        roomNumber: selectedRoom ? selectedRoom.roomNumber : null,
-        contractUrl,
-        contractHash,
-        adminFee,
-        totalAmount,
-        signedAt: signedAtIso
-      };
     } catch (err: unknown) {
       await connection.rollback();
       throw err;
     } finally {
       connection.release();
     }
+
+    // =========================================================================
+    // PHASE B: Network Call & PDF Streaming (Outside Database Transaction)
+    // Zero DB locks or connections held during PDF generation and Cloudinary upload
+    // =========================================================================
+    let contractUrl: string;
+    let contractHash: string;
+
+    try {
+      const uploadResult = await generateAndUploadContract(contractData);
+      contractUrl =
+        uploadResult.cloudinaryUrl || `/uploads/contract_${sanitizeRentalId(rentalId)}.pdf`;
+      contractHash = uploadResult.contractHash;
+    } catch (phaseBErr) {
+      // Compensating action: clean up pending rental if PDF generation crashes fatally
+      try {
+        await pool.query("DELETE FROM rentals WHERE id = ? AND status = 'pending'", [rentalId]);
+      } catch (cleanupErr) {
+        console.error(`[ContractService] Failed to clean up pending rental ${rentalId} after Phase B failure:`, cleanupErr);
+      }
+      throw phaseBErr;
+    }
+
+    // =========================================================================
+    // PHASE C: Finalize DB Record (Commit Contract URL, Hash & Timestamp)
+    // =========================================================================
+    try {
+      await pool.query(
+        `UPDATE rentals 
+         SET contract_url = ?, 
+             contract_hash = ?, 
+             contract_signed_at = ?,
+             document = COALESCE(?, document)
+         WHERE id = ?`,
+        [contractUrl, contractHash, signedAtDate, contractUrl, rentalId]
+      );
+    } catch (phaseCErr) {
+      try {
+        await pool.query("DELETE FROM rentals WHERE id = ? AND status = 'pending'", [rentalId]);
+      } catch (cleanupErr) {
+        console.error(`[ContractService] Failed to clean up pending rental ${rentalId} after Phase C failure:`, cleanupErr);
+      }
+      throw phaseCErr;
+    }
+
+    apiCache.invalidatePattern('properties');
+    apiCache.invalidatePattern('rentals');
+
+    return {
+      success: true,
+      message: 'Kontrak digital berhasil ditandatangani. Silakan selesaikan pembayaran.',
+      rentalId,
+      roomId: selectedRoom ? selectedRoom.id : null,
+      roomNumber: selectedRoom ? selectedRoom.roomNumber : null,
+      contractUrl,
+      contractHash,
+      adminFee,
+      totalAmount,
+      signedAt: signedAtIso
+    };
   }
 
   async getContractPdf(rentalId: string, authUser: JWTPayload) {

@@ -1,125 +1,133 @@
-# Project: GitHub Issues & Pull Requests Triage, Defect Resolution & Integration
+# Project: KOSMO Bali Co-Living Marketplace v2.0.0
 
 ## Architecture
-- **Backend Architecture**: Node.js, Express, TypeScript (`backend/`). Domain routers in `backend/routes/` mounted through central router (`backend/routes/index.ts`). MySQL connection pooling via `mysql2/promise` in `backend/db.ts`. Standalone Node server (`backend/server.ts`) and Vercel serverless bundle (`api/index.js`).
-- **Database Schema**: MySQL/InnoDB with ACID transactions. Core domain tables: `properties`, `rooms`, `property_photos`, `rentals`, `users`, `property_facilities`, `reviews`, `withdrawals`.
-- **Frontend Architecture**: React 19, TypeScript, Vite, Tailwind CSS, Lucide React (`frontend/src/`). Central pages in `pages/`, shared components in `components/`, utilities in `utils/`.
-- **Security & Caching**: Ephemeral random bytes fallback for JWT secrets, password verification gates (`bcrypt`), in-memory `apiCache` with pattern invalidation, HTTP 304 conditional caching (`Last-Modified`), client-side TTL caching and `AbortController`.
-- **Verification Pipeline**: 5-gate deterministic pipeline enforced by `./scripts/verify.sh` / `./scripts/verify.ps1`:
-  1. Backend TypeScript type-check (`npx tsc --noEmit`)
-  2. Frontend build (`npm --prefix frontend run build`) & Backend bundle (`npm run build:backend`)
-  3. Backend test suite (`npm test`)
-  4. Frontend Vitest suite (`npm --prefix frontend test -- --run`)
-  5. Playwright E2E browser suite (`npx playwright test`)
+- **Backend Architecture:** 3-tier Router -> Service -> Repository pattern in `backend/routes/`, `backend/services/`, `backend/repositories/`, `backend/router.ts`, running on Node.js / Express with TypeScript (`tsx`), Vercel serverless entry point at `api/index.js`.
+- **Database:** TiDB Serverless Cloud (MySQL dialect via `mysql2/promise` connection pooling with SSL in `backend/db.ts`).
+  - Domain tables: `users`, `properties`, `property_facilities`, `rooms`, `property_photos`, `reviews`, `withdrawals`, `visitor_tracking`, `rentals`.
+- **Frontend Architecture:** React 19, TypeScript, Vite 5, Tailwind CSS, Lucide React, Leaflet OpenStreetMap in `frontend/src/`.
+- **Authentication & Security:** Stateless JWT authentication (`Authorization: Bearer <token>` and `token=<jwt>` HttpOnly cookie), Bcrypt 10 rounds, password confirmation on destructive endpoints, OWASP strict Zod validation.
+- **Media & Storage:** Cloudinary CDN streaming, PDFKit in-memory buffer generation with zero local disk writes.
+- **Verification Infrastructure:** 5-gate deterministic pipeline (`scripts/verify.sh` & `scripts/verify.ps1`).
+
+---
 
 ## Feature Inventory
-| # | Feature / Item | Target Scope & Description | Milestone | Source |
-|---|---|---|---|---|
-| 1 | PR #75: JWT Secret Fallback | Replace hardcoded production fallback secret with cryptographically secure `randomBytes(32).toString('hex')` in `backend/middleware/auth.ts` and rebuild `api/index.js` | M1 | Survey 3 |
-| 2 | PR #76: Admin Password Gate Audit | Audit admin user deletion password verification gate. Verify superseded in main by commit `8905d98` and modular `backend/routes/users.routes.ts`. Mark REJECT/CLOSE | M1 | Survey 3 |
-| 3 | PR #77: property_facilities Index | Add index statement for `property_facilities.propertyId` to `backend/db.ts:ensureIndexes()` and update `.jules/bolt.md` | M1 | Survey 3 |
-| 4 | PR #91: formatRupiah Caching (Winner) | Merge optimal PR #91 replacing expensive `.toLocaleString` with cached `formatRupiah` across `ActiveRentalSection.tsx`, `PendingPaymentModal.tsx`, `RentalHistorySection.tsx` | M1 | Survey 3 |
-| 5 | PRs #92–#95: Redundant PRs Discard | Document technical disqualifications for PR #92 (scope creep), #93 (duplicate), #94 (incomplete), #95 (incomplete) | M1 | Survey 3 |
-| 6 | Issue #78: Concurrent Queries in Rooms Route | In `backend/routes/rooms.routes.ts:103-134`, run independent room and photo SQL queries concurrently using `Promise.all` | M2 | Survey 1 |
-| 7 | Issue #79: Explicit Column Projections | Replace 4 occurrences of `SELECT * FROM property_photos` in `backend/routes/rooms.routes.ts` and `backend/routes/photos.routes.ts` with explicit `PropertyPhotoRow` columns | M2 | Survey 1 |
-| 8 | Issue #80: In-Memory Single-Room Caching | Wire `GET /api/rooms/:roomId` to `apiCache` (TTL 30s) and add `apiCache.invalidatePattern('rooms')` on room mutations | M2 | Survey 1 |
-| 9 | Issue #81: Bulk UPDATE for Photo Reordering | In `backend/routes/photos.routes.ts:315-332`, collapse sequential loop of individual UPDATE queries into a single bulk `CASE WHEN` UPDATE | M2 | Survey 1 |
-| 10 | Issue #82: Safe Server-Side Photo Pagination | In `backend/routes/photos.routes.ts:69-125`, add optional sanitized `limit`/`offset` pagination params & headers while preserving array format `PropertyPhoto[]` by default | M2 | Survey 1 |
-| 11 | Issue #87: Photos updatedAt & HTTP 304 Caching | Add `updatedAt` column to `property_photos` in `backend/db.ts` and implement HTTP 304 conditional caching (`Last-Modified`/`If-Modified-Since`) in `backend/routes/photos.routes.ts` | M2 | Survey 2 |
-| 12 | Issue #88: Multi-Row Batch Photo INSERT | In `backend/routes/photos.routes.ts:216-242`, replace sequential single-row INSERT loop with a single multi-row parameterized `INSERT INTO property_photos` query | M2 | Survey 2 |
-| 13 | Issue #90: Photo Composite Index & Clean SQL Filter | Add composite indexes `idx_photos_prop_cat` and `idx_photos_prop_room` in `backend/db.ts`; clean `roomId IS NULL` lookup in `backend/routes/photos.routes.ts` | M2 | Survey 2 |
-| 14 | Issue #83: BookingModal Client-Side Cache | In `frontend/src/components/BookingModal.tsx:74-124`, add module-level cache (`Map`) with 60s TTL and initialize state with preloaded listing photos/rooms | M3 | Survey 1 |
-| 15 | Issue #84: Gallery Image Modern Loading Attributes | In `PropertyPhotoGallery.tsx`, add `loading="eager"`, `decoding="async"`, `fetchPriority="high"` on hero image, and `loading="lazy"`, `decoding="async"` on thumbnails/lightbox | M3 | Survey 1 |
-| 16 | Issue #85: Cloudinary Responsive Thumbnail Transforms | Create `getCloudinaryThumbUrl` helper in `frontend/src/utils/cloudinary.ts` and integrate into thumbnail filmstrip in `PropertyPhotoGallery.tsx` | M3 | Survey 2 |
-| 17 | Issue #86: Active Rental Fetch TTL Cache & Abort | In `frontend/src/pages/LandingPage.tsx:206-238`, wrap active rental check in 60s TTL cache with `AbortController` to stop network spam and button disability jitter | M3 | Survey 2 |
-| 18 | Issue #89: RoomSelectionGrid Memo & Windowing | Extract memoized `RoomCardItem` and implement progressive windowing/pagination for large room lists in `RoomSelectionGrid.tsx` | M3 | Survey 2 |
-| 19 | Milestone 4: Programmatic Verification & Tests | Write unit tests for new helpers/endpoints (`tests/triage_fixes.test.ts`, `frontend/src/utils/__tests__/cloudinary.test.ts`), verify all test suites, and execute Forensic Integrity Audit | M4 | Mandate |
-| 20 | Milestone 5: GitHub Resolution & Sync Report | Generate `GITHUB_TRIAGE_REPORT.md` documenting disposition of all 13 issues and 8 PRs with copy-pasteable remote sync commands | M5 | Mandate |
-| 21 | Milestone 6: Professional Error Architecture | Implement centralized `AppError` typed hierarchy, RFC 7807 response schema, request correlation tracing (`X-Request-Id`), driver translation (Zod, MySQL, Multer, JWT), and self-healing frontend `ErrorBoundary` | M6 | Mandate |
-| 22 | Milestone 6: Curator Agent Certification | Build autonomous Error Handling Curator Agent (`scripts/curator_error_handling.ts`, `tests/curator_error_handling.test.ts`) rating error architecture across 5 dimensions (Score 10.0/10) | M6 | Mandate |
-| 23 | Milestone 7: 3-Tier Layered Architecture Decoupling | Extract data access into `backend/repositories/` (`contracts.repository.ts`, `rentals.repository.ts`) and business services into `backend/services/` (`contract.service.ts`, `rental.service.ts`) | M7 | Core Refactor |
-| 24 | Milestone 7: RFC 6265 HttpOnly Cookie Auth & Logout | Implement `parseCookies`, dual token parsing, cookie credentials inclusion, and `POST /api/auth/logout` | M7 | Core Refactor |
-| 25 | Milestone 7: Production Docker & Compose Orchestration | Multi-stage backend `Dockerfile`, frontend Nginx container `frontend/Dockerfile`, and `docker-compose.yml` service mesh | M7 | Core Refactor |
-| 26 | Milestone 7: Test Warmup & Performance Suite Stabilization | Add JSDOM warmup renders and JIT warmup loops in `perf_components.test.tsx` and auth cookie tests | M7 | Core Refactor |
+| # | Feature | Description | Milestone | Source |
+|---|---------|-------------|-----------|--------|
+| 1 | Single Active Tenancy Guard in Payment Token | Row-level locking (`SELECT ... FOR UPDATE`) in `POST /api/payment/token` with 409 Conflict check | M1 | ORIGINAL_REQUEST §R1.1 |
+| 2 | Pessimistic Locking on Room Booking & Signing | Row-level locks in `POST /api/rentals` and `POST /api/rentals/contract/sign` | M1 | ORIGINAL_REQUEST §R1.1 |
+| 3 | Decouple CDN Upload from DB Transaction | Move Cloudinary upload outside open database transaction in `contract.service.ts` | M1 | ORIGINAL_REQUEST §R1.1 |
+| 4 | Direct SQL Aggregations for Landlord Analytics | Landlord dashboard metrics & revenue computed via direct SQL queries | M1 | ORIGINAL_REQUEST §R1.2 |
+| 5 | Atomic Withdrawal Refund Rollback | Rejection of landlord withdrawal atomically restores user balance in transaction | M1 | ORIGINAL_REQUEST §R1.2 |
+| 6 | Non-Destructive Migrations | Schema updates via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` | M1 | ORIGINAL_REQUEST §R1.3 |
+| 7 | Integration Test Isolation & Mock Teardown | `tests/db_integration.test.ts` uses `test-*` prefixes and atomic cleanup hooks | M1 | ORIGINAL_REQUEST §R1.3 |
+| 8 | Digital E-Contract Audit Trail | Complete audit trail in `rentals` (`contract_url`, `contract_hash` SHA-256, timestamps, IP, UA, NIK, signature, admin fee) | M2 | ORIGINAL_REQUEST §R2.1 |
+| 9 | Zero-Disk Cloudinary PDF Streaming | PDFKit buffers streamed directly to Cloudinary (`kosmo/contracts/`) with zero local disk writes | M2 | ORIGINAL_REQUEST §R2.2 |
+| 10 | Legal Clauses & Inclusions | Bilingual terms citing KUHPerdata 1320, UU ITE, Denpasar/Badung jurisdiction, WiFi, water, smart lock, cleaning, 200 kWh electricity | M2 | ORIGINAL_REQUEST §R2.3 |
+| 11 | In-Memory Sharp/WebP Media Pipeline | Dual WebP variants (Thumbnail 400x300, Hero 1200x800 @ 80%) without disk storage | M2 | ORIGINAL_REQUEST §R5.1 |
+| 12 | OWASP Strict Zod Mutation Validation | Zod schema validation across all mutation endpoints (`rentals`, `withdrawals`, `properties`, `payment`) | M2 | ORIGINAL_REQUEST §R5.2 |
+| 13 | API Latency Optimization (< 200ms) | Optimization and caching for `GET /api/rentals` to eliminate latency spikes | M2 | ORIGINAL_REQUEST §R5.2 |
+| 14 | Manual Lease Renewal Lifecycle | `daysRemaining` due date tracking, status transition to "Menjelang Jatuh Tempo", "Bayar Sewa Bulan Berikutnya" button | M3 | ORIGINAL_REQUEST §R3.1 |
+| 15 | Renewal Token Endpoint & Midtrans Handler | `POST /api/rentals/:id/renew-token` and Midtrans `RENEW-*` order handling without 409 conflict | M3 | ORIGINAL_REQUEST §R3.2 |
+| 16 | 3-Tier Monetization Implementation | Flat Rp5,000 tenant admin fee, 3% landlord platform commission deduction, Featured Listing slots | M3 | ORIGINAL_REQUEST §R3.3 |
+| 17 | Hyperlocal Micro-PMS Badges | "Tandon Air Terjamin" and "Speedtest Wi-Fi Terverifikasi" badges on `KosCard.tsx` and property details | M3 | ORIGINAL_REQUEST §R4.1 |
+| 18 | Landlord Billing Reminder Utilities | Landlord tenant management reminders with WhatsApp link and countdown badge | M3 | ORIGINAL_REQUEST §R4.1 |
+| 19 | Multi-Criteria Adaptive Recommendation Engine | SAW normalized suitability scoring $R_i = \sum W_j S_{ij}$ balancing cost vs. benefit | M4 | ORIGINAL_REQUEST §R4.2 |
+| 20 | Interaction Telemetry & Dynamic Preference Adaptation | 7-event telemetry and weight updating $P_j' = \alpha P_j + (1 - \alpha) B_j$ | M4 | ORIGINAL_REQUEST §R4.2 |
+| 21 | 100% E2E Test Suite Pass (Tiers 1-4) | Comprehensive opaque-box test suite passing across all user scenarios | M5 | ORIGINAL_REQUEST §R6 |
+| 22 | Tier 5 Adversarial Coverage Hardening | White-box challenger gap analysis and stress tests | M5 | ORIGINAL_REQUEST §R6 |
+| 23 | Deterministic 5-Gate Final Verification | Gates 1-5 passing at 100% exit code 0 | M5 | ORIGINAL_REQUEST §R6 |
+
+---
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | PR Evaluation & Branch Integration | Merge PRs #75, #77, #91; document discard for #76, #92–#95; rebuild backend bundle | Survey Complete | DONE |
-| M2 | Backend & Database Defect Resolutions | Fix issues #78, #79, #80, #81, #82, #87, #88, #90 in `backend/routes/` and `backend/db.ts` | M1 | DONE |
-| M3 | Frontend Performance & Virtualization | Fix issues #83, #84, #85, #86, #89 in `frontend/src/` components and utilities | M1 | DONE |
-| M4 | Verification, Automated Tests & Forensic Audit | Write automated tests in `tests/` and frontend test suite; run full verify pipeline; run Forensic Auditor | M2, M3 | DONE |
-| M5 | GitHub Resolution & Remote Sync Report | Generate comprehensive audit markdown report with copy-pasteable closure/merge commands | M4 | DONE |
-| M6 | Enterprise Error Handling & Curator Audit | Centralized AppError architecture, RFC 7807 schemas, ErrorBoundary self-healing, Curator Agent rating | M4 | DONE |
-| M7 | Core Architecture, Containerization & Auth Hardening | Repository-Service pattern, Docker Compose, HttpOnly cookie sessions, and JSDOM warmup tests | M6 | DONE |
+| M1 | Database Concurrency & Storage Integrity | Concurrency locking in `payment.routes.ts`, Cloudinary decoupling in `contract.service.ts`, non-destructive migrations in `db.ts`, test isolation in `tests/db_integration.test.ts` | None | DONE (Gate passed, 10/10 suites pass) |
+| M2 | Digital E-Contract & Media/OWASP Hardening | Audit trail completeness in `rentals.repository.ts`, zero-disk Cloudinary streaming (`kosmo/contracts/`), legal clauses, Sharp/WebP image pipeline, Zod validation on mutation endpoints, latency optimization | M1 | DONE (Gate passed, 357 backend tests, 65 E2E tests, clean forensic audit) |
+| M3 | Lease Renewal Engine, Monetization & Micro-PMS | `POST /api/rentals/:id/renew-token`, Midtrans `RENEW-*` webhook settlement, 3% platform commission, Featured Listing slots, Micro-PMS badges, and UI action buttons | M1 | PLANNED |
+| M4 | Adaptive Recommendation Engine & Telemetry | Simple Additive Weighting (SAW) service, interaction tracking endpoint, dynamic preference updating, recommended properties API | M1, M3 | PLANNED |
+| M5 | E2E Test Suite Pass & Adversarial Hardening | Phase 1: Pass 100% E2E Test Suite (Tiers 1-4) + stabilize test assertions; Phase 2: Tier 5 Adversarial Coverage Hardening; Phase 3: Final 5-Gate Deterministic Verification | M2, M3, M4, E2E-Track | PLANNED |
+
+*Note: In parallel with M1–M4, the **E2E Testing Track** designs and validates the comprehensive test suite (Tiers 1–4) and publishes `TEST_READY.md`.*
+
+---
 
 ## Interface Contracts
 
-### Backend Auth Middleware (`backend/middleware/auth.ts`)
-- `getJwtSecret(): string`: If `JWT_SECRET` is unset in production, logs a warning and generates an ephemeral secret via `process.env.JWT_FALLBACK_SECRET || randomBytes(32).toString('hex')`.
+### 1. Payment Token & Renewal (`backend/routes/payment.routes.ts` & `backend/routes/rentals.routes.ts`)
+- `POST /api/payment/token`
+  - Input: `{ propertyId: string, roomId?: string, durationMonths: number, customRentalId?: string }`
+  - Headers: `Authorization: Bearer <token>`
+  - Concurrency: `pool.getConnection()`, `beginTransaction()`, `SELECT ... FOR UPDATE` on `properties`, `rooms`, `rentals`.
+  - Tenancy Check: If tenant has active rental and `customRentalId` does not match, return `409 Conflict`.
+  - Output: `{ token: string, redirect_url: string, orderId: string, rentalId: string, grossAmount: number }`
+- `POST /api/rentals/:id/renew-token`
+  - Input: `{ months?: number }` (default: 1)
+  - Headers: `Authorization: Bearer <token>`
+  - Auth: Must be rental tenant or admin.
+  - State Check: Rental must be `status === 'active'`.
+  - Order ID format: `RENEW-${rental.id}-${monthYear}-${timestamp}`
+  - Output: `{ token: string, redirect_url: string, orderId: string, rentalId: string, grossAmount: number }`
 
-### Backend Photos API (`backend/routes/photos.routes.ts`)
-- `GET /api/properties/:id/photos?category=&roomId=&limit=&offset=`:
-  - Returns `PropertyPhoto[]` by default.
-  - Sets HTTP headers `Last-Modified` and handles `If-Modified-Since` by returning `304 Not Modified` if unchanged.
-  - If `limit` is passed, safely paginates results and sets headers `X-Total-Count`, `X-Page-Limit`, `X-Page-Offset`.
-- `POST /api/properties/:id/photos`:
-  - Inserts up to 10 photos in a single atomic multi-row `INSERT INTO property_photos` statement.
-- `PUT /api/properties/:id/photos/reorder`:
-  - Updates photo order indices using a single bulk `CASE id WHEN ? THEN ? ... END` statement.
+### 2. Midtrans Webhook Handler (`backend/routes/payment.routes.ts:settleRentalPayment`)
+- Webhook Payload: Midtrans notification with `order_id`, `transaction_status`, `signature_key`, etc.
+- Signature: SHA-512 verification (`order_id + status_code + gross_amount + server_key`).
+- Routing:
+  - Standard order (`rent-...`): Settle initial booking, increment occupied rooms, credit landlord net rent (`gross - 3%`).
+  - Renewal order (`RENEW-...`): Extract base rental ID, advance `duration_months += 1`, credit landlord net rent (`gross - 3%`), do NOT increment occupied rooms.
 
-### Backend Rooms API (`backend/routes/rooms.routes.ts`)
-- `GET /api/properties/:id/rooms`: Queries rooms and room photos concurrently via `Promise.all`.
-- `GET /api/rooms/:roomId`: Uses `apiCache` with 30s TTL, invalidated via `apiCache.invalidatePattern('rooms')`.
+### 3. Digital Contract Audit & Streaming (`backend/services/contract.service.ts`)
+- `signContract(rentalId, tenantData, clientInfo)`
+  - Input: `{ nikPassport: string, signatureData: string }`, Client: `{ ip: string, userAgent: string }`
+  - Output: `{ success: true, contractUrl: string, contractHash: string, signedAt: string }`
+  - Audit Trail Fields: `contract_url`, `contract_hash`, `contract_signed_at`, `signer_ip`, `signer_user_agent`, `tenant_nik_passport`, `tenant_signature_data`, `admin_fee_amount`.
+  - Decoupled Streaming: Generates buffer and streams to Cloudinary outside DB transaction.
 
-### Frontend Utilities (`frontend/src/utils/cloudinary.ts`)
-- `getCloudinaryThumbUrl(url: string, width?: number, height?: number): string`: Injects Cloudinary on-the-fly transformations (`w_{width},h_{height},c_fill,q_auto,f_auto`) into valid Cloudinary asset URLs.
+### 4. Recommendation Engine (`backend/services/recommendation.service.ts`)
+- `POST /api/tracking/interaction`
+  - Input: `{ propertyId: string, interactionType: 'view' | 'like' | 'bookmark' | 'chat' | 'booking' | 'rating' | 'filter', metadata?: Record<string, unknown> }`
+  - Behavior: Updates dynamic weights $P_j' = \alpha P_j + (1 - \alpha) B_j$.
+- `GET /api/properties/recommended`
+  - Query: `?lat=&lng=&limit=10`
+  - Output: `PropertySummary[]` with `suitabilityScore: number` sorted descending.
 
-### Centralized Error Architecture (`backend/errors/index.ts`, `backend/middleware/errorHandler.ts`)
-- `AppError`: Base application error class (`statusCode`, `code`, `isOperational`, `details`, `timestamp`).
-- `normalizeError(err: unknown)`: Translates Zod, Multer, JWT, BodyParser, and MySQL driver exceptions into typed operational `AppError` instances.
-- `errorHandler`: Express 4-argument centralized middleware providing RFC 7807 responses, logging with `[API status]`, `res.headersSent` streaming safety, and production credential sanitization.
-- `requestIdMiddleware`: Sanitizes incoming correlation IDs against CRLF injection, generating unique `req_<uuid>` and injecting `X-Request-Id` response header.
-- `notFoundHandler`: Intercepts unmapped API routes, returning JSON 404 with `code: 'ROUTE_NOT_FOUND'`.
-- `AppErrorBoundary`: Mounts in `frontend/src/App.tsx` and binds with `LanguageContext` (`locale={language}`), protecting the full client router from uncaught UI crashes.
-- `scripts/curator_error_handling.ts`: Autonomous curator evaluating 5 dimensions with zero hardcoded flags, asserting score > 9.0/10.0 (achieved: **10.00/10.0**).
+---
 
 ## Code Layout
-- `backend/errors/index.ts`: Centralized `AppError` typed hierarchy & `ErrorCode` constants.
-- `backend/repositories/contracts.repository.ts`: Data persistence for digital contracts.
-- `backend/repositories/rentals.repository.ts`: Data persistence for rental transactions and room state.
-- `backend/services/contract.service.ts`: Business domain logic and PDF contract orchestration.
-- `backend/services/rental.service.ts`: Rental workflow management, active tenancy checks, and payments.
-- `backend/routes/contracts.routes.ts`: Lease generation, PDF previews, digital signing.
-- `backend/routes/rentals.routes.ts`: Tenancy management, termination, payments.
-- `backend/routes/photos.routes.ts`: Property and room photo gallery endpoints.
-- `backend/routes/rooms.routes.ts`: Discrete room endpoints and caching.
-- `backend/middleware/auth.ts`: Authentication middleware, cookie parsing & JWT secret handling.
-- `backend/middleware/errorHandler.ts`: Express centralized error handler & driver normalizer.
-- `backend/middleware/notFoundHandler.ts`: 404 JSON handler for unmapped `/api` routes.
-- `backend/middleware/requestId.ts`: Request correlation ID generation and propagation.
-- `backend/utils/asyncHandler.ts`: Higher-order wrapper routing async exceptions to `next(err)`.
-- `backend/utils/processSafety.ts`: Process safety net for `uncaughtException` & `unhandledRejection`.
-- `backend/db.ts`: Database connection, DDL, migrations, index definitions (`ensureIndexes`).
-- `Dockerfile`: Production backend Node.js Alpine container definition.
-- `docker-compose.yml`: Multi-container orchestration (Backend + Frontend Nginx + MySQL).
-- `frontend/Dockerfile`: Production frontend multi-stage Nginx container.
-- `frontend/nginx.conf`: Nginx SPA reverse proxy and caching rules.
-- `frontend/src/components/ErrorBoundary.tsx`: React ErrorBoundary with reset recovery and diagnostics.
-- `frontend/src/context/ErrorContext.tsx`: Application-wide async error toast notification provider.
-- `frontend/src/services/apiClient.ts`: Typed `ApiError` parser and `requestWithRetry` backoff.
-- `frontend/src/utils/cloudinary.ts`: Cloudinary thumbnail transformation helper.
-- `frontend/src/utils/format.ts`: Central currency and date formatting (`formatRupiah`).
-- `frontend/src/pages/LandingPage.tsx`: Property detail open handler & active rental status check.
-- `frontend/src/components/BookingModal.tsx`: Booking modal lifecycle & client data cache.
-- `frontend/src/components/BookingModal/components/PropertyPhotoGallery.tsx`: Gallery hero, filmstrip thumbnails, lightbox.
-- `frontend/src/components/BookingModal/components/RoomSelectionGrid.tsx`: Memoized room card items and windowed rendering.
-- `frontend/src/pages/TenantDashboard/components/ActiveRentalSection.tsx`: Formatted rental prices.
-- `frontend/src/pages/TenantDashboard/components/PendingPaymentModal.tsx`: Formatted breakdown prices.
-- `frontend/src/pages/TenantDashboard/components/RentalHistorySection.tsx`: Formatted history prices.
-- `scripts/curator_error_handling.ts`: Autonomous Error Handling Curator Agent rating engine.
-- `tests/error_handling.test.ts`: Automated backend error architecture test suite.
-- `tests/curator_error_handling.test.ts`: Automated curator agent score verification test.
-- `frontend/src/components/__tests__/ErrorHandlingCuratorAudit.test.tsx`: Vitest frontend error resilience suite.
-- `tests/triage_fixes.test.ts`: Automated tests for triage fixes and PR integrations.
-- `api/index.js`: Compiled backend serverless bundle.
+```
+backend/
+├── db.ts                          # TiDB connection pool, non-destructive schema migrations
+├── router.ts                      # Top-level API router
+├── middleware/
+│   ├── auth.ts                    # JWT authentication & role-based access control
+│   └── validation.ts              # Strict Zod request body & query validation schemas
+├── routes/
+│   ├── auth.routes.ts             # Auth endpoints, verify-password
+│   ├── properties.routes.ts       # Property listings, featured filtering, recommended
+│   ├── rentals.routes.ts          # Rental management, renewal token
+│   ├── payment.routes.ts          # Payment token, Midtrans webhook, settlement
+│   ├── landlord.routes.ts         # Landlord metrics, direct SQL aggregations, withdrawals
+│   └── photos.routes.ts           # Media upload, Sharp WebP processing, Cloudinary
+├── services/
+│   ├── contract.service.ts        # Contract signing, audit trail, decoupled streaming
+│   ├── contract.ts                # PDFKit in-memory buffer generation, bilingual clauses
+│   ├── rental.service.ts          # Rental lifecycle, due date schedules, booking
+│   └── recommendation.service.ts  # SAW multi-criteria scoring, interaction adaptation
+├── repositories/
+│   ├── contracts.repository.ts    # Contract DB operations
+│   ├── rentals.repository.ts      # Rental DB queries & state mutations
+│   └── properties.repository.ts   # Property DB queries
+└── uploads/                       # ZERO RUNTIME DISK WRITES (in-memory streaming only)
+
+frontend/src/
+├── components/
+│   ├── KosCard.tsx                # Property card with badges (Water Tank, Wi-Fi, Featured)
+│   ├── BookingModal.tsx           # Booking & contract modal
+│   └── ContractSigningView.tsx    # KYC & HTML5 canvas signature
+├── pages/
+│   ├── TenantDashboard/           # Tenant active lease, "Bayar Sewa Bulan Berikutnya"
+│   ├── LandlordDashboard/         # Landlord occupancy analytics, billing reminders
+│   └── LandingPage.tsx            # Search, filter, recommended properties
+└── types/                         # TypeScript domain contracts
+```

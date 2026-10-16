@@ -9,6 +9,7 @@ import {
   loginSchema,
   registerSchema,
   updateProfileSchema,
+  verifyPasswordSchema,
   validateBody
 } from '../middleware/validation';
 import type { UserRole, IdentityType } from '../types/index';
@@ -416,6 +417,7 @@ export function registerAuthRoutes(router: Router): void {
     '/auth/verify-password',
     authLimiter,
     authenticateToken,
+    validateBody(verifyPasswordSchema),
     async (req: AuthenticatedRequest, res: Response) => {
       const { password, userId } = req.body;
       if (!password) {

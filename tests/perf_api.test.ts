@@ -59,6 +59,7 @@ test('API Performance, Latency SLAs & Payload Benchmarks', async (t) => {
 
     assert.equal(res.status, 200);
     assert.ok(duration < 350, `Expected latency < 350ms, got ${duration.toFixed(2)}ms`);
+    assert.ok(res.headers.get('cache-control')?.includes('max-age=15'), 'Cache-Control header missing or invalid on /api/rentals');
   });
 
   await t.test('GET /api/landlord/stats responds within 350ms with SQL aggregations', async () => {

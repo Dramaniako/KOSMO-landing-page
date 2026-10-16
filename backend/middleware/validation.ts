@@ -99,10 +99,14 @@ export const propertySchema = z.object({
 });
 
 export const withdrawalSchema = z.object({
-  amount: z.number().positive('Jumlah penarikan harus lebih besar dari 0'),
+  amount: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim() !== '' ? Number(val) : val),
+    z.number().positive('Jumlah penarikan harus lebih besar dari 0')
+  ),
   bankName: z.string().min(1, 'Nama bank wajib diisi'),
   accountNumber: z.string().min(1, 'Nomor rekening wajib diisi'),
-  accountHolder: z.string().optional()
+  accountHolder: z.string().optional(),
+  userId: z.string().optional()
 });
 
 export const reviewSchema = z.object({
@@ -280,5 +284,95 @@ export const updateTicketStatusSchema = z.object({
   })
 });
 
+export const terminateRentalSchema = z.object({
+  password: z.string().min(1, 'Password konfirmasi diperlukan'),
+  reason: z.string().optional()
+});
 
+export const propertyUpdateSchema = z.object({
+  name: z.string().trim().min(1, 'Nama properti tidak boleh kosong').optional(),
+  district: z.string().trim().min(1, 'Kabupaten/Kota tidak boleh kosong').optional(),
+  address: z.string().trim().min(1, 'Alamat tidak boleh kosong').optional(),
+  price: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().positive('Harga harus lebih besar dari 0').optional()),
+  description: z.string().optional(),
+  facilities: z.array(z.string()).optional(),
+  latitude: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().optional()),
+  longitude: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().optional()),
+  totalRooms: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().int().positive('Total kamar harus lebih besar dari 0').optional()),
+  occupiedRooms: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().int().min(0).optional()),
+  image: z.string().optional()
+});
+export const updatePropertySchema = propertyUpdateSchema;
 
+export const reviewUpdateSchema = z.object({
+  rating: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().int().min(1, 'Rating minimal 1').max(5, 'Rating maksimal 5').optional()),
+  comment: z.string().trim().min(1, 'Komentar ulasan tidak boleh kosong').optional()
+}).refine((data) => data.rating !== undefined || data.comment !== undefined, {
+  message: 'Minimal salah satu dari rating atau comment harus diisi'
+});
+export const updateReviewSchema = reviewUpdateSchema;
+
+export const verifyPasswordSchema = z.object({
+  password: z.string().min(1, 'password wajib diisi.'),
+  userId: z.string().optional()
+});
+
+export const processWithdrawalSchema = z.object({
+  status: z.enum(['processing', 'completed']).optional().default('completed'),
+  referenceId: z.string().optional()
+});
+
+export const rejectWithdrawalSchema = z.object({
+  reason: z.string().trim().min(1, 'Alasan penolakan wajib diisi').optional()
+});
+
+export const createRentalSchema = z.object({
+  propertyId: z.string().min(1, 'ID properti wajib diisi'),
+  tenantId: z.string().optional(),
+  propertyName: z.string().optional(),
+  price: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().positive('Harga sewa harus lebih besar dari 0').optional()),
+  durationMonths: z
+    .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : 1), z.number().int().min(1, 'Durasi sewa minimal 1 bulan').max(120).optional().default(1)),
+  roomId: z.string().optional().nullable(),
+  rentalId: z.string().optional(),
+  signature: z.string().optional()
+});
+
+export const renewRentalTokenSchema = z.object({
+  months: z
+    .preprocess(
+      (val) => (val !== undefined && val !== null && val !== '' ? Number(val) : 1),
+      z.number().int('Durasi perpanjangan harus berupa bilangan bulat').min(1, 'Durasi perpanjangan minimal 1 bulan').max(120, 'Durasi perpanjangan maksimal 120 bulan')
+    )
+    .optional()
+    .default(1)
+});
+
+export const featurePropertySchema = z.object({
+  isFeatured: z.boolean().optional().default(true),
+  durationDays: z
+    .preprocess(
+      (val) => (val !== undefined && val !== null && val !== '' ? Number(val) : 30),
+      z.number().int().min(1, 'Durasi minimal 1 hari').max(365, 'Durasi maksimal 365 hari')
+    )
+    .optional()
+    .default(30),
+  featuredUntil: z.string().optional()
+});
+
+export const interactionTelemetrySchema = z.object({
+  propertyId: z.string().trim().min(1, 'propertyId wajib diisi'),
+  interactionType: z.enum(['view', 'like', 'bookmark', 'chat', 'booking', 'rating', 'filter'], {
+    message: "interactionType harus salah satu dari: 'view', 'like', 'bookmark', 'chat', 'booking', 'rating', 'filter'"
+  }),
+  userId: z.string().optional(),
+  deviceToken: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional()
+});

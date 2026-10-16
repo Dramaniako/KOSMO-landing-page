@@ -18,6 +18,10 @@ interface SeedProperty {
   ownerId: string;
   document: string;
   facilities: string[];
+  is_featured?: boolean;
+  featured_until?: string | null;
+  verified_water_tank?: boolean;
+  verified_wifi_speedtest?: boolean;
 }
 
 interface SeedReview {
@@ -217,7 +221,10 @@ const curatedProperties: SeedProperty[] = [
     occupiedRooms: 0,
     ownerId: 'user-landlord',
     document: 'sertifikat_shm_cove_nuansa.pdf',
-    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir']
+    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir'],
+    is_featured: true,
+    verified_water_tank: true,
+    verified_wifi_speedtest: true
   },
   {
     id: 'prop-02',
@@ -234,7 +241,10 @@ const curatedProperties: SeedProperty[] = [
     occupiedRooms: 0,
     ownerId: 'user-landlord',
     document: 'sertifikat_shm_kawaii_home.pdf',
-    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir']
+    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir'],
+    is_featured: false,
+    verified_water_tank: true,
+    verified_wifi_speedtest: true
   },
   {
     id: 'prop-03',
@@ -251,7 +261,10 @@ const curatedProperties: SeedProperty[] = [
     occupiedRooms: 0,
     ownerId: 'user-landlord',
     document: 'sertifikat_shm_jims_coliving.pdf',
-    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir']
+    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir'],
+    is_featured: false,
+    verified_water_tank: true,
+    verified_wifi_speedtest: false
   },
   {
     id: 'prop-04',
@@ -268,7 +281,10 @@ const curatedProperties: SeedProperty[] = [
     occupiedRooms: 0,
     ownerId: 'user-landlord',
     document: 'sertifikat_shm_mari_living.pdf',
-    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir']
+    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir'],
+    is_featured: false,
+    verified_water_tank: false,
+    verified_wifi_speedtest: true
   },
   {
     id: 'prop-05',
@@ -285,7 +301,10 @@ const curatedProperties: SeedProperty[] = [
     occupiedRooms: 0,
     ownerId: 'user-landlord',
     document: 'sertifikat_shm_kori_nuansa.pdf',
-    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir']
+    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir'],
+    is_featured: true,
+    verified_water_tank: true,
+    verified_wifi_speedtest: true
   },
   {
     id: 'prop-06',
@@ -302,7 +321,10 @@ const curatedProperties: SeedProperty[] = [
     occupiedRooms: 0,
     ownerId: 'user-landlord',
     document: 'sertifikat_shm_katsumata.pdf',
-    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir']
+    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir'],
+    is_featured: false,
+    verified_water_tank: false,
+    verified_wifi_speedtest: true
   },
   {
     id: 'prop-07',
@@ -319,7 +341,10 @@ const curatedProperties: SeedProperty[] = [
     occupiedRooms: 0,
     ownerId: 'user-landlord',
     document: 'sertifikat_shm_dstay_jimbaran.pdf',
-    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir']
+    facilities: ['Listrik', 'Air', 'Wifi', 'Kebersihan', 'Keamanan', 'Parkir'],
+    is_featured: false,
+    verified_water_tank: true,
+    verified_wifi_speedtest: false
   }
 ];
 
@@ -472,8 +497,12 @@ export async function seedDatabase(): Promise<void> {
     console.log('🏡 Seeding curated Bali properties and facilities...');
     for (const prop of curatedProperties) {
       await connection.query(`
-        INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO properties (
+          id, name, district, address, price, rating, image, description, latitude, longitude,
+          totalRooms, occupiedRooms, ownerId, document,
+          is_featured, featured_until, verified_water_tank, verified_wifi_speedtest
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         prop.id,
         prop.name,
@@ -488,7 +517,11 @@ export async function seedDatabase(): Promise<void> {
         prop.totalRooms,
         prop.occupiedRooms,
         prop.ownerId,
-        prop.document
+        prop.document,
+        Boolean(prop.is_featured),
+        prop.featured_until || null,
+        Boolean(prop.verified_water_tank),
+        Boolean(prop.verified_wifi_speedtest)
       ]);
 
       for (const facility of prop.facilities) {

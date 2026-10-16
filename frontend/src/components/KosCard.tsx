@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { MapPin, Star, Sparkles } from 'lucide-react';
+import { MapPin, Star, Sparkles, Droplet, Wifi } from 'lucide-react';
 import { Property } from '../types/index';
 import { formatRupiah, formatUSD } from '../utils/format';
 import { useTranslation } from '../context/LanguageContext';
@@ -32,6 +32,7 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
 
   const isFull = totalRooms > 0 && occupiedRooms >= totalRooms;
   const availableRooms = Math.max(0, totalRooms - occupiedRooms);
+  const isFeatured = Boolean(property.is_featured || property.isFeatured);
 
   return (
     <div
@@ -62,16 +63,28 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
           }}
         />
 
-        {/* Floating Vacancy Badge (Top-Left) */}
-        <div
-          className={`absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-md shadow-sm flex items-center gap-1.5 ${
-            isFull
-              ? 'bg-rose-500/90 text-white'
-              : 'bg-emerald-500/90 text-white'
-          }`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${isFull ? 'bg-rose-200' : 'bg-emerald-200'} animate-pulse`} />
-          <span>{isFull ? t('prop.fullTag') : t('prop.remaining', { count: availableRooms })}</span>
+        {/* Floating Badges Container (Top-Left) */}
+        <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5 items-start">
+          {isFeatured && (
+            <div
+              data-testid="featured-badge"
+              title={t('prop.featuredTooltip')}
+              className="px-2.5 py-0.5 rounded-full text-[11px] font-bold backdrop-blur-md bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm flex items-center gap-1 border border-amber-300/40"
+            >
+              <Sparkles size={11} className="fill-white" />
+              <span>{t('prop.featuredBadge')}</span>
+            </div>
+          )}
+          <div
+            className={`px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-md shadow-sm flex items-center gap-1.5 ${
+              isFull
+                ? 'bg-rose-500/90 text-white'
+                : 'bg-emerald-500/90 text-white'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${isFull ? 'bg-rose-200' : 'bg-emerald-200'} animate-pulse`} />
+            <span>{isFull ? t('prop.fullTag') : t('prop.remaining', { count: availableRooms })}</span>
+          </div>
         </div>
 
         {/* Floating Rating Chip (Top-Right) */}
@@ -106,6 +119,32 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
             <span className="text-slate-300 dark:text-slate-600">•</span>
             <span>{t('prop.ensuite')}</span>
           </div>
+
+          {/* Hyperlocal Micro-PMS Badges */}
+          {(property.verified_water_tank || property.verified_wifi_speedtest) && (
+            <div className="flex items-center gap-1.5 flex-wrap mt-2" data-testid="micro-pms-badges">
+              {property.verified_water_tank && (
+                <span
+                  data-testid="badge-water-tank"
+                  title={t('prop.waterTankTooltip')}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200/60 dark:border-cyan-800/80"
+                >
+                  <Droplet size={11} className="text-cyan-600 dark:text-cyan-400 fill-cyan-500/20" />
+                  <span>{t('prop.waterTank')}</span>
+                </span>
+              )}
+              {property.verified_wifi_speedtest && (
+                <span
+                  data-testid="badge-wifi-speedtest"
+                  title={t('prop.wifiSpeedtestTooltip')}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/80"
+                >
+                  <Wifi size={11} className="text-emerald-600 dark:text-emerald-400" />
+                  <span>{t('prop.wifiSpeedtest')}</span>
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Facility Pills */}
           <div className="flex flex-wrap gap-1.5 my-2.5 property-facilities">

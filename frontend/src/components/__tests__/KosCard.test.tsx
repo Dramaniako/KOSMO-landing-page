@@ -106,4 +106,43 @@ describe('KosCard Component', () => {
     fireEvent.click(detailButton);
     expect(handleOpenDetail).toHaveBeenCalledWith(mockPropertyAvailable);
   });
+
+  it('renders "Pilihan" badge when property.is_featured is true', () => {
+    const featuredProperty = { ...mockPropertyAvailable, is_featured: true };
+    render(
+      <KosCard
+        property={featuredProperty}
+        onOpenDetail={vi.fn()}
+        renderFacilityIcon={mockRenderIcon}
+      />
+    );
+    expect(screen.getByTestId('featured-badge')).toBeInTheDocument();
+    expect(screen.getByText('Pilihan')).toBeInTheDocument();
+  });
+
+  it('renders "Tandon Air Terjamin" badge when verified_water_tank is true', () => {
+    const waterProperty = { ...mockPropertyAvailable, verified_water_tank: true };
+    render(
+      <KosCard
+        property={waterProperty}
+        onOpenDetail={vi.fn()}
+        renderFacilityIcon={mockRenderIcon}
+      />
+    );
+    expect(screen.getByTestId('badge-water-tank')).toBeInTheDocument();
+    expect(screen.getByText('Tandon Air Terjamin')).toBeInTheDocument();
+  });
+
+  it('renders "Speedtest Wi-Fi Terverifikasi" badge when verified_wifi_speedtest is true', () => {
+    const wifiProperty = { ...mockPropertyAvailable, verified_wifi_speedtest: true };
+    render(
+      <KosCard
+        property={wifiProperty}
+        onOpenDetail={vi.fn()}
+        renderFacilityIcon={mockRenderIcon}
+      />
+    );
+    expect(screen.getByTestId('badge-wifi-speedtest')).toBeInTheDocument();
+    expect(screen.getByText('Speedtest Wi-Fi Terverifikasi')).toBeInTheDocument();
+  });
 });

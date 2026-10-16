@@ -5,7 +5,7 @@ import { apiCache } from '../services/cache';
 import type { PropertyRow } from '../services/transformers';
 import { authenticateToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
-import { reviewSchema, validateBody } from '../middleware/validation';
+import { reviewSchema, reviewUpdateSchema, validateBody } from '../middleware/validation';
 import { generateId } from '../utils/id';
 import type { UserRow } from './auth.routes';
 
@@ -116,7 +116,7 @@ export function registerReviewRoutes(router: Router): void {
     }
   );
 
-  router.put('/reviews/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  router.put('/reviews/:id', authenticateToken, validateBody(reviewUpdateSchema), async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
     const { rating, comment } = req.body;
     const authUser = req.user;

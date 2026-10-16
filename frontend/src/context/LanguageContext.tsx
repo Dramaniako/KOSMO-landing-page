@@ -75,6 +75,13 @@ const translations: Record<Language, Translations> = {
     'prop.fac.kebersihan': 'Kebersihan',
     'prop.fac.keamanan': 'Keamanan 24 Jam',
     'prop.fac.parkir': 'Parkir Luas',
+    'prop.featured': 'Pilihan KOSMO',
+    'prop.featuredBadge': 'Pilihan',
+    'prop.featuredTooltip': 'Properti unggulan rekomendasi KOSMO dengan standar kenyamanan dan fasilitas terverifikasi',
+    'prop.waterTank': 'Tandon Air Terjamin',
+    'prop.waterTankTooltip': 'Dilengkapi tandon air cadangan & pompa pendorong, pasokan air lancar 24/7',
+    'prop.wifiSpeedtest': 'Speedtest Wi-Fi Terverifikasi',
+    'prop.wifiSpeedtestTooltip': 'Kecepatan internet telah diverifikasi langsung oleh tim teknis KOSMO minimal 50-100 Mbps',
 
     // Booking Modal
     'modal.detailTitle': 'Detail Properti & Fasilitas',
@@ -192,6 +199,12 @@ const translations: Record<Language, Translations> = {
     'tenant.saving': 'Menyimpan...',
     'tenant.editProfile': 'Edit Profil',
     'tenant.cancel': 'Batal',
+    'tenant.renewRentBtn': 'Bayar Sewa Bulan Berikutnya',
+    'tenant.renewing': 'Menyiapkan Pembayaran...',
+    'tenant.nearDueUrgency': 'Menjelang Jatuh Tempo',
+    'tenant.dueTodayUrgency': 'Jatuh Tempo Hari Ini',
+    'tenant.nearDueAlert': 'Masa sewa Anda akan segera jatuh tempo dalam {days} hari. Lakukan pembayaran sekarang untuk memperpanjang masa hunian tanpa gangguan.',
+    'tenant.dueTodayAlert': 'Sewa kos Anda jatuh tempo hari ini. Segera bayar untuk menghindari penonaktifan akses.',
 
     // Landlord Dashboard
     'landlord.title': 'Dasbor Pemilik Kos',
@@ -204,6 +217,9 @@ const translations: Record<Language, Translations> = {
     'landlord.viewContract': 'Lihat Kontrak',
     'landlord.downloadContract': 'Unduh PDF',
     'landlord.contractVerified': 'Tanda Tangan Sah',
+    'landlord.dueDate': 'Jatuh Tempo',
+    'landlord.remindPayment': 'Ingatkan Sewa',
+    'landlord.remindTooltip': 'Kirim pesan pengingat pembayaran ke WhatsApp penyewa',
 
 
     // Admin Dashboard
@@ -301,6 +317,13 @@ const translations: Record<Language, Translations> = {
     'prop.fac.kebersihan': 'Housekeeping',
     'prop.fac.keamanan': '24/7 Security',
     'prop.fac.parkir': 'Spacious Parking',
+    'prop.featured': 'KOSMO Choice',
+    'prop.featuredBadge': 'Featured',
+    'prop.featuredTooltip': 'Top-rated curated KOSMO property with verified amenities and high tenant satisfaction',
+    'prop.waterTank': 'Guaranteed Water Tank',
+    'prop.waterTankTooltip': 'Equipped with dedicated backup water tank & booster pump, ensuring uninterrupted 24/7 water supply',
+    'prop.wifiSpeedtest': 'Verified Wi-Fi Speedtest',
+    'prop.wifiSpeedtestTooltip': 'Internet speed verified on-site by KOSMO technical team (50-100+ Mbps)',
 
     // Booking Modal
     'modal.detailTitle': 'Property & Amenity Details',
@@ -418,6 +441,12 @@ const translations: Record<Language, Translations> = {
     'tenant.saving': 'Saving...',
     'tenant.editProfile': 'Edit Profile',
     'tenant.cancel': 'Cancel',
+    'tenant.renewRentBtn': 'Pay Next Month Rent',
+    'tenant.renewing': 'Preparing Checkout...',
+    'tenant.nearDueUrgency': 'Approaching Due Date',
+    'tenant.dueTodayUrgency': 'Due Today',
+    'tenant.nearDueAlert': 'Your lease expires in {days} days. Renew now to maintain uninterrupted occupancy.',
+    'tenant.dueTodayAlert': 'Your lease payment is due today. Please settle payment to prevent access disruption.',
 
     // Landlord Dashboard
     'landlord.title': 'Landlord Dashboard',
@@ -430,6 +459,9 @@ const translations: Record<Language, Translations> = {
     'landlord.viewContract': 'View Lease',
     'landlord.downloadContract': 'Download PDF',
     'landlord.contractVerified': 'Legally Signed',
+    'landlord.dueDate': 'Due Date',
+    'landlord.remindPayment': 'Remind Payment',
+    'landlord.remindTooltip': 'Send a direct payment reminder to tenant via WhatsApp',
 
 
     // Admin Dashboard

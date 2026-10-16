@@ -1,6 +1,13 @@
 import type { Request, Response, Router } from 'express';
 import { authenticateToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
+import { apiCache } from '../services/cache';
+import {
+  validateBody,
+  terminateRentalSchema,
+  createRentalSchema,
+  renewRentalTokenSchema
+} from '../middleware/validation';
 import {
   rentalService,
   RentalServiceError,
@@ -28,6 +35,14 @@ export function registerRentalRoutes(router: Router): void {
       ? (pageParam - 1) * limitParam
       : 0;
 
+    res.setHeader('Cache-Control', 'private, max-age=15');
+
+    const cacheKey = `rentals:${authUser.id}:${tenantId ? String(tenantId) : 'all'}:${limitParam || 'all'}:${offsetParam}`;
+    const cached = apiCache.get<RentalRow[]>(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     try {
       const rentals = await rentalService.getRentals(
         authUser,
@@ -35,6 +50,7 @@ export function registerRentalRoutes(router: Router): void {
         limitParam,
         offsetParam
       );
+      apiCache.set(cacheKey, rentals, 15);
       res.json(rentals);
     } catch (err: unknown) {
       if (err instanceof RentalServiceError) {
@@ -90,7 +106,7 @@ export function registerRentalRoutes(router: Router): void {
     }
   });
 
-  router.post('/rentals', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/rentals', authenticateToken, validateBody(createRentalSchema), async (req: AuthenticatedRequest, res: Response) => {
     const authUser = req.user;
     if (!authUser) {
       return res.status(401).json({ message: 'Otentikasi diperlukan.' });
@@ -111,6 +127,7 @@ export function registerRentalRoutes(router: Router): void {
         rentalId: req.body.rentalId
       });
 
+      apiCache.invalidatePattern('rentals');
       const statusCode = result.message.includes('sudah aktif') ? 200 : 201;
       res.status(statusCode).json(result);
     } catch (err: unknown) {
@@ -122,7 +139,7 @@ export function registerRentalRoutes(router: Router): void {
     }
   });
 
-  router.post('/rentals/:id/terminate', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/rentals/:id/terminate', authenticateToken, validateBody(terminateRentalSchema), async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
     const authUser = req.user;
     if (!authUser) {
@@ -133,6 +150,7 @@ export function registerRentalRoutes(router: Router): void {
 
     try {
       const result = await rentalService.terminateRental(String(id), authUser, password);
+      apiCache.invalidatePattern('rentals');
       res.json(result);
     } catch (err: unknown) {
       if (err instanceof RentalServiceError) {
@@ -142,4 +160,30 @@ export function registerRentalRoutes(router: Router): void {
       res.status(500).json({ message: 'Gagal memberhentikan sewa kos.' });
     }
   });
+
+  router.post(
+    '/rentals/:id/renew-token',
+    authenticateToken,
+    validateBody(renewRentalTokenSchema),
+    async (req: AuthenticatedRequest, res: Response) => {
+      const { id } = req.params;
+      const authUser = req.user;
+      if (!authUser) {
+        return res.status(401).json({ message: 'Otentikasi diperlukan.' });
+      }
+
+      const months = req.body?.months ? Number(req.body.months) : 1;
+
+      try {
+        const result = await rentalService.createRenewalToken(String(id), authUser, months);
+        return res.status(200).json(result);
+      } catch (err: unknown) {
+        if (err instanceof RentalServiceError) {
+          return res.status(err.statusCode).json({ message: err.message, ...err.details });
+        }
+        console.error('Renew rental token error:', err);
+        return res.status(500).json({ message: 'Gagal membuat token perpanjangan sewa.' });
+      }
+    }
+  );
 }

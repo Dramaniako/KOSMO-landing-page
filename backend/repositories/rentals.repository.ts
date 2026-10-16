@@ -177,7 +177,11 @@ export class RentalsRepository {
     status: 'active' | 'terminated' | 'cancelled',
     conn: PoolConnection
   ): Promise<void> {
-    await conn.query('UPDATE rentals SET status = ? WHERE id = ?', [status, rentalId]);
+    if (status === 'terminated') {
+      await conn.query('UPDATE rentals SET status = ?, terminated_at = NOW() WHERE id = ?', [status, rentalId]);
+    } else {
+      await conn.query('UPDATE rentals SET status = ? WHERE id = ?', [status, rentalId]);
+    }
   }
 
   async decrementPropertyOccupied(propertyId: string, conn: PoolConnection): Promise<void> {
@@ -203,6 +207,29 @@ export class RentalsRepository {
     await conn.query(
       'UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?',
       [revenue, revenue, ownerId]
+    );
+  }
+
+  async advanceRentalDuration(
+    rentalId: string,
+    addedMonths: number,
+    conn: PoolConnection
+  ): Promise<void> {
+    await conn.query(
+      "UPDATE rentals SET status = 'active', duration_months = COALESCE(duration_months, 1) + ? WHERE id = ?",
+      [addedMonths, rentalId]
+    );
+  }
+
+  async creditLandlordNetBalance(
+    ownerId: string,
+    netRevenue: number,
+    grossRevenue: number,
+    conn: PoolConnection
+  ): Promise<void> {
+    await conn.query(
+      'UPDATE users SET balance = balance + ?, totalRevenue = totalRevenue + ? WHERE id = ?',
+      [netRevenue, grossRevenue, ownerId]
     );
   }
 

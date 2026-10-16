@@ -5,8 +5,15 @@ import { apiCache } from '../services/cache';
 import { authenticateToken, requireRole } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { generateId } from '../utils/id';
+import {
+  validateBody,
+  withdrawalSchema,
+  processWithdrawalSchema,
+  rejectWithdrawalSchema
+} from '../middleware/validation';
 import type { UserRow } from './auth.routes';
 import { handleLandlordExcelReport } from './tracking.routes';
+import { rentalService } from '../services/rental.service';
 
 export interface WithdrawalRow extends RowDataPacket {
   id: string;
@@ -270,19 +277,54 @@ export function registerLandlordRoutes(router: Router): void {
       : authUser.id;
     try {
       const [rows] = await pool.query<RentalRow[]>(
-        `SELECT r.*, p.name as propertyName FROM rentals r 
+        `SELECT 
+           r.*, 
+           p.name as propertyName,
+           rm.roomNumber,
+           rm.floor AS roomFloor,
+           rm.type AS roomType,
+           u.name AS tenantName,
+           u.phone AS tenantPhone,
+           u.email AS tenantEmail
+         FROM rentals r 
          JOIN properties p ON r.propertyId = p.id 
-         WHERE p.ownerId = ? ORDER BY r.id DESC LIMIT 50`,
+         LEFT JOIN rooms rm ON r.roomId = rm.id
+         LEFT JOIN users u ON r.tenantId = u.id
+         WHERE p.ownerId = ? 
+         ORDER BY r.id DESC 
+         LIMIT 50`,
         [landlordId]
       );
-      res.json(rows);
+
+      const enriched = rows.map((r) => {
+        const duration = Number(r.duration_months || 1);
+        const schedule = rentalService.computePaymentSchedule(
+          String(r.startDate || new Date().toISOString()),
+          String(r.status || 'active'),
+          duration
+        );
+        return {
+          ...r,
+          duration_months: duration,
+          nextPaymentDate: schedule.nextPaymentDate,
+          nextPaymentDateISO: schedule.nextPaymentDateISO,
+          daysRemaining: schedule.daysRemaining,
+          paymentStatus: schedule.paymentStatus,
+          leaseStartDate: schedule.leaseStartDate,
+          leaseEndDate: schedule.leaseEndDate,
+          leaseEndDateISO: schedule.leaseEndDateISO,
+          totalDurationMonths: schedule.totalDurationMonths
+        };
+      });
+
+      res.json(enriched);
     } catch (err) {
       console.error("Get landlord rentals error:", err);
       res.status(500).json({ message: "Gagal mengambil data sewa landlord." });
     }
   });
 
-  router.post('/withdraw', authenticateToken, requireRole(['admin', 'landlord']), async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/withdraw', authenticateToken, requireRole(['admin', 'landlord']), validateBody(withdrawalSchema), async (req: AuthenticatedRequest, res: Response) => {
     const { amount, bankName, accountNumber, accountHolder, userId } = req.body;
     const authUser = req.user;
     if (!authUser) {
@@ -380,7 +422,7 @@ export function registerLandlordRoutes(router: Router): void {
     }
   });
 
-  router.post('/admin/withdrawals/:id/process', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }, unknown, { status?: 'processing' | 'completed'; referenceId?: string }>, res: Response) => {
+  router.post('/admin/withdrawals/:id/process', authenticateToken, requireRole(['admin']), validateBody(processWithdrawalSchema), async (req: Request<{ id: string }, unknown, { status?: 'processing' | 'completed'; referenceId?: string }>, res: Response) => {
     const { id } = req.params;
     const targetStatus = req.body?.status || 'completed';
     const connection = await pool.getConnection();
@@ -440,7 +482,7 @@ export function registerLandlordRoutes(router: Router): void {
     }
   });
 
-  router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['admin']), async (req: Request<{ id: string }, unknown, { reason?: string }>, res: Response) => {
+  router.post('/admin/withdrawals/:id/reject', authenticateToken, requireRole(['admin']), validateBody(rejectWithdrawalSchema), async (req: Request<{ id: string }, unknown, { reason?: string }>, res: Response) => {
     const { id } = req.params;
     const { reason } = req.body;
     const connection = await pool.getConnection();

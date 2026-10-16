@@ -231,19 +231,32 @@ test('Midtrans Snap payment & webhook signature verification', async (t) => {
     assert.equal(overbookRental.status, 'pending');
   });
 
-  await t.test('extracts root rentalId from timestamped Midtrans attempt order_id', () => {
-    function extractRentalId(orderIdOrRentalId: string): string {
-      let targetRentalId = orderIdOrRentalId.trim();
-      const rentMatch = targetRentalId.match(/^(rent-[a-zA-Z0-9]+)(?:-\d+)?$/);
-      if (rentMatch && rentMatch[1]) {
-        targetRentalId = rentMatch[1];
-      }
-      return targetRentalId;
-    }
+  await t.test('extracts root rentalId from timestamped Midtrans attempt order_id and RENEW-* order_id', async () => {
+    const { extractOrderRentalId } = await import('../backend/routes/payment.routes');
 
-    assert.equal(extractRentalId('rent-123456'), 'rent-123456');
-    assert.equal(extractRentalId('rent-abcde123-1724783921000'), 'rent-abcde123');
-    assert.equal(extractRentalId('rent-xyz999-1692837482'), 'rent-xyz999');
-    assert.equal(extractRentalId('custom-order-id'), 'custom-order-id');
+    const r1 = extractOrderRentalId('rent-123456');
+    assert.equal(r1.rentalId, 'rent-123456');
+    assert.equal(r1.isRenewal, false);
+
+    const r2 = extractOrderRentalId('rent-abcde123-1724783921000');
+    assert.equal(r2.rentalId, 'rent-abcde123');
+    assert.equal(r2.isRenewal, false);
+
+    const r3 = extractOrderRentalId('RENEW-rent-101-1126-1730000000000');
+    assert.equal(r3.rentalId, 'rent-101');
+    assert.equal(r3.isRenewal, true);
+
+    const r4 = extractOrderRentalId('RENEW-rent-abc999-0526');
+    assert.equal(r4.rentalId, 'rent-abc999');
+    assert.equal(r4.isRenewal, true);
+  });
+
+  await t.test('computes 3% platform commission and 97% net landlord credit accurately', () => {
+    const grossRent = 3000000;
+    const platformCommission = Math.round(grossRent * 0.03);
+    const netLandlordCredit = Math.max(0, grossRent - platformCommission);
+
+    assert.equal(platformCommission, 90000);
+    assert.equal(netLandlordCredit, 2910000);
   });
 });

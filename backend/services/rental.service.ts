@@ -13,7 +13,7 @@ import type { RoomRow } from '../types/index';
 import type { UserRow } from '../routes/auth.routes';
 import { isUserProfileComplete } from '../types/index';
 import { generateId } from '../utils/id';
-import { snap } from '../routes/payment.routes';
+import { snap, isMidtransConfigured } from '../routes/payment.routes';
 
 export interface PaymentSchedule {
   nextPaymentDate: string;
@@ -385,8 +385,12 @@ export class RentalService {
 
       if (assignedRoom) {
         await this.repo.setRoomStatus(assignedRoom.id, 'occupied', connection);
+        // Atomically synchronize property occupiedRooms count within the active transaction
+        await syncPropertyRoomCounts(connection, propertyId);
+      } else {
+        // Fallback for legacy properties without discrete room rows
+        await this.repo.incrementPropertyOccupied(propertyId, connection);
       }
-      await this.repo.incrementPropertyOccupied(propertyId, connection);
 
       if (property.ownerId) {
         await this.repo.creditLandlordBalance(property.ownerId, addedRevenue, connection);
@@ -415,14 +419,6 @@ export class RentalService {
       await connection.commit();
       apiCache.invalidatePattern('properties');
       apiCache.invalidatePattern('rentals');
-
-      if (assignedRoom) {
-        try {
-          await syncPropertyRoomCounts(connection, propertyId);
-        } catch {
-          // Non-blocking sync
-        }
-      }
 
       return {
         message: 'Penyewaan kos berhasil dibuat!',
@@ -517,6 +513,181 @@ export class RentalService {
       connection.release();
     }
   }
+
+  async createRenewalToken(
+    rentalId: string,
+    authUser: JWTPayload,
+    months = 1
+  ): Promise<{
+    message: string;
+    token: string;
+    redirect_url: string;
+    rentalId: string;
+    orderId: string;
+    grossAmount: number;
+  }> {
+    if (!rentalId || typeof rentalId !== 'string' || rentalId.trim() === '') {
+      throw new RentalServiceError(400, 'rentalId wajib diisi.');
+    }
+
+    const durationMonths = Math.max(1, Math.floor(months || 1));
+    const resolvedRentalId = rentalId.trim();
+
+    let tenantName = '';
+    let tenantEmail = '';
+    let tenantPhone = '';
+    let propertyId = '';
+    let propertyName = '';
+    let monthlyRent = 0;
+    const adminFee = 5000.0;
+    let totalGrossAmount = 0;
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // Early lookup for propertyId to preserve strict lock hierarchy: users -> properties -> rentals
+      const earlyRental = await this.repo.findRentalSummaryById(resolvedRentalId, connection);
+      if (!earlyRental) {
+        await connection.rollback();
+        throw new RentalServiceError(404, 'Data sewa tidak ditemukan.');
+      }
+
+      // 1. Lock tenant row in users
+      const tenant = await this.repo.findUserById(authUser.id, connection, true);
+      if (!tenant) {
+        await connection.rollback();
+        throw new RentalServiceError(404, 'Pengguna tidak ditemukan.');
+      }
+      tenantName = tenant.name;
+      tenantEmail = tenant.email;
+      tenantPhone = tenant.phone || '';
+
+      // 2. Lock property row in properties
+      propertyId = earlyRental.propertyId;
+      const property = await this.repo.findPropertyById(propertyId, connection, true);
+      if (!property) {
+        await connection.rollback();
+        throw new RentalServiceError(404, 'Properti tidak ditemukan.');
+      }
+      propertyName = property.name;
+
+      // 3. Lock rental row in rentals
+      const [rentalRows] = await connection.query<RentalRow[]>(
+        'SELECT * FROM rentals WHERE id = ? FOR UPDATE',
+        [resolvedRentalId]
+      );
+      const rental = rentalRows[0];
+      if (!rental) {
+        await connection.rollback();
+        throw new RentalServiceError(404, 'Data sewa tidak ditemukan.');
+      }
+
+      if (authUser.role !== 'admin' && authUser.id !== rental.tenantId) {
+        await connection.rollback();
+        throw new RentalServiceError(403, 'Akses ditolak. Anda tidak dapat memperpanjang sewa akun lain.');
+      }
+
+      if (rental.status !== 'active') {
+        await connection.rollback();
+        throw new RentalServiceError(
+          400,
+          `Hanya sewa dengan status aktif yang dapat diperpanjang. Status sewa saat ini: ${rental.status}`
+        );
+      }
+
+      // Single Active Tenancy Guard: verify no OTHER active rental exists for this tenant
+      const [conflictingRentals] = await connection.query<RentalRow[]>(
+        "SELECT id FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? FOR UPDATE",
+        [rental.tenantId, resolvedRentalId]
+      );
+      if (conflictingRentals.length > 0) {
+        await connection.rollback();
+        throw new RentalServiceError(
+          409,
+          'Single Active Tenancy Violation: Anda memiliki sewa kos aktif lain yang bertentangan.'
+        );
+      }
+
+      monthlyRent = Number(rental.price || property.price || 0);
+      totalGrossAmount = (monthlyRent * durationMonths) + adminFee;
+
+      // Commit DB transaction BEFORE external Midtrans HTTP call
+      await connection.commit();
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+
+    const now = new Date();
+    const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const yy = String(now.getUTCFullYear()).slice(-2);
+    const attemptOrderId = `RENEW-${resolvedRentalId}-${mm}${yy}-${Date.now()}`;
+
+    const parameter = {
+      transaction_details: {
+        order_id: attemptOrderId,
+        gross_amount: totalGrossAmount
+      },
+      customer_details: {
+        first_name: tenantName,
+        email: tenantEmail,
+        phone: tenantPhone
+      },
+      item_details: [
+        {
+          id: propertyId,
+          price: monthlyRent,
+          quantity: durationMonths,
+          name: `Perpanjangan Sewa - ${propertyName.substring(0, 28)}`
+        },
+        {
+          id: 'ADMIN_FEE',
+          price: adminFee,
+          quantity: 1,
+          name: 'Biaya Administrasi & Layanan'
+        }
+      ],
+      custom_field1: resolvedRentalId
+    };
+
+    const isProduction = (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== 'test';
+    const hasMidtransConfig = isMidtransConfigured();
+
+    if (!hasMidtransConfig && isProduction) {
+      throw new RentalServiceError(
+        500,
+        'Konfigurasi payment gateway Midtrans belum diatur di server produksi.'
+      );
+    }
+
+    let transactionToken = `snap-token-renewal-${resolvedRentalId}`;
+    let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${resolvedRentalId}`;
+
+    if (hasMidtransConfig) {
+      try {
+        const transaction = await snap.createTransaction(parameter);
+        transactionToken = transaction.token;
+        redirectUrl = transaction.redirect_url;
+      } catch (snapErr: unknown) {
+        console.error('Midtrans renewal createTransaction error:', snapErr);
+        const errMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
+        throw new RentalServiceError(502, `Gagal membuat transaksi di Midtrans: ${errMsg}`);
+      }
+    }
+
+    return {
+      message: 'Token perpanjangan sewa berhasil dibuat.',
+      token: transactionToken,
+      redirect_url: redirectUrl,
+      rentalId: resolvedRentalId,
+      orderId: attemptOrderId,
+      grossAmount: totalGrossAmount
+    };
+  }
 }
 
 export const rentalService = new RentalService();
+

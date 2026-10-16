@@ -126,6 +126,7 @@ export async function ensureIndexes(executor: QueryExecutor = pool): Promise<voi
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
+    "ALTER TABLE properties ADD INDEX idx_properties_featured (is_featured)",
     // ⚡ Bolt Performance Optimization:
     // Added index on property_facilities.propertyId to optimize the GROUP_CONCAT join query in GET /api/properties.
     // Why: property_facilities is frequently joined by propertyId, causing slow full table scans as the table grows.
@@ -136,6 +137,7 @@ export async function ensureIndexes(executor: QueryExecutor = pool): Promise<voi
     "ALTER TABLE rentals ADD INDEX idx_rentals_room (roomId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_contract_hash (contract_hash)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_signed_at (contract_signed_at)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_terminated_at (terminated_at)",
     "ALTER TABLE rooms ADD INDEX idx_rooms_property_status (propertyId, status)",
     "ALTER TABLE rooms ADD INDEX idx_rooms_status (status)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_property (propertyId, orderIndex)",
@@ -225,8 +227,13 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         occupiedRooms INT DEFAULT 0,
         ownerId VARCHAR(50),
         document VARCHAR(100) DEFAULT 'sertifikat_kepemilikan.pdf',
+        is_featured BOOLEAN DEFAULT FALSE,
+        featured_until DATETIME NULL,
+        verified_water_tank BOOLEAN DEFAULT FALSE,
+        verified_wifi_speedtest BOOLEAN DEFAULT FALSE,
         INDEX idx_properties_district_price (district, price),
         INDEX idx_properties_owner (ownerId),
+        INDEX idx_properties_featured (is_featured),
         FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `),
@@ -313,11 +320,13 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         tenant_signature_data LONGTEXT,
         admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00,
         duration_months INT DEFAULT 1,
+        terminated_at DATETIME NULL,
         INDEX idx_rentals_tenant_status (tenantId, status),
         INDEX idx_rentals_property_status (propertyId, status),
         INDEX idx_rentals_room (roomId),
         INDEX idx_rentals_contract_hash (contract_hash),
         INDEX idx_rentals_signed_at (contract_signed_at),
+        INDEX idx_rentals_terminated_at (terminated_at),
         FOREIGN KEY (tenantId) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -653,7 +662,11 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
 
   const propertiesQueries = [
     'ALTER TABLE properties MODIFY image LONGTEXT',
-    'ALTER TABLE properties MODIFY description LONGTEXT'
+    'ALTER TABLE properties MODIFY description LONGTEXT',
+    'ALTER TABLE properties ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE properties ADD COLUMN IF NOT EXISTS featured_until DATETIME NULL',
+    'ALTER TABLE properties ADD COLUMN IF NOT EXISTS verified_water_tank BOOLEAN DEFAULT FALSE',
+    'ALTER TABLE properties ADD COLUMN IF NOT EXISTS verified_wifi_speedtest BOOLEAN DEFAULT FALSE'
   ];
 
   const usersQueries = [
@@ -692,7 +705,8 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS tenant_signature_data LONGTEXT",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS roomId VARCHAR(50)"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS roomId VARCHAR(50)",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS terminated_at DATETIME NULL"
   ];
 
   const photosQueries = [

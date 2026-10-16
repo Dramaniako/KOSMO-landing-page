@@ -267,6 +267,17 @@ test('PDF Rental Contract & Cryptographic Verification Suite', async (t) => {
         'PDF must specify water utility terms'
       );
     });
+
+    await t3.test('3.8 embeds Smart Lock digital access and scheduled room cleaning clauses', () => {
+      assert.ok(
+        normalizedText.includes('SmartLock'),
+        'PDF must include Smart Lock digital key access clause'
+      );
+      assert.ok(
+        normalizedText.includes('Pembersihan') || normalizedText.includes('Cleaning'),
+        'PDF must include scheduled room cleaning clause'
+      );
+    });
   });
 
   // -------------------------------------------------------------

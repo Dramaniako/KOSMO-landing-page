@@ -343,6 +343,10 @@ export interface Property {
   images: string[];
   facilities: string[];
   ownerId: string;
+  is_featured?: boolean;
+  featured_until?: string | Date | null;
+  verified_water_tank?: boolean;
+  verified_wifi_speedtest?: boolean;
 }
 
 export interface Review {
@@ -483,6 +487,7 @@ export interface Rental {
   nextPaymentDateISO?: string;
   daysRemaining?: number;
   paymentStatus?: string;
+  terminated_at?: string | Date | null;
 }
 
 export interface RentalRow extends RowDataPacket {
@@ -507,6 +512,7 @@ export interface RentalRow extends RowDataPacket {
   tenant_signature_data?: string | null;
   admin_fee_amount?: number | string;
   duration_months?: number;
+  terminated_at?: string | Date | null;
 }
 
 export interface UtilityQuotas {
@@ -668,6 +674,7 @@ export interface RentalContractJoinedRow extends RowDataPacket {
   tenant_signature_data?: string | null;
   admin_fee_amount?: number | string;
   duration_months?: number;
+  rental_terminated_at?: string | Date | null;
   property_name?: string;
   property_address?: string;
   property_price?: number;

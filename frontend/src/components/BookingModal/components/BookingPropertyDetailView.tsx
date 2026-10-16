@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapPin, Star, Sparkles, ShieldCheck, Download, CheckCircle2, FileText, Eye, AlertCircle, AlertTriangle, ArrowRight } from 'lucide-react';
+import { MapPin, Star, Sparkles, ShieldCheck, Download, CheckCircle2, FileText, Eye, AlertCircle, AlertTriangle, ArrowRight, Droplet, Wifi } from 'lucide-react';
 import { Property, User, PropertyPhoto, Room } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
 import { useCurrency } from '../../../context/CurrencyContext';
@@ -196,6 +196,36 @@ export default function BookingPropertyDetailView({
             <ShieldCheck size={14} />
             {t('prop.verified')}
           </span>
+          {(property.is_featured || property.isFeatured) && (
+            <span
+              data-testid="detail-badge-featured"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800 text-xs font-bold"
+              title={t('prop.featuredTooltip')}
+            >
+              <Sparkles size={13} className="text-amber-500 fill-amber-500" />
+              {t('prop.featured')}
+            </span>
+          )}
+          {property.verified_water_tank && (
+            <span
+              data-testid="detail-badge-water-tank"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200/80 dark:border-cyan-800 text-xs font-semibold"
+              title={t('prop.waterTankTooltip')}
+            >
+              <Droplet size={13} className="text-cyan-600 dark:text-cyan-400 fill-cyan-500/20" />
+              {t('prop.waterTank')}
+            </span>
+          )}
+          {property.verified_wifi_speedtest && (
+            <span
+              data-testid="detail-badge-wifi-speedtest"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800 text-xs font-semibold"
+              title={t('prop.wifiSpeedtestTooltip')}
+            >
+              <Wifi size={13} className="text-emerald-600 dark:text-emerald-400" />
+              {t('prop.wifiSpeedtest')}
+            </span>
+          )}
           {property.document && (
             <span
               style={{

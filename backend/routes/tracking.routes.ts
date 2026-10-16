@@ -8,6 +8,8 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import type { PropertyRow } from '../services/transformers';
 import type { UserRow } from './auth.routes';
 import { apiCache } from '../services/cache';
+import { validateBody, interactionTelemetrySchema } from '../middleware/validation';
+import { recommendationService, type InteractionType } from '../services/recommendation.service';
 
 // Rate Limiter for Visitor Tracking
 export const trackingLimiter = rateLimit({
@@ -49,6 +51,56 @@ interface RentalRow extends RowDataPacket {
 }
 
 export function registerTrackingRoutes(router: Router): void {
+  router.post(
+    '/tracking/interaction',
+    trackingLimiter,
+    validateBody(interactionTelemetrySchema),
+    async (req: Request, res: Response) => {
+      try {
+        const { propertyId, interactionType, userId, deviceToken, metadata } = req.body as {
+          propertyId: string;
+          interactionType: InteractionType;
+          userId?: string;
+          deviceToken?: string;
+          metadata?: Record<string, unknown>;
+        };
+
+        const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'anon';
+        const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+        const userKey = String(userId || deviceToken || req.headers['x-device-token'] || firstIp);
+
+        let targetProp: PropertyRow | undefined;
+        try {
+          const [rows] = await pool.query<PropertyRow[]>(
+            'SELECT * FROM properties WHERE id = ? LIMIT 1',
+            [propertyId]
+          );
+          targetProp = rows[0];
+        } catch {
+          // Non-blocking lookup
+        }
+
+        const { event, updatedWeights } = recommendationService.recordInteraction({
+          userKey,
+          propertyId,
+          interactionType,
+          property: targetProp,
+          metadata
+        });
+
+        res.status(201).json({
+          success: true,
+          message: 'Interaksi berhasil dicatat dan bobot preferensi diperbarui.',
+          event,
+          weights: updatedWeights
+        });
+      } catch (err: unknown) {
+        console.error('Error in POST /api/tracking/interaction:', err);
+        res.status(500).json({ message: 'Gagal mencatat interaksi pengguna.' });
+      }
+    }
+  );
+
   router.post('/tracking/visit', trackingLimiter, async (req: Request, res: Response) => {
     const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
     const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
