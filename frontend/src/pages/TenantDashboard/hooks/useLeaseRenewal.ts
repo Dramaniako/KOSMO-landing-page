@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Rental, User } from '../../../types/index';
+import { loadSnapSdk } from '../../../utils/snapLoader';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -39,6 +40,10 @@ export function useLeaseRenewal({ currentUser, onRefreshRentals }: UseLeaseRenew
       if (!snapToken) {
         throw new Error('Token pembayaran Midtrans tidak diterima dari server.');
       }
+
+      await loadSnapSdk().catch((loadErr) => {
+        console.warn('Snap SDK dynamic load notice:', loadErr);
+      });
 
       if (typeof window === 'undefined' || !window.snap) {
         throw new Error('Midtrans Snap SDK belum dimuat. Silakan muat ulang halaman.');

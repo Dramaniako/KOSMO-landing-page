@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { User, Rental } from '../../../types/index';
+import { loadSnapSdk } from '../../../utils/snapLoader';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -74,6 +75,10 @@ export function usePendingPayment({
       if (!snapToken) {
         throw new Error('Token pembayaran tidak ditemukan dari server.');
       }
+
+      await loadSnapSdk().catch((loadErr) => {
+        console.warn('Snap SDK dynamic load notice:', loadErr);
+      });
 
       if (typeof window === 'undefined' || !window.snap) {
         throw new Error('Midtrans Payment Gateway belum siap. Silakan muat ulang halaman.');

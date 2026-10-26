@@ -69,8 +69,17 @@ declare module 'midtrans-client' {
     redirect_url: string;
   }
 
+  export interface SnapApiConfig {
+    isProduction: boolean;
+    serverKey: string;
+    clientKey: string;
+    set(options: SnapOptions): void;
+    getSnapApiBaseUrl: () => string;
+  }
+
   export class Snap {
     constructor(options?: SnapOptions);
+    apiConfig: SnapApiConfig;
     createTransaction(parameter: SnapTransactionParameter): Promise<SnapTransactionResult>;
     createTransactionToken(parameter: SnapTransactionParameter): Promise<string>;
     createTransactionRedirectUrl(parameter: SnapTransactionParameter): Promise<string>;

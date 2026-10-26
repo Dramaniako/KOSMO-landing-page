@@ -1,8 +1,28 @@
 import type { Request, Response, Router } from 'express';
 import crypto from 'crypto';
 import midtransClient from 'midtrans-client';
-import type { RowDataPacket } from 'mysql2/promise';
+import type { RowDataPacket, PoolConnection } from 'mysql2/promise';
 import { pool, syncPropertyRoomCounts } from '../db';
+
+export interface MySQLErrorLike {
+  code?: string;
+  errno?: number;
+  message?: string;
+}
+
+export function isLockContentionError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const dbErr = err as MySQLErrorLike;
+  return (
+    dbErr.code === 'ER_LOCK_WAIT_TIMEOUT' ||
+    dbErr.errno === 1205 ||
+    dbErr.code === 'ER_LOCK_DEADLOCK' ||
+    dbErr.errno === 1213 ||
+    (typeof dbErr.message === 'string' &&
+      (dbErr.message.includes('Lock wait timeout exceeded') ||
+       dbErr.message.includes('Deadlock found')))
+  );
+}
 import { apiCache } from '../services/cache';
 import { authenticateToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -48,6 +68,66 @@ export const snap = new midtransClient.Snap({
   clientKey: process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-placeholder'
 });
 
+export function configureSnapClient(): typeof snap {
+  const isProduction = process.env.MIDTRANS_IS_PRODUCTION === 'true';
+  const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder';
+  const clientKey = process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-placeholder';
+
+  snap.apiConfig.set({
+    isProduction,
+    serverKey,
+    clientKey
+  });
+
+  if (process.env.MIDTRANS_SNAP_URL) {
+    const customBase = process.env.MIDTRANS_SNAP_URL.replace(/\/transactions\/?$/, '');
+    snap.apiConfig.getSnapApiBaseUrl = () => customBase;
+  }
+
+  return snap;
+}
+
+export function getSnapRedirectUrl(rentalId: string): string {
+  const isProduction = process.env.MIDTRANS_IS_PRODUCTION === 'true';
+  if (process.env.MIDTRANS_SNAP_URL) {
+    try {
+      const parsed = new URL(process.env.MIDTRANS_SNAP_URL);
+      return `${parsed.protocol}//${parsed.host}/snap/v2/vtweb/${rentalId}`;
+    } catch {
+      // Fall through to default
+    }
+  }
+  const baseUrl = isProduction ? 'https://app.midtrans.com' : 'https://app.sandbox.midtrans.com';
+  return `${baseUrl}/snap/v2/vtweb/${rentalId}`;
+}
+
+export function assertMidtransProductionConfig(options?: { throwOnMismatch?: boolean }): {
+  isProduction: boolean;
+  isSandboxKey: boolean;
+  valid: boolean;
+  warning?: string;
+} {
+  const isProduction =
+    process.env.MIDTRANS_IS_PRODUCTION === 'true' ||
+    process.env.NODE_ENV === 'production';
+  const serverKey = (process.env.MIDTRANS_SERVER_KEY || '').trim();
+  const isSandboxKey = serverKey.startsWith('SB-Mid-');
+
+  let warning: string | undefined;
+  let valid = true;
+
+  if (isProduction && isSandboxKey) {
+    valid = false;
+    warning = `[SECURITY WARNING] Detected sandbox MIDTRANS_SERVER_KEY prefix ('SB-Mid-') while running in production mode (MIDTRANS_IS_PRODUCTION=true or NODE_ENV=production). Live transactions will fail. Please configure production Midtrans credentials.`;
+    console.warn(warning);
+    if (options?.throwOnMismatch) {
+      throw new Error(warning);
+    }
+  }
+
+  return { isProduction, isSandboxKey, valid, warning };
+}
+
 export function verifyMidtransSignature(
   orderId: string,
   statusCode: string,
@@ -58,19 +138,36 @@ export function verifyMidtransSignature(
   if (!orderId || !statusCode || !grossAmount || !serverKey || !signatureKey) {
     return false;
   }
-  // Normalize grossAmount string (Midtrans might format with or without .00)
-  const normalizedAmount = grossAmount.includes('.') ? parseFloat(grossAmount).toFixed(2) : grossAmount;
-  const payload = `${orderId}${statusCode}${normalizedAmount}${serverKey}`;
-  const calculatedHash = crypto.createHash('sha512').update(payload).digest('hex').toLowerCase();
-  const targetSig = signatureKey.toLowerCase();
-
-  const calculatedBuffer = Buffer.from(calculatedHash, 'utf8');
-  const targetBuffer = Buffer.from(targetSig, 'utf8');
-
-  if (calculatedBuffer.length !== targetBuffer.length) {
+  const targetSig = signatureKey.trim().toLowerCase();
+  if (targetSig.length !== 128 || !/^[0-9a-f]{128}$/.test(targetSig)) {
     return false;
   }
-  return crypto.timingSafeEqual(calculatedBuffer, targetBuffer);
+
+  const rawPayload = `${orderId}${statusCode}${grossAmount}${serverKey}`;
+  const rawHash = crypto.createHash('sha512').update(rawPayload).digest('hex').toLowerCase();
+
+  const targetBuffer = Buffer.from(targetSig, 'hex');
+  const rawBuffer = Buffer.from(rawHash, 'hex');
+
+  if (targetBuffer.length === 64 && rawBuffer.length === 64 && crypto.timingSafeEqual(rawBuffer, targetBuffer)) {
+    return true;
+  }
+
+  // Fallback for grossAmount normalized with 2 decimal places if raw differed
+  const parsedAmount = parseFloat(grossAmount);
+  if (!isNaN(parsedAmount)) {
+    const normalizedAmount = parsedAmount.toFixed(2);
+    if (normalizedAmount !== grossAmount) {
+      const altPayload = `${orderId}${statusCode}${normalizedAmount}${serverKey}`;
+      const altHash = crypto.createHash('sha512').update(altPayload).digest('hex').toLowerCase();
+      const altBuffer = Buffer.from(altHash, 'hex');
+      if (altBuffer.length === 64 && crypto.timingSafeEqual(altBuffer, targetBuffer)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 interface PaymentTokenBody {
@@ -112,9 +209,24 @@ export async function settleRentalPayment(
 ): Promise<{ success: boolean; statusCode?: number; message: string; rental?: RentalRow }> {
   const { rentalId: targetRentalId, isRenewal } = extractOrderRentalId(orderIdOrRentalId);
 
-  const connection = await pool.getConnection();
+  let connection: PoolConnection | null = null;
+  let transactionStarted = false;
+  let connectionReleased = false;
+
+  const safeRollback = async (reason?: string) => {
+    if (connection && transactionStarted) {
+      await connection.rollback().catch((rbErr: unknown) => {
+        console.warn(`[Settle Payment] Rollback swallowed error (${reason || 'unknown'}):`, rbErr);
+      });
+      transactionStarted = false;
+    }
+  };
+
   try {
+    connection = await pool.getConnection();
+    await connection.query('SET SESSION innodb_lock_wait_timeout = 5;');
     await connection.beginTransaction();
+    transactionStarted = true;
 
     // Early lookup to discover propertyId for lock hierarchy compliance
     const [earlyRentalRows] = await connection.query<RentalRow[]>(
@@ -124,7 +236,7 @@ export async function settleRentalPayment(
     const earlyRental = earlyRentalRows[0];
 
     if (!earlyRental) {
-      await connection.rollback();
+      await safeRollback('early rental missing');
       return { success: false, statusCode: 404, message: "Data sewa tidak ditemukan." };
     }
 
@@ -155,7 +267,7 @@ export async function settleRentalPayment(
     const rental = rentalRows[0];
 
     if (!rental) {
-      await connection.rollback();
+      await safeRollback('rental missing');
       return { success: false, statusCode: 404, message: "Data sewa tidak ditemukan." };
     }
 
@@ -187,7 +299,7 @@ export async function settleRentalPayment(
           Math.abs(paidAmount - (monthlyPrice + adminFee)) <= 1.0;
 
         if (!isPriceMatch) {
-          await connection.rollback();
+          await safeRollback('renewal price mismatch');
           console.error(`Midtrans renewal gross_amount mismatch: expected ${expectedRenewalWithAdmin} or ${expectedRenewalBase}, got ${paidAmount}`);
           return { success: false, statusCode: 400, message: "Jumlah nominal pembayaran tidak sesuai dengan biaya perpanjangan sewa." };
         }
@@ -210,6 +322,7 @@ export async function settleRentalPayment(
       }
 
       await connection.commit();
+      transactionStarted = false;
       apiCache.invalidatePattern('properties');
       apiCache.invalidatePattern('rentals');
 
@@ -235,7 +348,7 @@ export async function settleRentalPayment(
         Math.abs(paidAmount - monthlyPrice) <= 1.0;
 
       if (!isPriceMatch) {
-        await connection.rollback();
+        await safeRollback('price mismatch');
         console.error(`Midtrans gross_amount mismatch: expected ${expectedWithAdmin} or ${expectedBase}, got ${paidAmount}`);
         return { success: false, statusCode: 400, message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa." };
       }
@@ -249,7 +362,7 @@ export async function settleRentalPayment(
         [rental.tenantId, resolvedRentalId]
       );
       if (activeRentals.length > 0) {
-        await connection.rollback();
+        await safeRollback('single active tenancy');
         return {
           success: false,
           statusCode: 409,
@@ -268,7 +381,7 @@ export async function settleRentalPayment(
         );
         lockedRoom = roomRows[0];
         if (!lockedRoom || lockedRoom.status !== 'available') {
-          await connection.rollback();
+          await safeRollback('room unavailable');
           console.error(`Overbooking conflict detected for room ${targetRoomId}, status: ${lockedRoom?.status}`);
           return { success: false, statusCode: 409, message: "Kamar sudah terisi atau tidak tersedia." };
         }
@@ -287,11 +400,11 @@ export async function settleRentalPayment(
             [rental.propertyId]
           );
           if (Number(discreteCountRows[0]?.count || 0) > 0) {
-            await connection.rollback();
+            await safeRollback('no discrete rooms available');
             return { success: false, statusCode: 409, message: "Kamar sudah terisi atau tidak tersedia." };
           }
           if (property && property.occupiedRooms >= property.totalRooms) {
-            await connection.rollback();
+            await safeRollback('property full');
             console.error(`Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`);
             return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
           }
@@ -325,6 +438,7 @@ export async function settleRentalPayment(
     }
 
     await connection.commit();
+    transactionStarted = false;
     apiCache.invalidatePattern('properties');
     apiCache.invalidatePattern('rentals');
     return {
@@ -334,11 +448,26 @@ export async function settleRentalPayment(
       rental: { ...rental, status: 'active' }
     };
   } catch (err: unknown) {
-    await connection.rollback();
+    await safeRollback('catch');
+    if (isLockContentionError(err)) {
+      console.warn('[Settle Payment] Lock wait timeout or deadlock (1205/1213):', (err as Error)?.message || err);
+      return {
+        success: false,
+        statusCode: 409,
+        message: "High contention: unable to settle rental payment due to concurrent lock timeout. Please retry."
+      };
+    }
     console.error("Settle rental payment error:", err);
     return { success: false, statusCode: 500, message: "Gagal memproses transaksi sewa." };
   } finally {
-    connection.release();
+    if (connection && !connectionReleased) {
+      connectionReleased = true;
+      try {
+        connection.release();
+      } catch (relErr: unknown) {
+        console.warn('[Settle Payment] Connection release warning:', relErr);
+      }
+    }
   }
 }
 
@@ -448,9 +577,24 @@ export function registerPaymentRoutes(router: Router): void {
     let targetRoomId: string | null = null;
 
     // 🔒 Acquire dedicated connection from pool for pessimistic locking transaction
-    const connection = await pool.getConnection();
+    let connection: PoolConnection | null = null;
+    let transactionStarted = false;
+    let connectionReleased = false;
+
+    const safeRollback = async (reason?: string) => {
+      if (connection && transactionStarted) {
+        await connection.rollback().catch((rbErr: unknown) => {
+          console.warn(`[Payment Token] Rollback swallowed error (${reason || 'unknown'}):`, rbErr);
+        });
+        transactionStarted = false;
+      }
+    };
+
     try {
+      connection = await pool.getConnection();
+      await connection.query('SET SESSION innodb_lock_wait_timeout = 5;');
       await connection.beginTransaction();
+      transactionStarted = true;
 
       // 1. Strict Lock Order (users -> properties -> rooms -> rentals)
       // Lock tenant row
@@ -460,7 +604,7 @@ export function registerPaymentRoutes(router: Router): void {
       );
       const tenant = userRows[0];
       if (!tenant) {
-        await connection.rollback();
+        await safeRollback('tenant missing');
         return res.status(404).json({ message: "Tenant tidak ditemukan." });
       }
       tenantName = tenant.name;
@@ -474,13 +618,13 @@ export function registerPaymentRoutes(router: Router): void {
       );
       const property = propRows[0];
       if (!property) {
-        await connection.rollback();
+        await safeRollback('property missing');
         return res.status(404).json({ message: "Properti tidak ditemukan." });
       }
       propertyName = property.name;
 
       if (property.occupiedRooms >= property.totalRooms) {
-        await connection.rollback();
+        await safeRollback('property full');
         return res.status(400).json({ message: "Kamar kos sudah penuh." });
       }
 
@@ -495,11 +639,11 @@ export function registerPaymentRoutes(router: Router): void {
         );
         lockedRoom = roomRows[0];
         if (!lockedRoom) {
-          await connection.rollback();
+          await safeRollback('room not found on property');
           return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
         }
         if (lockedRoom.status !== 'available') {
-          await connection.rollback();
+          await safeRollback('room unavailable');
           return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
         }
         targetRoomId = lockedRoom.id;
@@ -516,7 +660,7 @@ export function registerPaymentRoutes(router: Router): void {
             [propertyId]
           );
           if (availableRooms.length === 0) {
-            await connection.rollback();
+            await safeRollback('no available rooms');
             return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
           }
         }
@@ -532,7 +676,7 @@ export function registerPaymentRoutes(router: Router): void {
 
       const [activeRentals] = await connection.query<RentalRow[]>(activeRentalsQuery, queryParams);
       if (activeRentals.length > 0) {
-        await connection.rollback();
+        await safeRollback('single active tenancy');
         return res.status(409).json({
           message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
         });
@@ -571,13 +715,34 @@ export function registerPaymentRoutes(router: Router): void {
 
       // Commit transaction: Row locks are released BEFORE external Midtrans network calls
       await connection.commit();
+      transactionStarted = false;
     } catch (err: unknown) {
-      await connection.rollback();
+      await safeRollback('catch');
+      if (isLockContentionError(err)) {
+        console.warn('[Payment Token] Lock wait timeout or deadlock (1205/1213):', (err as Error)?.message || err);
+        if (!res.headersSent) {
+          return res.status(409).json({
+            message: "High contention: unable to reserve room due to concurrent requests. Please retry."
+          });
+        }
+        return;
+      }
+
       console.error("Create payment token transaction error:", err);
-      return res.status(500).json({ message: "Gagal memproses transaksi pembuatan token pembayaran." });
+      if (!res.headersSent) {
+        return res.status(500).json({ message: "Gagal memproses transaksi pembuatan token pembayaran." });
+      }
+      return;
     } finally {
-      // Guaranteed connection release to prevent pool exhaustion
-      connection.release();
+      // Guaranteed single connection release to prevent pool exhaustion
+      if (connection && !connectionReleased) {
+        connectionReleased = true;
+        try {
+          connection.release();
+        } catch (relErr: unknown) {
+          console.warn('[Payment Token] Connection release warning:', relErr);
+        }
+      }
     }
 
     // 6. External Midtrans Snap token creation executed OUTSIDE database transaction
@@ -619,10 +784,11 @@ export function registerPaymentRoutes(router: Router): void {
     }
 
     let transactionToken = `snap-token-${resolvedRentalId}`;
-    let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${resolvedRentalId}`;
+    let redirectUrl = getSnapRedirectUrl(resolvedRentalId);
 
     if (hasMidtransConfig) {
       try {
+        configureSnapClient();
         const transaction = await snap.createTransaction(parameter);
         transactionToken = transaction.token;
         redirectUrl = transaction.redirect_url;

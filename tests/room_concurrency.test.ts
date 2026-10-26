@@ -1,7 +1,8 @@
 (process.env as Record<string, string | undefined>).NODE_ENV = 'test';
 (process.env as Record<string, string | undefined>).NO_LISTEN = 'true';
-(process.env as Record<string, string | undefined>).DB_CONNECTION_LIMIT = '20';
+(process.env as Record<string, string | undefined>).DB_CONNECTION_LIMIT = '25';
 (process.env as Record<string, string | undefined>).MIDTRANS_SERVER_KEY = 'placeholder';
+(process.env as Record<string, string | undefined>).MIDTRANS_CLIENT_KEY = 'placeholder';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,7 +45,18 @@ interface PropertyRow extends RowDataPacket {
 }
 
 test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
-  await ensureDbReady();
+  // ⚡ Dynamically resize pool capacity for concurrent test storms
+  const rawPool = (pool as unknown as { pool?: { config?: { connectionLimit?: number } } })?.pool;
+  if (rawPool && rawPool.config) {
+    rawPool.config.connectionLimit = 25;
+  }
+
+  // Fast schema check: only run full DDL migrations if core tables do not exist
+  try {
+    await pool.query('SELECT 1 FROM rooms, properties, users, rentals LIMIT 1');
+  } catch {
+    await ensureDbReady();
+  }
 
   // 1. Boot isolated Express instance on dynamic port 0
   const app = express();
@@ -67,9 +79,44 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
 
   const baseUrl = `http://127.0.0.1:${serverPort}/api`;
 
-  t.after(() => {
-    server.close();
-  });
+  // Track in-flight requests and ensure per-request timeout & closed connections
+  const inFlightRequests = new Set<Promise<unknown>>();
+
+  async function fetchWithTimeout(
+    url: string,
+    init: RequestInit = {},
+    timeoutMs = 10000
+  ): Promise<{ status: number; body: any }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    const reqPromise = (async () => {
+      try {
+        const res = await fetch(url, {
+          ...init,
+          signal: controller.signal,
+          headers: {
+            ...init.headers,
+            Connection: 'close'
+          }
+        });
+        let body: any = null;
+        const text = await res.text();
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          body = { raw: text };
+        }
+        return { status: res.status, body };
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+
+    inFlightRequests.add(reqPromise);
+    reqPromise.finally(() => inFlightRequests.delete(reqPromise));
+    return reqPromise;
+  }
 
   // Unique isolation tag for test entities
   const tag = crypto.randomBytes(4).toString('hex');
@@ -94,12 +141,30 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
     }
   };
 
+  // Unified 3-phase teardown: settle requests -> cleanup DB records -> sever keep-alive sockets & close server
   t.after(async () => {
-    await cleanupTestData();
-  });
+    // Phase 1: Wait for all in-flight requests to completely settle
+    if (inFlightRequests.size > 0) {
+      await Promise.allSettled(Array.from(inFlightRequests));
+    }
 
-  // Pre-cleanup
-  await cleanupTestData();
+    // Phase 2: Atomically clean up test DB rows (no active queries can conflict)
+    await cleanupTestData();
+
+    // Phase 3: Gracefully close Express server and forcefully sever keep-alive sockets
+    await new Promise<void>((resolve) => {
+      const rawServer = server as unknown as {
+        closeAllConnections?: () => void;
+        closeIdleConnections?: () => void;
+      };
+      if (typeof rawServer.closeAllConnections === 'function') {
+        rawServer.closeAllConnections();
+      } else if (typeof rawServer.closeIdleConnections === 'function') {
+        rawServer.closeIdleConnections();
+      }
+      server.close(() => resolve());
+    });
+  });
 
   // 2. Seed Landlord and Property
   await pool.query(
@@ -128,24 +193,28 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
 
   await syncPropertyRoomCounts(pool, propId);
 
-  // 4. Seed 10 Distinct Tenants with complete KYC identity profiles
+  // 4. Seed 10 Distinct Tenants with complete KYC identity profiles (batched query)
   const tenantIds: string[] = [];
   const tenantTokens: string[] = [];
+  const userPlaceholders: string[] = [];
+  const userParams: (string | number)[] = [];
+
   for (let i = 0; i < 10; i++) {
     const tId = `tenant-cstorm-${tag}-${i}`;
     const tEmail = `tenant-cstorm-${tag}-${i}@kosmo.test`;
     tenantIds.push(tId);
-
-    await pool.query(
-      `INSERT INTO users (
-        id, name, email, role, password, phone, identity_type, identity_number, address, occupation,
-        emergency_contact_name, emergency_contact_phone, emergency_contact_relation
-      ) VALUES (?, ?, ?, 'tenant', ?, '+6281234567890', 'NIK', ?, 'Jl. Sunset Road No. 88, Badung', 'Software Engineer', 'Emergency Contact', '+6281234567899', 'Family')`,
-      [tId, `Storm Tenant ${i}`, tEmail, hashedPassword, `517101230898${(2000 + i).toString()}`]
-    );
-
+    userPlaceholders.push("(?, ?, ?, 'tenant', ?, '+6281234567890', 'NIK', ?, 'Jl. Sunset Road No. 88, Badung', 'Software Engineer', 'Emergency Contact', '+6281234567899', 'Family')");
+    userParams.push(tId, `Storm Tenant ${i}`, tEmail, hashedPassword, `517101230898${(2000 + i).toString()}`);
     tenantTokens.push(generateJwtToken({ id: tId, email: tEmail, role: 'tenant' }));
   }
+
+  await pool.query(
+    `INSERT INTO users (
+      id, name, email, role, password, phone, identity_type, identity_number, address, occupation,
+      emergency_contact_name, emergency_contact_phone, emergency_contact_relation
+    ) VALUES ${userPlaceholders.join(', ')}`,
+    userParams
+  );
 
   // =========================================================================
   // STORM 1: 10-Tenant Concurrency Storm for the EXACT SAME roomId
@@ -161,7 +230,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
     // Fire 10 concurrent requests simultaneously targeting targetRoomId
     const stormPromises = tenantTokens.map(async (tok, idx) => {
       const rentalId = `rent-cstorm-${tag}-${idx}`;
-      const res = await fetch(`${baseUrl}/rentals`, {
+      const res = await fetchWithTimeout(`${baseUrl}/rentals`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -179,8 +248,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
         })
       });
 
-      const body = (await res.json()) as { message?: string; rentalId?: string; success?: boolean };
-      return { status: res.status, body, tenantIndex: idx, rentalId };
+      return { status: res.status, body: res.body, tenantIndex: idx, rentalId };
     });
 
     const results = await Promise.all(stormPromises);
@@ -254,7 +322,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
     const winningToken = tenantTokens[winningTenantIdx];
 
     // Terminate rental via POST /api/rentals/:id/terminate
-    const termRes = await fetch(`${baseUrl}/rentals/${winningRentalId}/terminate`, {
+    const termRes = await fetchWithTimeout(`${baseUrl}/rentals/${winningRentalId}/terminate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -280,7 +348,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
     const retryToken = tenantTokens[retryIdx];
     const retryRentalId = `rent-cstorm-retry-${tag}`;
 
-    const retryRes = await fetch(`${baseUrl}/rentals`, {
+    const retryRes = await fetchWithTimeout(`${baseUrl}/rentals`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -311,7 +379,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
     await pool.query("UPDATE rooms SET status = 'maintenance' WHERE id = ?", [room103Id]);
 
     const tenantIdx = 5;
-    const res = await fetch(`${baseUrl}/rentals`, {
+    const res = await fetchWithTimeout(`${baseUrl}/rentals`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -344,7 +412,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
     );
 
     const tenantIdx = 6;
-    const res = await fetch(`${baseUrl}/rentals`, {
+    const res = await fetchWithTimeout(`${baseUrl}/rentals`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -381,7 +449,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
         [activeRentId, tenantIds[0], propId]
       );
 
-      const res = await fetch(`${baseUrl}/payment/token`, {
+      const res = await fetchWithTimeout(`${baseUrl}/payment/token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -396,7 +464,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
       });
 
       assert.equal(res.status, 409, 'Must return HTTP 409 Conflict when tenant has active lease');
-      const body = (await res.json()) as { message?: string };
+      const body = res.body as { message?: string };
       assert.match(body.message || '', /Single Active Tenancy Violation/);
 
       // Clean up active rental
@@ -407,7 +475,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
     await t5.test('5.2 Rejects token request with 409 Conflict if target roomId is in maintenance or occupied', async () => {
       await pool.query("UPDATE rooms SET status = 'maintenance' WHERE id = ?", [room102Id]);
 
-      const res = await fetch(`${baseUrl}/payment/token`, {
+      const res = await fetchWithTimeout(`${baseUrl}/payment/token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -433,7 +501,7 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
         [foreignPropId, landlordId]
       );
 
-      const res = await fetch(`${baseUrl}/payment/token`, {
+      const res = await fetchWithTimeout(`${baseUrl}/payment/token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -453,9 +521,9 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
 
     // 5.4 High-Concurrency Token Generation: concurrent requests without 500 error or deadlock
     await t5.test('5.4 Concurrent token generation requests execute cleanly without deadlock (zero Error 1213)', async () => {
-      const tokenPromises = tenantTokens.slice(2, 7).map(async (tok, idx) => {
+      const tokenPromises = tenantTokens.slice(2, 7).map((tok, idx) => {
         const actualIdx = idx + 2;
-        const res = await fetch(`${baseUrl}/payment/token`, {
+        return fetchWithTimeout(`${baseUrl}/payment/token`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -466,11 +534,15 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
             tenantId: tenantIds[actualIdx],
             durationMonths: 1
           })
-        });
-        return { status: res.status, body: await res.json() };
+        }, 10000);
       });
 
-      const results = await Promise.all(tokenPromises);
+      const settled = await Promise.allSettled(tokenPromises);
+      for (const s of settled) {
+        assert.equal(s.status, 'fulfilled', `Request must not reject/hang: ${s.status === 'rejected' ? s.reason : ''}`);
+      }
+      const results = settled.map((s) => (s as PromiseFulfilledResult<{ status: number; body: unknown }>).value);
+
       assert.ok(
         results.every((r) => r.status === 200 || r.status === 409),
         `All token requests must return 200 or 409, no 500 permitted. Got statuses: ${results.map((r) => r.status).join(',')}`

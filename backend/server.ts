@@ -12,6 +12,7 @@ import { requestIdMiddleware } from './middleware/requestId';
 import { errorHandler } from './middleware/errorHandler';
 import { notFoundHandler } from './middleware/notFoundHandler';
 import { setupProcessSafety } from './utils/processSafety';
+import { assertMidtransProductionConfig } from './routes/payment.routes';
 
 // Initialize defensive process-level safety net
 setupProcessSafety();
@@ -224,6 +225,7 @@ app.use(errorHandler);
 const isDirectRun = Boolean(process.argv[1] && /server(\.ts|\.js)?$/i.test(process.argv[1]));
 
 if (!process.env.VERCEL && process.env.NO_LISTEN !== 'true' && (isDirectRun || process.env.NODE_ENV !== 'test')) {
+  assertMidtransProductionConfig();
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });

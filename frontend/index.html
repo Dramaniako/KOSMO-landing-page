@@ -8,12 +8,24 @@
     <!-- Leaflet CSS & JS for Interactive Map Picker -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-    <!-- Midtrans Snap JS for Payment Gateway -->
-    <script 
-      type="text/javascript"
-      src="https://app.sandbox.midtrans.com/snap/snap.js"
-      data-client-key="%VITE_MIDTRANS_CLIENT_KEY%"
-    ></script>
+    <!-- Dynamic Midtrans Snap SDK Loader -->
+    <script type="text/javascript">
+      (function() {
+        var isProd = "%VITE_MIDTRANS_IS_PRODUCTION%" === "true";
+        var clientKey = "%VITE_MIDTRANS_CLIENT_KEY%";
+        var snapUrl = isProd 
+          ? "https://app.midtrans.com/snap/snap.js" 
+          : "https://app.sandbox.midtrans.com/snap/snap.js";
+        var script = document.createElement("script");
+        script.id = "midtrans-snap-sdk";
+        script.type = "text/javascript";
+        script.src = snapUrl;
+        if (clientKey && !clientKey.startsWith("%")) {
+          script.setAttribute("data-client-key", clientKey);
+        }
+        document.head.appendChild(script);
+      })();
+    </script>
     <script>
       (function() {
         try {

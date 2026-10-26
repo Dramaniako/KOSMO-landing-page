@@ -13,7 +13,7 @@ import type { RoomRow } from '../types/index';
 import type { UserRow } from '../routes/auth.routes';
 import { isUserProfileComplete } from '../types/index';
 import { generateId } from '../utils/id';
-import { snap, isMidtransConfigured } from '../routes/payment.routes';
+import { snap, isMidtransConfigured, configureSnapClient, getSnapRedirectUrl } from '../routes/payment.routes';
 
 export interface PaymentSchedule {
   nextPaymentDate: string;
@@ -291,6 +291,7 @@ export class RentalService {
 
     const connection = await pool.getConnection();
     try {
+      await connection.query('SET SESSION innodb_lock_wait_timeout = 5;');
       await connection.beginTransaction();
 
       const tenant = await this.repo.findUserById(tenantId, connection, true);
@@ -428,7 +429,9 @@ export class RentalService {
         roomNumber: assignedRoom ? assignedRoom.roomNumber : null
       };
     } catch (err) {
-      await connection.rollback();
+      await connection.rollback().catch((rbErr: unknown) => {
+        console.warn('[Rental Service] createBooking rollback warning:', rbErr);
+      });
       throw err;
     } finally {
       connection.release();
@@ -442,6 +445,7 @@ export class RentalService {
 
     const connection = await pool.getConnection();
     try {
+      await connection.query('SET SESSION innodb_lock_wait_timeout = 5;');
       await connection.beginTransaction();
 
       const earlyRental = await this.repo.findRentalSummaryById(rentalId, connection);
@@ -507,7 +511,9 @@ export class RentalService {
 
       return { message: 'Sewa kos berhasil diberhentikan.' };
     } catch (err) {
-      await connection.rollback();
+      await connection.rollback().catch((rbErr: unknown) => {
+        console.warn('[Rental Service] terminateRental rollback warning:', rbErr);
+      });
       throw err;
     } finally {
       connection.release();
@@ -664,10 +670,11 @@ export class RentalService {
     }
 
     let transactionToken = `snap-token-renewal-${resolvedRentalId}`;
-    let redirectUrl = `https://app.sandbox.midtrans.com/snap/v2/vtweb/${resolvedRentalId}`;
+    let redirectUrl = getSnapRedirectUrl(resolvedRentalId);
 
     if (hasMidtransConfig) {
       try {
+        configureSnapClient();
         const transaction = await snap.createTransaction(parameter);
         transactionToken = transaction.token;
         redirectUrl = transaction.redirect_url;

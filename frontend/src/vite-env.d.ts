@@ -3,6 +3,7 @@
 interface ImportMetaEnv {
   readonly VITE_API_BASE?: string;
   readonly VITE_MIDTRANS_CLIENT_KEY?: string;
+  readonly VITE_MIDTRANS_IS_PRODUCTION?: string;
 }
 
 interface ImportMeta {

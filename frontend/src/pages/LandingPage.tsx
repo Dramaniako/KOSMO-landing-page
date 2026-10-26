@@ -11,6 +11,7 @@ import SearchFilterBar from '../components/SearchFilterBar';
 import BookingModal from '../components/BookingModal';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
+import { loadSnapSdk } from '../utils/snapLoader';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -424,6 +425,10 @@ export default function LandingPage() {
       if (!snapToken) {
         throw new Error("Token pembayaran tidak ditemukan dari respons server.");
       }
+
+      await loadSnapSdk().catch((loadErr) => {
+        console.warn('Snap SDK dynamic load notice:', loadErr);
+      });
 
       if (typeof window === 'undefined' || !window.snap) {
         throw new Error("Midtrans Payment Gateway belum siap. Silakan muat ulang halaman.");
