@@ -1,6 +1,16 @@
+export function isProductionMidtrans(): boolean {
+  if (import.meta.env.VITE_MIDTRANS_IS_PRODUCTION === 'true') {
+    return true;
+  }
+  const clientKey = import.meta.env.VITE_MIDTRANS_CLIENT_KEY;
+  if (typeof clientKey === 'string' && clientKey.startsWith('Mid-client-')) {
+    return true;
+  }
+  return false;
+}
+
 export function getSnapScriptUrl(): string {
-  const isProduction = import.meta.env.VITE_MIDTRANS_IS_PRODUCTION === 'true';
-  return isProduction
+  return isProductionMidtrans()
     ? 'https://app.midtrans.com/snap/snap.js'
     : 'https://app.sandbox.midtrans.com/snap/snap.js';
 }
@@ -8,9 +18,6 @@ export function getSnapScriptUrl(): string {
 export function loadSnapSdk(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
-      return resolve();
-    }
-    if (window.snap) {
       return resolve();
     }
 
@@ -25,9 +32,14 @@ export function loadSnapSdk(): Promise<void> {
       if (existingScript.src === scriptUrl && window.snap) {
         return resolve();
       }
-      existingScript.addEventListener('load', () => resolve());
-      existingScript.addEventListener('error', (e) => reject(e));
-      return;
+      if (existingScript.src !== scriptUrl) {
+        existingScript.remove();
+        delete (window as unknown as { snap?: unknown }).snap;
+      } else {
+        existingScript.addEventListener('load', () => resolve());
+        existingScript.addEventListener('error', (e) => reject(e));
+        return;
+      }
     }
 
     const script = document.createElement('script');

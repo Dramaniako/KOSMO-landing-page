@@ -11,8 +11,9 @@
     <!-- Dynamic Midtrans Snap SDK Loader -->
     <script type="text/javascript">
       (function() {
-        var isProd = "%VITE_MIDTRANS_IS_PRODUCTION%" === "true";
         var clientKey = "%VITE_MIDTRANS_CLIENT_KEY%";
+        var isClientKeySet = clientKey && !clientKey.startsWith("%");
+        var isProd = "%VITE_MIDTRANS_IS_PRODUCTION%" === "true" || (isClientKeySet && clientKey.indexOf("Mid-client-") === 0);
         var snapUrl = isProd 
           ? "https://app.midtrans.com/snap/snap.js" 
           : "https://app.sandbox.midtrans.com/snap/snap.js";
@@ -20,7 +21,7 @@
         script.id = "midtrans-snap-sdk";
         script.type = "text/javascript";
         script.src = snapUrl;
-        if (clientKey && !clientKey.startsWith("%")) {
+        if (isClientKeySet) {
           script.setAttribute("data-client-key", clientKey);
         }
         document.head.appendChild(script);
