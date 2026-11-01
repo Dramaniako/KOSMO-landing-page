@@ -219,6 +219,7 @@ export default function LandingPage() {
   }, [fetchProperties]);
 
   const activeRentalAbortRef = useRef<AbortController | null>(null);
+  const deepLinkOpenedRef = useRef<string | null>(null);
 
   // Clean up in-flight abort controller on unmount
   useEffect(() => {
@@ -306,6 +307,20 @@ export default function LandingPage() {
       setHasActiveRental(false);
     }
   }, [currentUser, t]);
+
+  // Auto-open property detail modal when arriving via shareable deep link (/?property=<id>)
+  useEffect(() => {
+    if (typeof window === 'undefined' || properties.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const propertyParam = params.get('property');
+    if (!propertyParam || deepLinkOpenedRef.current === propertyParam) return;
+
+    const matched = properties.find((p) => String(p.id) === propertyParam.trim());
+    if (matched) {
+      deepLinkOpenedRef.current = propertyParam;
+      handleOpenDetail(matched);
+    }
+  }, [properties, handleOpenDetail]);
 
   const handleSignContractSubmit = async (payload: ContractSignPayload): Promise<boolean> => {
     if (!currentUser) {

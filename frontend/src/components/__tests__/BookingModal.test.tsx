@@ -101,6 +101,27 @@ describe('BookingModal Evidentiary UI & Contract Signing Suite', () => {
     expect(screen.getByText('Rp 4.500.000')).toBeInTheDocument();
     expect(screen.getByText('Sewa Sekarang (All-Inclusive)')).toBeInTheDocument();
     expect(screen.getByText('Tersedia: 5 dari 8 Kamar')).toBeInTheDocument();
+    expect(screen.getByTestId('share-property-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('whatsapp-inquiry-btn')).toHaveAttribute(
+      'href',
+      expect.stringContaining('https://wa.me/6281234567890?text=')
+    );
+  });
+
+  it('copies shareable property deep link (/?property=<id>) when clicking Bagikan Kos', async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText: writeTextMock }
+    });
+
+    renderWithContext({ showContract: false, showPayment: false });
+    const shareBtn = screen.getByTestId('share-property-btn');
+    fireEvent.click(shareBtn);
+
+    await waitFor(() => {
+      expect(writeTextMock).toHaveBeenCalledWith(expect.stringContaining('/?property=prop-bali-01'));
+      expect(screen.getByText('Tautan Disalin!')).toBeInTheDocument();
+    });
   });
 
   it('renders active rental alert banner when tenant has an existing active tenancy', () => {

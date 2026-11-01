@@ -72,7 +72,9 @@ export default function TenantDashboard() {
     setSelectedPendingRental,
     pendingPaymentProcessing,
     pendingPaymentError,
+    cancellingRentalId,
     handleOpenPendingPayment,
+    handleCancelPendingRental,
     handleProcessPendingPayment
   } = usePendingPayment({
     currentUser,
@@ -201,6 +203,8 @@ export default function TenantDashboard() {
               onOpenContract={handleOpenContract}
               onViewContractDetails={setViewingContractRental}
               onOpenPendingPayment={handleOpenPendingPayment}
+              onCancelPendingRental={handleCancelPendingRental}
+              cancellingRentalId={cancellingRentalId}
             />
           </div>
         )}

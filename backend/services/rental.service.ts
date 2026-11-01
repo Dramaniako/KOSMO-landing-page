@@ -520,6 +520,72 @@ export class RentalService {
     }
   }
 
+  async cancelPendingRental(
+    rentalId: string,
+    authUser: JWTPayload
+  ): Promise<{ message: string; rentalId: string }> {
+    if (!rentalId || typeof rentalId !== 'string' || rentalId.trim() === '') {
+      throw new RentalServiceError(400, 'rentalId wajib diisi.');
+    }
+
+    const resolvedRentalId = rentalId.trim();
+    const connection = await pool.getConnection();
+    try {
+      await connection.query('SET SESSION innodb_lock_wait_timeout = 5;');
+      await connection.beginTransaction();
+
+      const rental = await this.repo.findRentalForUpdate(resolvedRentalId, connection);
+      if (!rental) {
+        await connection.rollback();
+        throw new RentalServiceError(404, 'Data sewa tidak ditemukan.');
+      }
+
+      const isTenant = authUser.id === rental.tenantId;
+      const isAdmin = authUser.role === 'admin';
+      if (!isTenant && !isAdmin) {
+        await connection.rollback();
+        throw new RentalServiceError(
+          403,
+          'Akses ditolak. Anda tidak berhak membatalkan pesanan sewa ini.'
+        );
+      }
+
+      if (rental.status === 'cancelled') {
+        await connection.commit();
+        return {
+          message: 'Pesanan sewa sudah dibatalkan.',
+          rentalId: resolvedRentalId
+        };
+      }
+
+      if (rental.status !== 'pending') {
+        await connection.rollback();
+        throw new RentalServiceError(
+          400,
+          'Hanya pesanan sewa yang menunggu pembayaran (pending) yang dapat dibatalkan.'
+        );
+      }
+
+      await this.repo.updateRentalStatus(resolvedRentalId, 'cancelled', connection);
+      await connection.commit();
+
+      apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('rentals');
+
+      return {
+        message: 'Pesanan sewa berhasil dibatalkan.',
+        rentalId: resolvedRentalId
+      };
+    } catch (err) {
+      await connection.rollback().catch((rbErr: unknown) => {
+        console.warn('[Rental Service] cancelPendingRental rollback warning:', rbErr);
+      });
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+
   async createRenewalToken(
     rentalId: string,
     authUser: JWTPayload,

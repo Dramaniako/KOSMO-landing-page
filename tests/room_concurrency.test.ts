@@ -440,6 +440,9 @@ test('ROOM CONCURRENCY & TRANSACTION ISOLATION SUITE', async (t) => {
   // STORM 5: POST /api/payment/token Concurrency, Locking & Tenancy Guard
   // =========================================================================
   await t.test('Storm 5: POST /api/payment/token enforces row-level locking and single active tenancy', async (t5) => {
+    // Ensure any active retry rental from Storm 2 does not collide with Tenant 1 in 5.2 / 5.3
+    await pool.query("UPDATE rentals SET status = 'terminated' WHERE id = ?", [`rent-cstorm-retry-${tag}`]);
+
     // 5.1 Single Active Tenancy Guard returns HTTP 409 when tenant already has active lease
     await t5.test('5.1 Rejects token request with 409 Conflict if tenant already has an active lease', async () => {
       // Seed an active rental for Tenant 0

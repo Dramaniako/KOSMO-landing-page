@@ -235,5 +235,51 @@ test('Next payment schedule and billing computation', async (t) => {
     assert.equal(schedExpired.paymentStatus, 'Penyewaan Selesai');
     assert.equal(schedExpired.leaseEndDateISO, '2027-01-01');
     assert.equal(schedExpired.totalDurationMonths, 12);
+
+    const simulateCancelPendingRental = (
+      rental: { id: string; tenantId: string; status: 'pending' | 'active' | 'terminated' | 'cancelled' } | undefined,
+      caller: { id: string; role: 'tenant' | 'landlord' | 'admin' }
+    ): { statusCode: number; message: string; updatedStatus?: string } => {
+      if (!rental) {
+        return { statusCode: 404, message: 'Data sewa tidak ditemukan.' };
+      }
+      const isTenant = caller.id === rental.tenantId;
+      const isAdmin = caller.role === 'admin';
+      if (!isTenant && !isAdmin) {
+        return { statusCode: 403, message: 'Akses ditolak. Anda tidak berhak membatalkan pesanan sewa ini.' };
+      }
+      if (rental.status === 'cancelled') {
+        return { statusCode: 200, message: 'Pesanan sewa sudah dibatalkan.', updatedStatus: 'cancelled' };
+      }
+      if (rental.status !== 'pending') {
+        return {
+          statusCode: 400,
+          message: 'Hanya pesanan sewa yang menunggu pembayaran (pending) yang dapat dibatalkan.'
+        };
+      }
+      return { statusCode: 200, message: 'Pesanan sewa berhasil dibatalkan.', updatedStatus: 'cancelled' };
+    };
+
+    assert.equal(
+      simulateCancelPendingRental(
+        { id: 'rent-pend-01', tenantId: 'tenant-1', status: 'pending' },
+        { id: 'tenant-1', role: 'tenant' }
+      ).updatedStatus,
+      'cancelled'
+    );
+    assert.equal(
+      simulateCancelPendingRental(
+        { id: 'rent-pend-02', tenantId: 'tenant-1', status: 'pending' },
+        { id: 'tenant-2', role: 'tenant' }
+      ).statusCode,
+      403
+    );
+    assert.equal(
+      simulateCancelPendingRental(
+        { id: 'rent-act-01', tenantId: 'tenant-1', status: 'active' },
+        { id: 'tenant-1', role: 'tenant' }
+      ).statusCode,
+      400
+    );
   });
 });

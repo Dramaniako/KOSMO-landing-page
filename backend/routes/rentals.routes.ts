@@ -161,6 +161,26 @@ export function registerRentalRoutes(router: Router): void {
     }
   });
 
+  router.post('/rentals/:id/cancel', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const authUser = req.user;
+    if (!authUser) {
+      return res.status(401).json({ message: 'Otentikasi diperlukan.' });
+    }
+
+    try {
+      const result = await rentalService.cancelPendingRental(String(id), authUser);
+      apiCache.invalidatePattern('rentals');
+      return res.status(200).json(result);
+    } catch (err: unknown) {
+      if (err instanceof RentalServiceError) {
+        return res.status(err.statusCode).json({ message: err.message, ...err.details });
+      }
+      console.error('Cancel pending rental error:', err);
+      return res.status(500).json({ message: 'Gagal membatalkan pesanan sewa.' });
+    }
+  });
+
   router.post(
     '/rentals/:id/renew-token',
     authenticateToken,

@@ -17,11 +17,42 @@ export function usePendingPayment({
   const [selectedPendingRental, setSelectedPendingRental] = useState<Rental | null>(null);
   const [pendingPaymentProcessing, setPendingPaymentProcessing] = useState<boolean>(false);
   const [pendingPaymentError, setPendingPaymentError] = useState<string | null>(null);
+  const [cancellingRentalId, setCancellingRentalId] = useState<string | null>(null);
 
   const handleOpenPendingPayment = (rental: Rental): void => {
     setSelectedPendingRental(rental);
     setPendingPaymentError(null);
     setShowPendingPaymentModal(true);
+  };
+
+  const handleCancelPendingRental = async (rental: Rental): Promise<void> => {
+    if (!currentUser || !rental.id || cancellingRentalId) return;
+    setCancellingRentalId(rental.id);
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_BASE}/rentals/${encodeURIComponent(rental.id)}/cancel`, {
+        method: 'POST',
+        headers
+      });
+
+      if (!res.ok) {
+        const errData = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(errData.message || 'Gagal membatalkan pesanan sewa.');
+      }
+
+      await onRefreshRentals(currentUser.id);
+    } catch (err: unknown) {
+      console.error('Cancel pending rental error:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setPendingPaymentError(msg);
+    } finally {
+      setCancellingRentalId(null);
+    }
   };
 
   const handleClosePendingPayment = (): void => {
@@ -138,7 +169,9 @@ export function usePendingPayment({
     setSelectedPendingRental,
     pendingPaymentProcessing,
     pendingPaymentError,
+    cancellingRentalId,
     handleOpenPendingPayment,
+    handleCancelPendingRental,
     handleClosePendingPayment,
     handleProcessPendingPayment
   };

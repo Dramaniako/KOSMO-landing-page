@@ -1,5 +1,5 @@
 import React from 'react';
-import { History, AlertCircle, FileText, CreditCard } from 'lucide-react';
+import { History, AlertCircle, FileText, CreditCard, XCircle } from 'lucide-react';
 import { Rental } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
 import { formatRupiah } from '../../../utils/format';
@@ -10,6 +10,8 @@ interface RentalHistorySectionProps {
   onOpenContract: (rentalId: string) => Promise<void>;
   onViewContractDetails?: (rental: Rental) => void;
   onOpenPendingPayment: (rental: Rental) => void;
+  onCancelPendingRental?: (rental: Rental) => Promise<void> | void;
+  cancellingRentalId?: string | null;
 }
 
 export const RentalHistorySection: React.FC<RentalHistorySectionProps> = ({
@@ -17,14 +19,16 @@ export const RentalHistorySection: React.FC<RentalHistorySectionProps> = ({
   contractDownloading,
   onOpenContract,
   onViewContractDetails,
-  onOpenPendingPayment
+  onOpenPendingPayment,
+  onCancelPendingRental,
+  cancellingRentalId = null
 }) => {
   const { t } = useTranslation();
 
   if (otherRentals.length === 0) return null;
 
   return (
-    <div className="card" style={{ padding: '28px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '28px', backgroundColor: 'var(--bg-card, #ffffff)' }}>
       <div className="flex-between" style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -139,6 +143,29 @@ export const RentalHistorySection: React.FC<RentalHistorySectionProps> = ({
                     <FileText size={12} />
                     {contractDownloading[rent.id] ? 'Memuat...' : t('tenant.viewContract')}
                   </button>
+                  {isPending && onCancelPendingRental && (
+                    <button
+                      type="button"
+                      onClick={() => onCancelPendingRental(rent)}
+                      disabled={cancellingRentalId === rent.id}
+                      data-testid={`cancel-pending-rental-${rent.id}`}
+                      className="btn btn-outline"
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: '11px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        color: '#dc2626',
+                        borderColor: '#fecaca',
+                        backgroundColor: '#fef2f2',
+                        fontWeight: 600
+                      }}
+                    >
+                      <XCircle size={12} />
+                      {cancellingRentalId === rent.id ? 'Membatalkan...' : 'Batalkan Pesanan'}
+                    </button>
+                  )}
                   {isPending && (
                     <button
                       type="button"
