@@ -6,12 +6,12 @@ const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
 export function useAdminData() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals'>('tracking');
   const [users, setUsers] = useState<User[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ users: true });
+  const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ tracking: true });
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [trackingHistory, setTrackingHistory] = useState<TrackingHistory | null>(null);
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('24h');
@@ -146,8 +146,11 @@ export function useAdminData() {
   const fetchTrackingTab = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, tracking: true }));
     try {
-      await Promise.all([fetchStats(), fetchTrackingHistory()]);
-      loadedTabs.current.add('tracking');
+      const results = await Promise.allSettled([fetchStats(), fetchTrackingHistory()]);
+      const anyRejected = results.some(r => r.status === 'rejected');
+      if (!anyRejected) {
+        loadedTabs.current.add('tracking');
+      }
     } catch (err) {
       console.error('Error loading tracking tab data:', err);
     } finally {

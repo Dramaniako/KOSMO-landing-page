@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download } from 'lucide-react';
+import { Download, RotateCcw } from 'lucide-react';
 import { User } from '../../../types/index';
 import ThemeLanguageToggle from '../../../components/ThemeLanguageToggle';
 import { useTranslation } from '../../../context/LanguageContext';
@@ -8,11 +8,15 @@ const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
 export interface LandlordHeaderProps {
   landlordUser: User | null;
-  onNavigateHome: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  onNavigateHome?: () => void;
 }
 
 export default function LandlordHeader({
   landlordUser,
+  onRefresh,
+  refreshing,
   onNavigateHome
 }: LandlordHeaderProps) {
   const { t } = useTranslation();
@@ -86,8 +90,15 @@ export default function LandlordHeader({
         >
           <Download size={16} /> {downloading ? 'Mengunduh...' : 'Unduh Laporan Excel'}
         </button>
-        <button className="btn btn-outline" onClick={onNavigateHome}>
-          Lihat Landing Page
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={onRefresh || onNavigateHome}
+          disabled={refreshing}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+        >
+          <RotateCcw size={16} className={refreshing ? 'animate-spin' : ''} />
+          {refreshing ? 'Memuat...' : 'Segarkan Data'}
         </button>
       </div>
     </header>

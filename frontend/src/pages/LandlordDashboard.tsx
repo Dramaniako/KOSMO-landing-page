@@ -17,6 +17,7 @@ import DeletePropertyModal from './LandlordDashboard/components/DeletePropertyMo
 import RoomInventoryModal from './LandlordDashboard/components/RoomInventoryModal';
 import PhotoGalleryManager from './LandlordDashboard/components/PhotoGalleryManager';
 import MaintenanceTab from './LandlordDashboard/components/MaintenanceTab';
+import { performLogout } from '../utils/authSession';
 
 export default function LandlordDashboard() {
   const {
@@ -32,7 +33,9 @@ export default function LandlordDashboard() {
     tabLoading,
     loadedTabs,
     fetchOverviewStats,
-    fetchLandlordProperties
+    fetchLandlordProperties,
+    fetchLandlordReviews,
+    fetchLandlordRentals
   } = useLandlordData();
 
   const {
@@ -72,9 +75,16 @@ export default function LandlordDashboard() {
   const [photoModalProperty, setPhotoModalProperty] = useState<Property | null>(null);
 
   const handleLogout = (): void => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
-    navigate('/');
+    void performLogout(navigate);
+  };
+
+  const handleRefresh = (): void => {
+    if (!landlordUser) return;
+    loadedTabs.current.clear();
+    if (activeTab === 'overview') void fetchOverviewStats(landlordUser.id);
+    else if (activeTab === 'properties') void fetchLandlordProperties(landlordUser.id);
+    else if (activeTab === 'reviews') void fetchLandlordReviews(landlordUser.id);
+    else if (activeTab === 'tenants') void fetchLandlordRentals(landlordUser.id);
   };
 
   return (
@@ -98,6 +108,8 @@ export default function LandlordDashboard() {
         {/* Dashboard Header */}
         <LandlordHeader
           landlordUser={landlordUser}
+          onRefresh={handleRefresh}
+          refreshing={Boolean(tabLoading[activeTab])}
           onNavigateHome={() => navigate('/')}
         />
 

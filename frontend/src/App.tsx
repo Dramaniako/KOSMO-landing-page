@@ -35,6 +35,27 @@ function AppErrorBoundary({ children }: { children: React.ReactNode }) {
   return <ErrorBoundary locale={language}>{children}</ErrorBoundary>;
 }
 
+function RootRoute() {
+  const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+  const rawUser = localStorage.getItem('user');
+
+  if (token && rawUser) {
+    try {
+      const user = JSON.parse(rawUser);
+      if (user?.role === 'admin') {
+        return <Navigate to="/admin" replace />;
+      }
+      if (user?.role === 'landlord') {
+        return <Navigate to="/landlord" replace />;
+      }
+    } catch {
+      // Non-JSON user string; allow LandingPage to mount
+    }
+  }
+
+  return <LandingPage />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -45,7 +66,7 @@ export default function App() {
               <BrowserRouter>
               <Suspense fallback={<RouteLoadingFallback />}>
                 <Routes>
-                  <Route path="/" element={<LandingPage />} />
+                  <Route path="/" element={<RootRoute />} />
                   <Route path="/login" element={<Login />} />
                   <Route
                     path="/admin"
@@ -66,7 +87,7 @@ export default function App() {
                   <Route
                     path="/tenant"
                     element={
-                      <ProtectedRoute allowedRoles={['tenant', 'landlord']}>
+                      <ProtectedRoute allowedRoles={['tenant']}>
                         <TenantDashboard />
                       </ProtectedRoute>
                     }

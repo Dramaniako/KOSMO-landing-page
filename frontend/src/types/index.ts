@@ -351,6 +351,14 @@ export interface AdminStats {
   totalLandlords: number;
   totalProperties: number;
   totalRooms: number;
+  visitors?: number;
+  users?: number;
+  landlords?: number;
+  properties?: number;
+  rooms?: number;
+  activeRentals?: number;
+  pendingWithdrawals?: number;
+  openTickets?: number;
 }
 
 export interface TrackingHistoryItem {

@@ -1,12 +1,15 @@
 import React from 'react';
+import { RotateCcw } from 'lucide-react';
 import ThemeLanguageToggle from '../../../components/ThemeLanguageToggle';
 import { useTranslation } from '../../../context/LanguageContext';
 
 export interface AdminHeaderProps {
-  onNavigateHome: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  onNavigateHome?: () => void;
 }
 
-export default function AdminHeader({ onNavigateHome }: AdminHeaderProps) {
+export default function AdminHeader({ onRefresh, refreshing, onNavigateHome }: AdminHeaderProps) {
   const { t } = useTranslation();
 
   return (
@@ -19,8 +22,15 @@ export default function AdminHeader({ onNavigateHome }: AdminHeaderProps) {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <ThemeLanguageToggle />
-        <button className="btn btn-outline" onClick={onNavigateHome}>
-          Kembali ke Web
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={onRefresh || onNavigateHome}
+          disabled={refreshing}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+        >
+          <RotateCcw size={16} className={refreshing ? 'animate-spin' : ''} />
+          {refreshing ? 'Memuat...' : 'Segarkan Data'}
         </button>
       </div>
     </header>

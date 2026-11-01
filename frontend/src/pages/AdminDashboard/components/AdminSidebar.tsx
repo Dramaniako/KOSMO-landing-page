@@ -25,6 +25,15 @@ export default function AdminSidebar({
         <ul className="sidebar-links">
           <li>
             <button
+              className={`sidebar-link ${activeTab === 'tracking' ? 'active' : ''}`}
+              onClick={() => setActiveTab('tracking')}
+            >
+              <BarChart3 size={18} />
+              Statistik & Tracking
+            </button>
+          </li>
+          <li>
+            <button
               className={`sidebar-link ${activeTab === 'users' ? 'active' : ''}`}
               onClick={() => setActiveTab('users')}
             >
@@ -57,15 +66,6 @@ export default function AdminSidebar({
             >
               <Landmark size={18} />
               Pencairan Dana ({pendingWithdrawalsCount})
-            </button>
-          </li>
-          <li>
-            <button
-              className={`sidebar-link ${activeTab === 'tracking' ? 'active' : ''}`}
-              onClick={() => setActiveTab('tracking')}
-            >
-              <BarChart3 size={18} />
-              Tracking Pengunjung
             </button>
           </li>
         </ul>

@@ -17,7 +17,7 @@ export function getSnapScriptUrl(): string {
 
 export function loadSnapSdk(): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || window.snap) {
       return resolve();
     }
 

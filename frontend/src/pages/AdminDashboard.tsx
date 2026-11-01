@@ -14,6 +14,7 @@ import TrackingTab from './AdminDashboard/components/TrackingTab';
 import UserModal from './AdminDashboard/components/UserModal';
 import PropertyModerationModal from './AdminDashboard/components/PropertyModerationModal';
 import ReviewModal from './AdminDashboard/components/ReviewModal';
+import { performLogout } from '../utils/authSession';
 
 export default function AdminDashboard() {
   const {
@@ -36,7 +37,8 @@ export default function AdminDashboard() {
     fetchUsers,
     fetchProperties,
     fetchReviews,
-    fetchWithdrawals
+    fetchWithdrawals,
+    fetchTrackingTab
   } = useAdminData();
 
   const {
@@ -78,14 +80,21 @@ export default function AdminDashboard() {
   );
 
   const handleLogout = (): void => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
-    navigate('/');
+    void performLogout(navigate);
   };
 
-  const pendingWithdrawalsCount = withdrawals.filter(
-    (w) => w.status === 'pending' || w.status === 'processing'
-  ).length;
+  const handleRefresh = (): void => {
+    loadedTabs.current.clear();
+    if (activeTab === 'tracking') void fetchTrackingTab();
+    else if (activeTab === 'users') void fetchUsers();
+    else if (activeTab === 'properties') void fetchProperties();
+    else if (activeTab === 'reviews') void fetchReviews();
+    else if (activeTab === 'withdrawals') void fetchWithdrawals();
+  };
+
+  const pendingWithdrawalsCount =
+    stats?.pendingWithdrawals ??
+    withdrawals.filter((w) => w.status === 'pending' || w.status === 'processing').length;
 
   const landlordUsers = users.filter((u) => u.role === 'landlord');
 
@@ -101,7 +110,11 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <main className="dashboard-content">
-        <AdminHeader onNavigateHome={() => navigate('/')} />
+        <AdminHeader
+          onRefresh={handleRefresh}
+          refreshing={Boolean(tabLoading[activeTab])}
+          onNavigateHome={() => navigate('/')}
+        />
 
         {/* Tab 1: Users Management */}
         {activeTab === 'users' && (

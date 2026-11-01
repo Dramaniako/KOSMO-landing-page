@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Property, Review, Rental } from '../../../types/index';
+import { performLogout } from '../../../utils/authSession';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -20,9 +21,7 @@ export function useTenantData() {
   const loadedTabs = useRef<Set<string>>(new Set(['profile']));
 
   const handleLogout = useCallback((): void => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
-    navigate('/');
+    void performLogout(navigate);
   }, [navigate]);
 
   const fetchMyRentals = useCallback(async (userId: string): Promise<void> => {
@@ -89,8 +88,14 @@ export function useTenantData() {
   }, [fetchProperties]);
 
   useEffect(() => {
-    if (!currentUser || (currentUser.role !== 'tenant' && currentUser.role !== 'landlord')) {
-      navigate('/login');
+    if (!currentUser || currentUser.role !== 'tenant') {
+      if (currentUser?.role === 'admin') {
+        navigate('/admin', { replace: true });
+      } else if (currentUser?.role === 'landlord') {
+        navigate('/landlord', { replace: true });
+      } else {
+        navigate('/login', { replace: true });
+      }
       return;
     }
 

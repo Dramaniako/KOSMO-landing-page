@@ -70,6 +70,18 @@ test.describe('Role-Based Authentication & Dashboard Redirection', () => {
       });
     });
 
+    await page.route('**/api/admin/tracking-history', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          history24h: Array.from({ length: 24 }, (_, i) => ({ label: `${i}:00`, count: i * 2 })),
+          history7d: Array.from({ length: 7 }, (_, i) => ({ label: `Day ${i}`, count: i * 10 })),
+          history30d: Array.from({ length: 30 }, (_, i) => ({ label: `${i + 1}`, count: i * 5 }))
+        })
+      });
+    });
+
     await page.route('**/api/stats*', async (route) => {
       await route.fulfill({
         status: 200,

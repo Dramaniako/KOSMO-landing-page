@@ -25,6 +25,8 @@ interface SumRow extends RowDataPacket {
 interface TrackingHistoryRow extends RowDataPacket {
   label_time?: string;
   label_date?: string;
+  hours_ago?: number;
+  days_ago?: number;
   count: number;
 }
 
@@ -106,6 +108,72 @@ export const handleRecordVisit = async (req: Request, res: Response): Promise<Re
   }
 };
 
+export async function safeCount(query: string, params: unknown[] = []): Promise<number> {
+  try {
+    const [rows] = await pool.query<CountRow[]>(query, params);
+    return Number(rows[0]?.count ?? 0) || 0;
+  } catch (err) {
+    console.warn(`[AdminStats] Non-fatal count query error: "${query}":`, err);
+    return 0;
+  }
+}
+
+export async function safeRoomCount(): Promise<number> {
+  try {
+    const [rows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM rooms');
+    const count = Number(rows[0]?.count ?? 0);
+    if (count > 0) return count;
+  } catch {
+    // Fall back to properties totalRooms sum
+  }
+  return safeCount('SELECT COALESCE(SUM(totalRooms), 0) as count FROM properties');
+}
+
+export async function preloadTrackingData(): Promise<void> {
+  try {
+    const cacheKey = 'admin:stats';
+    const [
+      visitors,
+      users,
+      landlords,
+      properties,
+      rooms,
+      activeRentals,
+      pendingWithdrawals,
+      openTickets
+    ] = await Promise.all([
+      safeCount('SELECT COUNT(*) as count FROM visitor_tracking'),
+      safeCount('SELECT COUNT(*) as count FROM users'),
+      safeCount("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
+      safeCount('SELECT COUNT(*) as count FROM properties'),
+      safeRoomCount(),
+      safeCount("SELECT COUNT(*) as count FROM rentals WHERE status = 'active'"),
+      safeCount("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'"),
+      safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'pending')")
+    ]);
+
+    const statsData = {
+      visitors,
+      users,
+      landlords,
+      properties,
+      rooms,
+      activeRentals,
+      pendingWithdrawals,
+      openTickets,
+      totalVisitors: visitors,
+      totalUsers: users,
+      totalLandlords: landlords,
+      totalProperties: properties,
+      totalRooms: rooms
+    };
+
+    apiCache.set(cacheKey, statsData, 30);
+  } catch (err) {
+    console.warn('[AdminStats] Non-fatal tracking preload error:', err);
+  }
+}
+
 export function registerTrackingRoutes(router: Router): void {
   router.post(
     '/tracking/interaction',
@@ -172,33 +240,42 @@ export function registerTrackingRoutes(router: Router): void {
       }
 
       const [
-        [visitorRows],
-        [userRows],
-        [landlordRows],
-        [propertyRows],
-        [roomsRows]
+        visitors,
+        users,
+        landlords,
+        properties,
+        rooms,
+        activeRentals,
+        pendingWithdrawals,
+        openTickets
       ] = await Promise.all([
-        pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking'),
-        pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users'),
-        pool.query<CountRow[]>("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
-        pool.query<CountRow[]>('SELECT COUNT(*) as count FROM properties'),
-        pool.query<SumRow[]>('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties')
+        safeCount('SELECT COUNT(*) as count FROM visitor_tracking'),
+        safeCount('SELECT COUNT(*) as count FROM users'),
+        safeCount("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
+        safeCount('SELECT COUNT(*) as count FROM properties'),
+        safeRoomCount(),
+        safeCount("SELECT COUNT(*) as count FROM rentals WHERE status = 'active'"),
+        safeCount("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'"),
+        safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'pending')")
       ]);
 
-      const totalVisitors = visitorRows[0]?.count || 0;
-      const totalUsers = userRows[0]?.count || 0;
-      const totalLandlords = landlordRows[0]?.count || 0;
-      const totalProperties = propertyRows[0]?.count || 0;
-      const totalRooms = Number(roomsRows[0]?.sum) || 0;
-
       const statsData = {
-        totalVisitors,
-        totalUsers,
-        totalLandlords,
-        totalProperties,
-        totalRooms
+        visitors,
+        users,
+        landlords,
+        properties,
+        rooms,
+        activeRentals,
+        pendingWithdrawals,
+        openTickets,
+        totalVisitors: visitors,
+        totalUsers: users,
+        totalLandlords: landlords,
+        totalProperties: properties,
+        totalRooms: rooms
       };
-      apiCache.set(cacheKey, statsData, 15000);
+
+      apiCache.set(cacheKey, statsData, 30);
       res.json(statsData);
     } catch (err) {
       console.error("Admin stats error:", err);
@@ -208,57 +285,53 @@ export function registerTrackingRoutes(router: Router): void {
 
   router.get('/admin/tracking-history', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
     try {
-      // 1. Last 24 Hours (grouped by hour)
+      // 1. Last 24 Hours (grouped by integer hours elapsed in DB)
       const [rows24h] = await pool.query<TrackingHistoryRow[]>(`
         SELECT 
-          DATE_FORMAT(visited_at, '%Y-%m-%d %H:00:00') as label_time,
+          TIMESTAMPDIFF(HOUR, DATE_FORMAT(visited_at, '%Y-%m-%d %H:00:00'), DATE_FORMAT(NOW(), '%Y-%m-%d %H:00:00')) as hours_ago,
           COUNT(*) as count
         FROM visitor_tracking
-        WHERE visited_at >= NOW() - INTERVAL 24 HOUR
-        GROUP BY label_time
-        ORDER BY label_time ASC
+        WHERE visited_at >= DATE_SUB(DATE_FORMAT(NOW(), '%Y-%m-%d %H:00:00'), INTERVAL 23 HOUR)
+        GROUP BY hours_ago
+        ORDER BY hours_ago ASC
       `);
 
-      // 2. Last 7 Days (grouped by day)
+      // 2. Last 7 Days (grouped by integer days elapsed in DB)
       const [rows7d] = await pool.query<TrackingHistoryRow[]>(`
         SELECT 
-          DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
+          DATEDIFF(NOW(), visited_at) as days_ago,
           COUNT(*) as count
         FROM visitor_tracking
         WHERE visited_at >= DATE(NOW() - INTERVAL 6 DAY)
-        GROUP BY label_date
-        ORDER BY label_date ASC
+        GROUP BY days_ago
+        ORDER BY days_ago ASC
       `);
 
-      // 3. Last 30 Days (grouped by day)
+      // 3. Last 30 Days (grouped by integer days elapsed in DB)
       const [rows30d] = await pool.query<TrackingHistoryRow[]>(`
         SELECT 
-          DATE_FORMAT(visited_at, '%Y-%m-%d') as label_date,
+          DATEDIFF(NOW(), visited_at) as days_ago,
           COUNT(*) as count
         FROM visitor_tracking
         WHERE visited_at >= DATE(NOW() - INTERVAL 29 DAY)
-        GROUP BY label_date
-        ORDER BY label_date ASC
+        GROUP BY days_ago
+        ORDER BY days_ago ASC
       `);
 
-      // Post-process to fill gaps
+      // Post-process using integer offsets
       const now = new Date();
       
       // 24h helper
       const data24h: { label: string; count: number }[] = [];
       for (let i = 23; i >= 0; i--) {
         const d = new Date(now.getTime() - i * 60 * 60 * 1000);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const date = String(d.getDate()).padStart(2, '0');
         const hour = String(d.getHours()).padStart(2, '0');
-        const labelKey = `${year}-${month}-${date} ${hour}:00:00`;
         const hourLabel = `${hour}:00`;
         
-        const match = rows24h.find(r => r.label_time === labelKey);
+        const match = rows24h.find(r => Number(r.hours_ago) === i);
         data24h.push({
           label: hourLabel,
-          count: match ? match.count : 0
+          count: match ? Number(match.count) : 0
         });
       }
 
@@ -267,16 +340,14 @@ export function registerTrackingRoutes(router: Router): void {
       const daysName = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const year = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const date = String(d.getDate()).padStart(2, '0');
-        const labelKey = `${year}-${month}-${date}`;
         const dayLabel = daysName[d.getDay()] + ` (${date}/${month})`;
 
-        const match = rows7d.find(r => r.label_date === labelKey);
+        const match = rows7d.find(r => Number(r.days_ago) === i);
         data7d.push({
           label: dayLabel,
-          count: match ? match.count : 0
+          count: match ? Number(match.count) : 0
         });
       }
 
@@ -284,16 +355,14 @@ export function registerTrackingRoutes(router: Router): void {
       const data30d: { label: string; count: number }[] = [];
       for (let i = 29; i >= 0; i--) {
         const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const year = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const date = String(d.getDate()).padStart(2, '0');
-        const labelKey = `${year}-${month}-${date}`;
         const dayLabel = `${date}/${month}`;
 
-        const match = rows30d.find(r => r.label_date === labelKey);
+        const match = rows30d.find(r => Number(r.days_ago) === i);
         data30d.push({
           label: dayLabel,
-          count: match ? match.count : 0
+          count: match ? Number(match.count) : 0
         });
       }
 
@@ -369,6 +438,9 @@ export function registerTrackingRoutes(router: Router): void {
   });
 
   router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordExcelReport);
+
+  // Prewarm admin stats cache asynchronously on router registration
+  void preloadTrackingData();
 }
 
 export const handleLandlordExcelReport = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
