@@ -1,6 +1,6 @@
-import React from 'react';
-import { DollarSign, ArrowUpRight, CreditCard, Percent, Landmark, Plus } from 'lucide-react';
-import { User, LandlordStats } from '../../../types/index';
+import React, { useMemo } from 'react';
+import { DollarSign, ArrowUpRight, CreditCard, Percent, Landmark, Plus, AlertTriangle, Wrench } from 'lucide-react';
+import { User, LandlordStats, Rental, MaintenanceTicket } from '../../../types/index';
 import { formatRupiah } from '../../../utils/format';
 import { shimmerStyle } from '../types';
 
@@ -8,17 +8,34 @@ export interface OverviewTabProps {
   stats: LandlordStats;
   landlordUser: User | null;
   loading: boolean;
+  rentals?: Rental[];
+  tickets?: MaintenanceTicket[];
   onOpenWithdraw: () => void;
   onOpenAddProperty: () => void;
+  onNavigateTab?: (tab: 'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance') => void;
 }
 
 export default function OverviewTab({
   stats,
   landlordUser,
   loading,
+  rentals,
+  tickets,
   onOpenWithdraw,
-  onOpenAddProperty
+  onOpenAddProperty,
+  onNavigateTab
 }: OverviewTabProps) {
+  const expiringLeases = useMemo(() => {
+    if (!rentals) return [];
+    return rentals.filter(
+      (r) => r.status === 'active' && ((r.daysRemaining !== undefined && r.daysRemaining <= 7) || r.paymentStatus === 'Menjelang Jatuh Tempo')
+    );
+  }, [rentals]);
+
+  const openTickets = useMemo(() => {
+    if (!tickets) return [];
+    return tickets.filter((t) => t.status === 'open' || t.status === 'in_progress');
+  }, [tickets]);
   if (loading) {
     return (
       <div>
@@ -41,6 +58,95 @@ export default function OverviewTab({
 
   return (
     <>
+      {/* Operational Alert Banners */}
+      {(expiringLeases.length > 0 || openTickets.length > 0) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+          {expiringLeases.length > 0 && (
+            <div
+              data-testid="alert-expiring-leases"
+              style={{
+                padding: '16px',
+                backgroundColor: '#fffbeb',
+                border: '1px solid #fef3c7',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                flexWrap: 'wrap'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ backgroundColor: '#fef3c7', padding: '8px', borderRadius: '8px', color: '#b45309' }}>
+                  <AlertTriangle size={20} />
+                </div>
+                <div>
+                  <strong style={{ fontSize: '14px', color: '#92400e' }}>
+                    Perhatian: {expiringLeases.length} Sewa Segera Jatuh Tempo / Berakhir (&le; 7 hari)
+                  </strong>
+                  <p style={{ fontSize: '12px', color: '#b45309', marginTop: '2px' }}>
+                    {expiringLeases.map((r) => `${r.tenantName || 'Penyewa'} (${r.propertyName}${r.roomNumber ? ' - Kmr ' + r.roomNumber : ''})`).slice(0, 2).join(', ')}
+                    {expiringLeases.length > 2 ? ` dan ${expiringLeases.length - 2} lainnya` : ''}
+                  </p>
+                </div>
+              </div>
+              {onNavigateTab && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', borderColor: '#fde68a', color: '#92400e' }}
+                  onClick={() => onNavigateTab('tenants')}
+                >
+                  Kelola di Tab Penyewa &rarr;
+                </button>
+              )}
+            </div>
+          )}
+
+          {openTickets.length > 0 && (
+            <div
+              data-testid="alert-open-tickets"
+              style={{
+                padding: '16px',
+                backgroundColor: '#eff6ff',
+                border: '1px solid #dbeafe',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                flexWrap: 'wrap'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ backgroundColor: '#dbeafe', padding: '8px', borderRadius: '8px', color: '#1d4ed8' }}>
+                  <Wrench size={20} />
+                </div>
+                <div>
+                  <strong style={{ fontSize: '14px', color: '#1e40af' }}>
+                    Perhatian: {openTickets.length} Tiket Pemeliharaan Menunggu Tanggapan
+                  </strong>
+                  <p style={{ fontSize: '12px', color: '#2563eb', marginTop: '2px' }}>
+                    {openTickets.map((t) => `${t.title} (${t.propertyName || 'Unit'})`).slice(0, 2).join(', ')}
+                    {openTickets.length > 2 ? ` dan ${openTickets.length - 2} lainnya` : ''}
+                  </p>
+                </div>
+              </div>
+              {onNavigateTab && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ fontSize: '12px', padding: '6px 12px', backgroundColor: '#ffffff', borderColor: '#bfdbfe', color: '#1e40af' }}
+                  onClick={() => onNavigateTab('maintenance')}
+                >
+                  Tinjau Pemeliharaan &rarr;
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Stats Cards Row */}
       <div className="stats-grid">
         <div className="stats-card">
@@ -98,7 +204,7 @@ export default function OverviewTab({
 
       {/* Financial Summary & Withdrawal History */}
       <div className="grid-2">
-        <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+        <div className="card" style={{ padding: '24px' }}>
           <h3 style={{ fontSize: '18px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
             Rincian Operasional
           </h3>
@@ -115,14 +221,42 @@ export default function OverviewTab({
               <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Jumlah Review Masuk</span>
               <strong style={{ fontSize: '16px' }}>{stats.reviewsCount} Ulasan</strong>
             </div>
-            <div className="flex-between">
-              <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Metode Pencairan Utama</span>
-              <strong style={{ fontSize: '16px' }}>{landlordUser?.bankName} - {landlordUser?.bankAccountNumber}</strong>
+
+            <div style={{ marginTop: '16px', padding: '16px', backgroundColor: 'var(--bg-main)', borderRadius: '8px', border: '1px solid var(--border-color)' }} data-testid="saved-bank-details">
+              <div className="flex-between" style={{ marginBottom: '8px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Landmark size={15} style={{ color: '#2563eb' }} /> Rekening Pencairan Terdaftar
+                </span>
+                {landlordUser?.bankAccountNumber || stats.bankAccountNumber ? (
+                  <span className="badge badge-success" style={{ fontSize: '10px' }}>Terverifikasi</span>
+                ) : (
+                  <span className="badge badge-secondary" style={{ fontSize: '10px' }}>Belum Diatur</span>
+                )}
+              </div>
+              {landlordUser?.bankAccountNumber || stats.bankAccountNumber ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                    <strong style={{ fontSize: '15px', color: 'var(--text-main)' }}>
+                      {landlordUser?.bankName || stats.bankName || 'Bank Tujuan'}
+                    </strong>
+                    <span style={{ fontSize: '14px', fontFamily: 'monospace', color: 'var(--primary)', fontWeight: 600 }}>
+                      {landlordUser?.bankAccountNumber || stats.bankAccountNumber}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Atas Nama: <strong style={{ color: 'var(--text-main)' }}>{landlordUser?.bankAccountHolder || stats.bankAccountHolder || landlordUser?.name || '-'}</strong>
+                  </p>
+                </>
+              ) : (
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '4px' }}>
+                  Rekening pencairan akan tersimpan otomatis saat Anda mengajukan penarikan dana pertama kali.
+                </p>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+        <div className="card" style={{ padding: '24px' }}>
           <h3 style={{ fontSize: '18px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
             Riwayat Penarikan Dana
           </h3>

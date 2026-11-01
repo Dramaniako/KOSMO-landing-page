@@ -30,6 +30,7 @@ export default function LandlordDashboard() {
     properties,
     reviews,
     rentals,
+    tickets,
     tabLoading,
     loadedTabs,
     fetchOverviewStats,
@@ -119,11 +120,14 @@ export default function LandlordDashboard() {
             stats={stats}
             landlordUser={landlordUser}
             loading={tabLoading.overview && !loadedTabs.current.has('overview')}
+            rentals={rentals}
+            tickets={tickets}
             onOpenWithdraw={() => setShowWithdrawModal(true)}
             onOpenAddProperty={() => {
               resetPropertyForm();
               setShowPropModal(true);
             }}
+            onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}
 

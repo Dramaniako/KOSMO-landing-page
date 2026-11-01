@@ -1,5 +1,5 @@
-import React from 'react';
-import { FileText, Calendar, MessageSquare, DoorOpen, AlertTriangle } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { FileText, Calendar, MessageSquare, DoorOpen, AlertTriangle, Search, X, Filter } from 'lucide-react';
 import { Rental } from '../../../types/index';
 import { formatRupiah } from '../../../utils/format';
 import { useTranslation } from '../../../context/LanguageContext';
@@ -19,6 +19,38 @@ export default function TenantsTab({
   onDownloadContract
 }: TenantsTabProps) {
   const { t } = useTranslation();
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'expiring' | 'pending'>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const counts = useMemo(() => {
+    const total = rentals.length;
+    const active = rentals.filter((r) => r.status === 'active').length;
+    const pending = rentals.filter((r) => r.status === 'pending').length;
+    const expiring = rentals.filter(
+      (r) => r.status === 'active' && ((r.daysRemaining !== undefined && r.daysRemaining <= 7) || r.paymentStatus === 'Menjelang Jatuh Tempo')
+    ).length;
+    return { total, active, pending, expiring };
+  }, [rentals]);
+
+  const filteredRentals = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return rentals.filter((r) => {
+      if (statusFilter === 'active' && r.status !== 'active') return false;
+      if (statusFilter === 'pending' && r.status !== 'pending') return false;
+      if (statusFilter === 'expiring') {
+        const isExpiring = r.status === 'active' && ((r.daysRemaining !== undefined && r.daysRemaining <= 7) || r.paymentStatus === 'Menjelang Jatuh Tempo');
+        if (!isExpiring) return false;
+      }
+
+      if (!query) return true;
+      const matchName = (r.tenantName || '').toLowerCase().includes(query);
+      const matchRoom = (r.roomNumber || '').toLowerCase().includes(query);
+      const matchProp = (r.propertyName || '').toLowerCase().includes(query);
+      const matchPhone = (r.tenantPhone || '').toLowerCase().includes(query);
+      const matchId = (r.id || '').toLowerCase().includes(query);
+      return matchName || matchRoom || matchProp || matchPhone || matchId;
+    });
+  }, [rentals, statusFilter, searchQuery]);
 
   const getWhatsAppReminderUrl = (rental: Rental): string | null => {
     const rawPhone = rental.tenantPhone || '';
@@ -43,9 +75,86 @@ export default function TenantsTab({
   };
 
   return (
-    <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
-      <div className="flex-between" style={{ marginBottom: '24px' }}>
-        <h3 style={{ fontSize: '20px' }}>Sesi Kontrak Penyewa Aktif ({rentals.length})</h3>
+    <div className="card" style={{ padding: '24px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <h3 style={{ fontSize: '20px' }}>
+            Sesi Kontrak Penyewa ({filteredRentals.length}{filteredRentals.length !== rentals.length ? ` / ${rentals.length}` : ''})
+          </h3>
+
+          {/* Search Input */}
+          <div style={{ position: 'relative', minWidth: '280px', maxWidth: '400px', flex: '1 1 280px' }}>
+            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Cari penyewa, kamar, atau properti..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              data-testid="tenant-search-input"
+              style={{ paddingLeft: '36px', paddingRight: searchQuery ? '36px' : '12px', fontSize: '13px', width: '100%' }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                data-testid="tenant-search-clear"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Filter Buttons */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginRight: '4px' }}>
+            <Filter size={14} /> Filter Status:
+          </span>
+          <button
+            type="button"
+            className={`btn ${statusFilter === 'all' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ padding: '4px 12px', fontSize: '12px', borderRadius: '20px' }}
+            onClick={() => setStatusFilter('all')}
+            data-testid="filter-status-all"
+          >
+            Semua ({counts.total})
+          </button>
+          <button
+            type="button"
+            className={`btn ${statusFilter === 'active' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ padding: '4px 12px', fontSize: '12px', borderRadius: '20px' }}
+            onClick={() => setStatusFilter('active')}
+            data-testid="filter-status-active"
+          >
+            Sewa Aktif ({counts.active})
+          </button>
+          <button
+            type="button"
+            className={`btn ${statusFilter === 'expiring' ? 'btn-primary' : 'btn-outline'}`}
+            style={{
+              padding: '4px 12px',
+              fontSize: '12px',
+              borderRadius: '20px',
+              borderColor: statusFilter === 'expiring' ? undefined : '#f59e0b',
+              color: statusFilter === 'expiring' ? undefined : '#d97706'
+            }}
+            onClick={() => setStatusFilter('expiring')}
+            data-testid="filter-status-expiring"
+          >
+            Segera Berakhir ({counts.expiring})
+          </button>
+          <button
+            type="button"
+            className={`btn ${statusFilter === 'pending' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ padding: '4px 12px', fontSize: '12px', borderRadius: '20px' }}
+            onClick={() => setStatusFilter('pending')}
+            data-testid="filter-status-pending"
+          >
+            Menunggu Pembayaran ({counts.pending})
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -54,9 +163,26 @@ export default function TenantsTab({
             <div key={i} style={{ height: '68px', ...shimmerStyle }} />
           ))}
         </div>
-      ) : rentals.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
-          <p style={{ fontStyle: 'italic', fontSize: '14px' }}>Belum ada sesi penyewaan aktif pada properti Anda.</p>
+      ) : filteredRentals.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }} data-testid="tenants-empty-state">
+          <p style={{ fontStyle: 'italic', fontSize: '14px' }}>
+            {rentals.length === 0
+              ? 'Belum ada sesi penyewaan aktif pada properti Anda.'
+              : 'Tidak ada sesi sewa yang cocok dengan filter atau kata kunci pencarian.'}
+          </p>
+          {rentals.length > 0 && (statusFilter !== 'all' || searchQuery) && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ marginTop: '12px', fontSize: '12px' }}
+              onClick={() => {
+                setStatusFilter('all');
+                setSearchQuery('');
+              }}
+            >
+              Reset Filter & Pencarian
+            </button>
+          )}
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
@@ -72,7 +198,7 @@ export default function TenantsTab({
               </tr>
             </thead>
             <tbody>
-              {rentals.map((r) => {
+              {filteredRentals.map((r) => {
                 const daysRemaining = r.daysRemaining;
                 const isNearDue = r.status === 'active' && daysRemaining !== undefined && daysRemaining <= 3;
                 const waUrl = getWhatsAppReminderUrl(r);

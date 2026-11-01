@@ -4,13 +4,22 @@ export function useAdminWithdrawalManagement(
   getAuthHeaders: () => Record<string, string>,
   fetchWithdrawals: () => Promise<void>
 ) {
-  const handleProcessWithdrawal = async (id: string): Promise<void> => {
-    if (!window.confirm("Konfirmasi proses pencairan dana ke landlord?")) return;
+  const handleProcessWithdrawal = async (id: string, defaultRef?: string): Promise<void> => {
+    const suggestedRef = defaultRef || `TRX-${Date.now().toString(36).toUpperCase()}`;
+    const referenceId = window.prompt(
+      "Masukkan Nomor Referensi Transfer Bank (Bank Transfer Reference ID / Bukti Transfer):",
+      suggestedRef
+    );
+    if (referenceId === null) return;
+
     try {
       const res = await fetch(`${API_BASE}/admin/withdrawals/${id}/process`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ status: 'completed' })
+        body: JSON.stringify({
+          status: 'completed',
+          referenceId: referenceId.trim() || suggestedRef
+        })
       });
       const data = (await res.json()) as { message: string };
       if (!res.ok) throw new Error(data.message);

@@ -16,7 +16,7 @@ export default function ReviewsTab({
   onDeleteReview
 }: ReviewsTabProps) {
   return (
-    <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '24px' }}>
       <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Pelanggan Secara Global ({reviews.length})</h3>
 
       {loading ? (
@@ -27,7 +27,7 @@ export default function ReviewsTab({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {reviews.map((r) => (
-            <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div key={r.id} className="card" style={{ padding: '20px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ flex: 1, marginRight: '24px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
                   <strong style={{ fontSize: '15px' }}>{r.userName}</strong>

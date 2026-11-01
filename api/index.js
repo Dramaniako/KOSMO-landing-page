@@ -2854,65 +2854,73 @@ function registerPropertyRoutes(router2) {
       connection.release();
     }
   });
+  const handleFeatureProperty = async (req, res) => {
+    const { id } = req.params;
+    const { isFeatured, durationDays, featuredUntil } = req.body;
+    const authUser = req.user;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [rows] = await connection.query(
+        "SELECT id, name, ownerId, is_featured, featured_until FROM properties WHERE id = ? FOR UPDATE",
+        [id]
+      );
+      const property = rows[0];
+      if (!property) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Properti tidak ditemukan." });
+      }
+      if (authUser?.role !== "admin" && property.ownerId !== authUser?.id) {
+        await connection.rollback();
+        return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+      }
+      let newFeaturedUntil = null;
+      const willBeFeatured = isFeatured !== false;
+      if (willBeFeatured) {
+        if (featuredUntil) {
+          newFeaturedUntil = new Date(String(featuredUntil)).toISOString().slice(0, 19).replace("T", " ");
+        } else {
+          const days = durationDays && Number(durationDays) > 0 ? Number(durationDays) : 30;
+          const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1e3);
+          newFeaturedUntil = expiry.toISOString().slice(0, 19).replace("T", " ");
+        }
+      }
+      await connection.query(
+        "UPDATE properties SET is_featured = ?, featured_until = ? WHERE id = ?",
+        [willBeFeatured ? 1 : 0, newFeaturedUntil, id]
+      );
+      await connection.commit();
+      apiCache.invalidatePattern("properties");
+      return res.json({
+        success: true,
+        message: willBeFeatured ? "Status featured properti berhasil diaktifkan." : "Status featured properti dinonaktifkan.",
+        propertyId: id,
+        is_featured: willBeFeatured,
+        isFeatured: willBeFeatured,
+        featured_until: newFeaturedUntil,
+        featuredUntil: newFeaturedUntil
+      });
+    } catch (err) {
+      await connection.rollback();
+      console.error("Error setting property featured status:", err);
+      return res.status(500).json({ message: "Gagal memperbarui status featured properti." });
+    } finally {
+      connection.release();
+    }
+  };
   router2.post(
     "/properties/:id/feature",
     authenticateToken,
     requireRole(["admin", "landlord", "owner"]),
     validateBody(featurePropertySchema),
-    async (req, res) => {
-      const { id } = req.params;
-      const { isFeatured, durationDays, featuredUntil } = req.body;
-      const authUser = req.user;
-      const connection = await pool.getConnection();
-      try {
-        await connection.beginTransaction();
-        const [rows] = await connection.query(
-          "SELECT id, name, ownerId, is_featured, featured_until FROM properties WHERE id = ? FOR UPDATE",
-          [id]
-        );
-        const property = rows[0];
-        if (!property) {
-          await connection.rollback();
-          return res.status(404).json({ message: "Properti tidak ditemukan." });
-        }
-        if (authUser?.role !== "admin" && property.ownerId !== authUser?.id) {
-          await connection.rollback();
-          return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
-        }
-        let newFeaturedUntil = null;
-        const willBeFeatured = isFeatured !== false;
-        if (willBeFeatured) {
-          if (featuredUntil) {
-            newFeaturedUntil = new Date(String(featuredUntil)).toISOString().slice(0, 19).replace("T", " ");
-          } else {
-            const days = durationDays && Number(durationDays) > 0 ? Number(durationDays) : 30;
-            const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1e3);
-            newFeaturedUntil = expiry.toISOString().slice(0, 19).replace("T", " ");
-          }
-        }
-        await connection.query(
-          "UPDATE properties SET is_featured = ?, featured_until = ? WHERE id = ?",
-          [willBeFeatured ? 1 : 0, newFeaturedUntil, id]
-        );
-        await connection.commit();
-        apiCache.invalidatePattern("properties");
-        return res.json({
-          success: true,
-          message: willBeFeatured ? "Status featured properti berhasil diaktifkan." : "Status featured properti dinonaktifkan.",
-          propertyId: id,
-          is_featured: willBeFeatured,
-          isFeatured: willBeFeatured,
-          featured_until: newFeaturedUntil,
-          featuredUntil: newFeaturedUntil
-        });
-      } catch (err) {
-        await connection.rollback();
-        console.error("Error setting property featured status:", err);
-        return res.status(500).json({ message: "Gagal memperbarui status featured properti." });
-      } finally {
-        connection.release();
-      }
-    }
+    handleFeatureProperty
+  );
+  router2.patch(
+    "/properties/:id/feature",
+    authenticateToken,
+    requireRole(["admin", "landlord", "owner"]),
+    validateBody(featurePropertySchema),
+    handleFeatureProperty
   );
 }
 
@@ -4868,7 +4876,7 @@ var handleLandlordStats = async (req, res) => {
       [reviewCountRows],
       [withdrawals]
     ] = await Promise.all([
-      pool.query("SELECT id, balance, totalRevenue, totalWithdrawn FROM users WHERE id = ?", [landlordId]),
+      pool.query("SELECT id, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder FROM users WHERE id = ?", [landlordId]),
       pool.query(
         `SELECT 
            COUNT(id) as totalProperti,
@@ -4903,6 +4911,9 @@ var handleLandlordStats = async (req, res) => {
       balance: parseFloat(String(landlord.balance || 0)),
       totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
       totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
+      bankName: landlord.bankName || "",
+      bankAccountNumber: landlord.bankAccountNumber || "",
+      bankAccountHolder: landlord.bankAccountHolder || "",
       totalProperti,
       totalRooms,
       occupiedRooms,

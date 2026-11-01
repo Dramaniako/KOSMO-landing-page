@@ -40,7 +40,7 @@ export default function VisitorChart({ data, timeRange }: VisitorChartProps) {
   const xLabels = points.filter((_, idx) => idx % step === 0 || idx === data.length - 1);
 
   return (
-    <div style={{ position: 'relative', width: '100%', overflowX: 'auto', backgroundColor: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)', marginTop: '24px' }}>
+    <div style={{ position: 'relative', width: '100%', overflowX: 'auto', backgroundColor: 'var(--bg-main)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)', marginTop: '24px' }}>
       <h4 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '16px' }}>
         Grafik Aktivitas Pengunjung ({timeRange === '24h' ? '24 Jam Terakhir' : timeRange === '7d' ? '1 Minggu Terakhir' : '1 Bulan Terakhir'})
       </h4>

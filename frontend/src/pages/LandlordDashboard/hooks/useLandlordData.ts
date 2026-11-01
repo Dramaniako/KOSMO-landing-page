@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Property, Review, Rental, LandlordStats } from '../../../types/index';
+import { User, Property, Review, Rental, LandlordStats, MaintenanceTicket } from '../../../types/index';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -29,6 +29,7 @@ export function useLandlordData() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [rentals, setRentals] = useState<Rental[]>([]);
+  const [tickets, setTickets] = useState<MaintenanceTicket[]>([]);
   const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ overview: true });
   const loadedTabs = useRef<Set<string>>(new Set());
 
@@ -110,6 +111,22 @@ export function useLandlordData() {
     }
   }, []);
 
+  const fetchLandlordTickets = useCallback(async (): Promise<void> => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
+      const res = await fetch(`${API_BASE}/tickets`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (res.ok) {
+        const data = (await res.json()) as MaintenanceTicket[];
+        setTickets(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error("Error loading landlord tickets:", err);
+      setTickets([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!landlordUser || landlordUser.role !== 'landlord') {
       navigate('/login');
@@ -117,15 +134,19 @@ export function useLandlordData() {
     }
 
     if (activeTab === 'overview' && !loadedTabs.current.has('overview')) {
-      fetchOverviewStats(landlordUser.id);
+      void fetchOverviewStats(landlordUser.id);
+      void fetchLandlordRentals(landlordUser.id);
+      void fetchLandlordTickets();
     } else if (activeTab === 'properties' && !loadedTabs.current.has('properties')) {
       fetchLandlordProperties(landlordUser.id);
     } else if (activeTab === 'reviews' && !loadedTabs.current.has('reviews')) {
       fetchLandlordReviews(landlordUser.id);
     } else if (activeTab === 'tenants' && !loadedTabs.current.has('tenants')) {
       fetchLandlordRentals(landlordUser.id);
+    } else if (activeTab === 'maintenance') {
+      void fetchLandlordTickets();
     }
-  }, [landlordUser, navigate, activeTab, fetchOverviewStats, fetchLandlordProperties, fetchLandlordReviews, fetchLandlordRentals]);
+  }, [landlordUser, navigate, activeTab, fetchOverviewStats, fetchLandlordProperties, fetchLandlordReviews, fetchLandlordRentals, fetchLandlordTickets]);
 
   return {
     navigate,
@@ -141,11 +162,14 @@ export function useLandlordData() {
     setReviews,
     rentals,
     setRentals,
+    tickets,
+    setTickets,
     tabLoading,
     loadedTabs,
     fetchOverviewStats,
     fetchLandlordProperties,
     fetchLandlordReviews,
-    fetchLandlordRentals
+    fetchLandlordRentals,
+    fetchLandlordTickets
   };
 }

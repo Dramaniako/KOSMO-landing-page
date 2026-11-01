@@ -12,8 +12,9 @@ export function useLandlordWithdraw(
   const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
   const [withdrawForm, setWithdrawForm] = useState<WithdrawFormState>(() => ({
     amount: '',
-    bankName: 'BCA',
-    accountNumber: landlordUser?.bankAccountNumber || ''
+    bankName: landlordUser?.bankName || 'BCA',
+    accountNumber: landlordUser?.bankAccountNumber || '',
+    accountHolder: landlordUser?.bankAccountHolder || landlordUser?.name || ''
   }));
 
   const handleWithdrawSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {

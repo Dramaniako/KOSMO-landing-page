@@ -158,6 +158,25 @@ export function useAdminPropertyManagement(
     }
   };
 
+  const handleToggleFeatured = async (prop: Property): Promise<void> => {
+    const currentFeatured = Boolean(prop.is_featured || prop.isFeatured);
+    const nextFeatured = !currentFeatured;
+    try {
+      const res = await fetch(`${API_BASE}/properties/${prop.id}/feature`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ isFeatured: nextFeatured, durationDays: 30 })
+      });
+      const data = (await res.json()) as { message: string };
+      if (!res.ok) throw new Error(data.message || 'Gagal mengubah status featured.');
+      await fetchProperties();
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
+      throw err;
+    }
+  };
+
   return {
     showPropModal,
     setShowPropModal,
@@ -168,6 +187,7 @@ export function useAdminPropertyManagement(
     resetPropertyForm,
     handlePropertySubmit,
     handleEditProperty,
-    handleDeleteProperty
+    handleDeleteProperty,
+    handleToggleFeatured
   };
 }

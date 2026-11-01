@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Property, Review, AdminStats, TrackingHistory, Withdrawal } from '../../../types/index';
+import { User, Property, Review, AdminStats, TrackingHistory, Withdrawal, MaintenanceTicket, TicketStatus } from '../../../types/index';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
 export function useAdminData() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals'>('tracking');
+  const [activeTab, setActiveTab] = useState<'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals' | 'maintenance'>('tracking');
   const [users, setUsers] = useState<User[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+  const [tickets, setTickets] = useState<MaintenanceTicket[]>([]);
   const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({ tracking: true });
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [trackingHistory, setTrackingHistory] = useState<TrackingHistory | null>(null);
@@ -158,6 +159,48 @@ export function useAdminData() {
     }
   }, [fetchStats, fetchTrackingHistory]);
 
+  const fetchTickets = useCallback(async (): Promise<void> => {
+    setTabLoading(prev => ({ ...prev, maintenance: true }));
+    try {
+      const res = await fetch(`${API_BASE}/tickets`, {
+        headers: getAuthOnlyHeaders()
+      });
+      if (!res.ok) {
+        setTickets([]);
+        return;
+      }
+      const data = (await res.json()) as MaintenanceTicket[];
+      setTickets(Array.isArray(data) ? data : []);
+      loadedTabs.current.add('maintenance');
+    } catch (err) {
+      console.error('Error loading tickets:', err);
+      setTickets([]);
+    } finally {
+      setTabLoading(prev => ({ ...prev, maintenance: false }));
+    }
+  }, [getAuthOnlyHeaders]);
+
+  const handleUpdateTicketStatus = async (ticketId: string, newStatus: TicketStatus): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/tickets/${ticketId}/status`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { message?: string };
+        throw new Error(data.message || 'Gagal mengubah status tiket.');
+      }
+      setTickets((prev) =>
+        prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus } : t))
+      );
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      alert(errorMsg);
+      throw err;
+    }
+  };
+
   useEffect(() => {
     const raw = localStorage.getItem('user');
     const curUser = raw ? (JSON.parse(raw) as User) : null;
@@ -176,8 +219,10 @@ export function useAdminData() {
       fetchWithdrawals();
     } else if (activeTab === 'tracking' && !loadedTabs.current.has('tracking')) {
       fetchTrackingTab();
+    } else if (activeTab === 'maintenance' && !loadedTabs.current.has('maintenance')) {
+      fetchTickets();
     }
-  }, [navigate, activeTab, fetchUsers, fetchProperties, fetchReviews, fetchWithdrawals, fetchTrackingTab]);
+  }, [navigate, activeTab, fetchUsers, fetchProperties, fetchReviews, fetchWithdrawals, fetchTrackingTab, fetchTickets]);
 
   return {
     navigate,
@@ -191,6 +236,8 @@ export function useAdminData() {
     setReviews,
     withdrawals,
     setWithdrawals,
+    tickets,
+    setTickets,
     tabLoading,
     stats,
     trackingHistory,
@@ -206,6 +253,8 @@ export function useAdminData() {
     fetchWithdrawals,
     fetchStats,
     fetchTrackingHistory,
-    fetchTrackingTab
+    fetchTrackingTab,
+    fetchTickets,
+    handleUpdateTicketStatus
   };
 }

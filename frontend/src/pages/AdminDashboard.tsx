@@ -11,6 +11,7 @@ import PropertiesTab from './AdminDashboard/components/PropertiesTab';
 import ReviewsTab from './AdminDashboard/components/ReviewsTab';
 import WithdrawalsTab from './AdminDashboard/components/WithdrawalsTab';
 import TrackingTab from './AdminDashboard/components/TrackingTab';
+import MaintenanceTab from './AdminDashboard/components/MaintenanceTab';
 import UserModal from './AdminDashboard/components/UserModal';
 import PropertyModerationModal from './AdminDashboard/components/PropertyModerationModal';
 import ReviewModal from './AdminDashboard/components/ReviewModal';
@@ -25,6 +26,7 @@ export default function AdminDashboard() {
     properties,
     reviews,
     withdrawals,
+    tickets,
     tabLoading,
     stats,
     trackingHistory,
@@ -38,7 +40,9 @@ export default function AdminDashboard() {
     fetchProperties,
     fetchReviews,
     fetchWithdrawals,
-    fetchTrackingTab
+    fetchTrackingTab,
+    fetchTickets,
+    handleUpdateTicketStatus
   } = useAdminData();
 
   const {
@@ -61,7 +65,8 @@ export default function AdminDashboard() {
     resetPropertyForm,
     handlePropertySubmit,
     handleEditProperty,
-    handleDeleteProperty
+    handleDeleteProperty,
+    handleToggleFeatured
   } = useAdminPropertyManagement(getAuthHeaders, users, fetchProperties);
 
   const {
@@ -90,11 +95,16 @@ export default function AdminDashboard() {
     else if (activeTab === 'properties') void fetchProperties();
     else if (activeTab === 'reviews') void fetchReviews();
     else if (activeTab === 'withdrawals') void fetchWithdrawals();
+    else if (activeTab === 'maintenance') void fetchTickets();
   };
 
   const pendingWithdrawalsCount =
     stats?.pendingWithdrawals ??
     withdrawals.filter((w) => w.status === 'pending' || w.status === 'processing').length;
+
+  const openTicketsCount =
+    stats?.openTickets ??
+    tickets.filter((t) => t.status === 'open' || t.status === 'in_progress').length;
 
   const landlordUsers = users.filter((u) => u.role === 'landlord');
 
@@ -105,6 +115,7 @@ export default function AdminDashboard() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         pendingWithdrawalsCount={pendingWithdrawalsCount}
+        openTicketsCount={openTicketsCount}
         onLogout={handleLogout}
       />
 
@@ -137,6 +148,7 @@ export default function AdminDashboard() {
             loading={tabLoading.properties && !loadedTabs.current.has('properties')}
             onEditProperty={handleEditProperty}
             onDeleteProperty={handleDeleteProperty}
+            onToggleFeatured={handleToggleFeatured}
           />
         )}
 
@@ -169,6 +181,16 @@ export default function AdminDashboard() {
             loading={tabLoading.withdrawals && !loadedTabs.current.has('withdrawals')}
             onProcessWithdrawal={handleProcessWithdrawal}
             onRejectWithdrawal={handleRejectWithdrawal}
+          />
+        )}
+
+        {/* Tab 6: Maintenance & Tickets */}
+        {activeTab === 'maintenance' && (
+          <MaintenanceTab
+            tickets={tickets}
+            loading={Boolean(tabLoading.maintenance && !loadedTabs.current.has('maintenance'))}
+            onRefresh={fetchTickets}
+            onUpdateStatus={handleUpdateTicketStatus}
           />
         )}
       </main>

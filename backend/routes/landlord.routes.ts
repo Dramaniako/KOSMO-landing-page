@@ -82,7 +82,7 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
       [reviewCountRows],
       [withdrawals]
     ] = await Promise.all([
-      pool.query<UserRow[]>('SELECT id, balance, totalRevenue, totalWithdrawn FROM users WHERE id = ?', [landlordId]),
+      pool.query<UserRow[]>('SELECT id, balance, totalRevenue, totalWithdrawn, bankName, bankAccountNumber, bankAccountHolder FROM users WHERE id = ?', [landlordId]),
       pool.query<PropertyStatsAgg[]>(
         `SELECT 
            COUNT(id) as totalProperti,
@@ -97,7 +97,7 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
          FROM reviews r 
          JOIN properties p ON r.propertyId = p.id 
          WHERE p.ownerId = ?`, 
-        [landlordId]
+         [landlordId]
       ),
       pool.query<WithdrawalRow[]>(
         'SELECT * FROM withdrawals WHERE userId = ? ORDER BY date DESC LIMIT 50', 
@@ -120,6 +120,9 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
       balance: parseFloat(String(landlord.balance || 0)),
       totalRevenue: parseFloat(String(landlord.totalRevenue || 0)),
       totalWithdrawn: parseFloat(String(landlord.totalWithdrawn || 0)),
+      bankName: landlord.bankName || '',
+      bankAccountNumber: landlord.bankAccountNumber || '',
+      bankAccountHolder: landlord.bankAccountHolder || '',
       totalProperti,
       totalRooms,
       occupiedRooms,

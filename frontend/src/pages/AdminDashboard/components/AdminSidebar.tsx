@@ -1,10 +1,11 @@
 import React from 'react';
-import { ShieldAlert, Users, Building, MessageSquare, Landmark, BarChart3, LogOut } from 'lucide-react';
+import { ShieldAlert, Users, Building, MessageSquare, Landmark, BarChart3, Wrench, LogOut } from 'lucide-react';
 
 export interface AdminSidebarProps {
-  activeTab: 'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals';
-  setActiveTab: (tab: 'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals') => void;
+  activeTab: 'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals' | 'maintenance';
+  setActiveTab: (tab: 'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals' | 'maintenance') => void;
   pendingWithdrawalsCount: number;
+  openTicketsCount?: number;
   onLogout: () => void;
 }
 
@@ -12,6 +13,7 @@ export default function AdminSidebar({
   activeTab,
   setActiveTab,
   pendingWithdrawalsCount,
+  openTicketsCount,
   onLogout
 }: AdminSidebarProps) {
   return (
@@ -66,6 +68,15 @@ export default function AdminSidebar({
             >
               <Landmark size={18} />
               Pencairan Dana ({pendingWithdrawalsCount})
+            </button>
+          </li>
+          <li>
+            <button
+              className={`sidebar-link ${activeTab === 'maintenance' ? 'active' : ''}`}
+              onClick={() => setActiveTab('maintenance')}
+            >
+              <Wrench size={18} />
+              Tiket & Komplain
             </button>
           </li>
         </ul>

@@ -69,7 +69,7 @@ export default function TrackingTab({
   };
 
   return (
-    <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '24px' }}>
       <div className="flex-between" style={{ marginBottom: '24px' }}>
         <h3 style={{ fontSize: '20px' }}>Tracking Pengunjung Website</h3>
         <button
@@ -162,7 +162,7 @@ export default function TrackingTab({
               timeRange={timeRange}
             />
           ) : (
-            <div style={{ height: '280px', backgroundColor: '#f8fafc', display: 'flex', justifyContent: 'center', alignItems: 'center', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+            <div style={{ height: '280px', backgroundColor: 'var(--bg-main)', display: 'flex', justifyContent: 'center', alignItems: 'center', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
               <div style={{ width: '24px', height: '24px', border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite', marginRight: '8px' }}></div>
               <p style={{ color: 'var(--text-muted)' }}>Memuat data grafik...</p>
             </div>

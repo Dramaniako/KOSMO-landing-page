@@ -5,6 +5,7 @@ export interface WithdrawFormState {
   amount: string;
   bankName: string;
   accountNumber: string;
+  accountHolder?: string;
 }
 
 export interface PropertyFormState {

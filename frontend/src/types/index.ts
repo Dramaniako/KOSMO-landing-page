@@ -383,6 +383,9 @@ export interface LandlordStats {
   activeTenants: number;
   withdrawals: Withdrawal[];
   reviewsCount: number;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountHolder?: string;
 }
 
 export interface FacilityFilterState {
@@ -452,5 +455,7 @@ export interface MaintenanceTicket {
   tenantName?: string;
   roomNumber?: string;
 }
+
+export { BALI_DISTRICTS, type BaliDistrict } from '../constants/districts';
 
 

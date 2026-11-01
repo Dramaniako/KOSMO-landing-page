@@ -16,7 +16,7 @@ export default function WithdrawalsTab({
   onRejectWithdrawal
 }: WithdrawalsTabProps) {
   return (
-    <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '24px' }}>
       <div className="flex-between" style={{ marginBottom: '24px' }}>
         <div>
           <h3 style={{ fontSize: '20px' }}>Moderasi Pencairan Dana Landlord ({withdrawals.length})</h3>

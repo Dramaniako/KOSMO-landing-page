@@ -1,6 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { Property, FacilityFilterState } from '../../../types/index';
+import { Property, FacilityFilterState, BALI_DISTRICTS } from '../../../types/index';
 import { PropertyFormState } from '../types';
 
 export interface PropertyFormModalProps {
@@ -47,15 +47,18 @@ export default function PropertyFormModal({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Kabupaten / Kota</label>
+              <label className="form-label">Kabupaten / Wilayah</label>
               <select
                 className="form-select"
                 value={propertyForm.district}
                 onChange={(e) => setPropertyForm({ ...propertyForm, district: e.target.value })}
               >
-                <option value="Denpasar">Denpasar</option>
-                <option value="Badung">Badung (Seminyak/Kuta)</option>
-                <option value="Gianyar">Gianyar (Ubud)</option>
+                {propertyForm.district && !(BALI_DISTRICTS as readonly string[]).includes(propertyForm.district) && (
+                  <option value={propertyForm.district}>{propertyForm.district}</option>
+                )}
+                {BALI_DISTRICTS.map((district) => (
+                  <option key={district} value={district}>{district}</option>
+                ))}
               </select>
             </div>
 

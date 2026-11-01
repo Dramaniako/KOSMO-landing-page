@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { Search, RotateCcw, SlidersHorizontal, MapPin, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 import { FacilityFilterState } from '../types/index';
+import { BALI_DISTRICTS } from '../constants/districts';
 import { useTranslation } from '../context/LanguageContext';
 
 export interface Props {
@@ -117,10 +118,9 @@ const SearchFilterBar = memo(function SearchFilterBar({
                 onChange={(e) => setDistrict(e.target.value)}
               >
                 <option value="Semua">{t('filter.allDistricts')}</option>
-                <option value="Denpasar">Denpasar</option>
-                <option value="Badung">Badung (Kuta, Seminyak, Canggu)</option>
-                <option value="Gianyar">Gianyar (Ubud)</option>
-                <option value="Tabanan">Tabanan</option>
+                {BALI_DISTRICTS.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
               </select>
             </div>
           </div>

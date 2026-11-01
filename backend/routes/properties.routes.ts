@@ -398,72 +398,82 @@ export function registerPropertyRoutes(router: Router): void {
     }
   });
 
+  const handleFeatureProperty = async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const { isFeatured, durationDays, featuredUntil } = req.body;
+    const authUser = req.user;
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [rows] = await connection.query<PropertyRow[]>(
+        'SELECT id, name, ownerId, is_featured, featured_until FROM properties WHERE id = ? FOR UPDATE',
+        [id]
+      );
+      const property = rows[0];
+      if (!property) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Properti tidak ditemukan." });
+      }
+
+      if (authUser?.role !== 'admin' && property.ownerId !== authUser?.id) {
+        await connection.rollback();
+        return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
+      }
+
+      let newFeaturedUntil: string | null = null;
+      const willBeFeatured = isFeatured !== false;
+
+      if (willBeFeatured) {
+        if (featuredUntil) {
+          newFeaturedUntil = new Date(String(featuredUntil)).toISOString().slice(0, 19).replace('T', ' ');
+        } else {
+          const days = durationDays && Number(durationDays) > 0 ? Number(durationDays) : 30;
+          const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+          newFeaturedUntil = expiry.toISOString().slice(0, 19).replace('T', ' ');
+        }
+      }
+
+      await connection.query(
+        'UPDATE properties SET is_featured = ?, featured_until = ? WHERE id = ?',
+        [willBeFeatured ? 1 : 0, newFeaturedUntil, id]
+      );
+
+      await connection.commit();
+      apiCache.invalidatePattern('properties');
+
+      return res.json({
+        success: true,
+        message: willBeFeatured ? "Status featured properti berhasil diaktifkan." : "Status featured properti dinonaktifkan.",
+        propertyId: id,
+        is_featured: willBeFeatured,
+        isFeatured: willBeFeatured,
+        featured_until: newFeaturedUntil,
+        featuredUntil: newFeaturedUntil
+      });
+    } catch (err: unknown) {
+      await connection.rollback();
+      console.error("Error setting property featured status:", err);
+      return res.status(500).json({ message: "Gagal memperbarui status featured properti." });
+    } finally {
+      connection.release();
+    }
+  };
+
   router.post(
     '/properties/:id/feature',
     authenticateToken,
     requireRole(['admin', 'landlord', 'owner']),
     validateBody(featurePropertySchema),
-    async (req: AuthenticatedRequest, res: Response) => {
-      const { id } = req.params;
-      const { isFeatured, durationDays, featuredUntil } = req.body;
-      const authUser = req.user;
+    handleFeatureProperty
+  );
 
-      const connection = await pool.getConnection();
-      try {
-        await connection.beginTransaction();
-
-        const [rows] = await connection.query<PropertyRow[]>(
-          'SELECT id, name, ownerId, is_featured, featured_until FROM properties WHERE id = ? FOR UPDATE',
-          [id]
-        );
-        const property = rows[0];
-        if (!property) {
-          await connection.rollback();
-          return res.status(404).json({ message: "Properti tidak ditemukan." });
-        }
-
-        if (authUser?.role !== 'admin' && property.ownerId !== authUser?.id) {
-          await connection.rollback();
-          return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik properti ini." });
-        }
-
-        let newFeaturedUntil: string | null = null;
-        const willBeFeatured = isFeatured !== false;
-
-        if (willBeFeatured) {
-          if (featuredUntil) {
-            newFeaturedUntil = new Date(String(featuredUntil)).toISOString().slice(0, 19).replace('T', ' ');
-          } else {
-            const days = durationDays && Number(durationDays) > 0 ? Number(durationDays) : 30;
-            const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-            newFeaturedUntil = expiry.toISOString().slice(0, 19).replace('T', ' ');
-          }
-        }
-
-        await connection.query(
-          'UPDATE properties SET is_featured = ?, featured_until = ? WHERE id = ?',
-          [willBeFeatured ? 1 : 0, newFeaturedUntil, id]
-        );
-
-        await connection.commit();
-        apiCache.invalidatePattern('properties');
-
-        return res.json({
-          success: true,
-          message: willBeFeatured ? "Status featured properti berhasil diaktifkan." : "Status featured properti dinonaktifkan.",
-          propertyId: id,
-          is_featured: willBeFeatured,
-          isFeatured: willBeFeatured,
-          featured_until: newFeaturedUntil,
-          featuredUntil: newFeaturedUntil
-        });
-      } catch (err: unknown) {
-        await connection.rollback();
-        console.error("Error setting property featured status:", err);
-        return res.status(500).json({ message: "Gagal memperbarui status featured properti." });
-      } finally {
-        connection.release();
-      }
-    }
+  router.patch(
+    '/properties/:id/feature',
+    authenticateToken,
+    requireRole(['admin', 'landlord', 'owner']),
+    validateBody(featurePropertySchema),
+    handleFeatureProperty
   );
 }

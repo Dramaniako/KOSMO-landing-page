@@ -18,7 +18,7 @@ describe('AdminSidebar Component', () => {
     );
 
     const buttons = screen.getAllByRole('button');
-    // buttons: [Statistik & Tracking, Manajemen User, Manajemen Properti, Manajemen Review, Pencairan Dana (5), Keluar Panel]
+    // buttons: [Statistik & Tracking, Manajemen User, Manajemen Properti, Manajemen Review, Pencairan Dana (5), Tiket & Komplain, Keluar Panel]
     expect(buttons[0]).toHaveTextContent('Statistik & Tracking');
     expect(buttons[0].className).toContain('active');
 
@@ -31,6 +31,11 @@ describe('AdminSidebar Component', () => {
     expect(buttons[2]).toHaveTextContent('Manajemen Properti');
     expect(buttons[3]).toHaveTextContent('Manajemen Review');
     expect(buttons[4]).toHaveTextContent('Pencairan Dana (5)');
+    expect(buttons[5]).toHaveTextContent('Tiket & Komplain');
+
+    // Click index 5
+    fireEvent.click(buttons[5]);
+    expect(setActiveTab).toHaveBeenCalledWith('maintenance');
   });
 
   it('triggers onLogout when clicking "Keluar Panel"', () => {

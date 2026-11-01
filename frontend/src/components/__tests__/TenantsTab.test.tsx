@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import TenantsTab from '../../pages/LandlordDashboard/components/TenantsTab';
 import { Rental } from '../../types/index';
 import { LanguageProvider } from '../../context/LanguageContext';
@@ -35,6 +35,17 @@ describe('TenantsTab Component Suite', () => {
       status: 'active',
       nextPaymentDate: '15 Okt 2026',
       daysRemaining: 14
+    },
+    {
+      id: 'rent-103',
+      tenantId: 'user-t3',
+      tenantName: 'Andi Wijaya',
+      tenantPhone: '081987654321',
+      propertyId: 'prop-02',
+      propertyName: 'KOSMO Ubud Sanctuary',
+      price: 4000000,
+      startDate: '20 Okt 2026',
+      status: 'pending'
     }
   ];
 
@@ -88,5 +99,62 @@ describe('TenantsTab Component Suite', () => {
     );
 
     expect(screen.queryByTestId('wa-reminder-btn-rent-102')).not.toBeInTheDocument();
+  });
+
+  it('filters rentals by status pills (active, expiring, pending)', () => {
+    render(
+      <LanguageProvider>
+        <TenantsTab
+          rentals={mockRentals}
+          loading={false}
+          contractDownloading={{}}
+          onDownloadContract={vi.fn()}
+        />
+      </LanguageProvider>
+    );
+
+    // Filter to expiring (<= 7 days)
+    fireEvent.click(screen.getByTestId('filter-status-expiring'));
+    expect(screen.getByText('Budi Santoso')).toBeInTheDocument();
+    expect(screen.queryByText('Siti Rahma')).not.toBeInTheDocument();
+    expect(screen.queryByText('Andi Wijaya')).not.toBeInTheDocument();
+
+    // Filter to pending
+    fireEvent.click(screen.getByTestId('filter-status-pending'));
+    expect(screen.getByText('Andi Wijaya')).toBeInTheDocument();
+    expect(screen.queryByText('Budi Santoso')).not.toBeInTheDocument();
+
+    // Reset to all
+    fireEvent.click(screen.getByTestId('filter-status-all'));
+    expect(screen.getByText('Budi Santoso')).toBeInTheDocument();
+    expect(screen.getByText('Siti Rahma')).toBeInTheDocument();
+    expect(screen.getByText('Andi Wijaya')).toBeInTheDocument();
+  });
+
+  it('searches rentals by tenant name and handles empty search results with reset', () => {
+    render(
+      <LanguageProvider>
+        <TenantsTab
+          rentals={mockRentals}
+          loading={false}
+          contractDownloading={{}}
+          onDownloadContract={vi.fn()}
+        />
+      </LanguageProvider>
+    );
+
+    const searchInput = screen.getByTestId('tenant-search-input');
+    fireEvent.change(searchInput, { target: { value: 'Ubud' } });
+
+    expect(screen.getByText('Andi Wijaya')).toBeInTheDocument();
+    expect(screen.queryByText('Budi Santoso')).not.toBeInTheDocument();
+
+    // Non-existent search
+    fireEvent.change(searchInput, { target: { value: 'NonExistent' } });
+    expect(screen.getByTestId('tenants-empty-state')).toBeInTheDocument();
+
+    // Reset via button
+    fireEvent.click(screen.getByText(/Reset Filter & Pencarian/i));
+    expect(screen.getByText('Budi Santoso')).toBeInTheDocument();
   });
 });
