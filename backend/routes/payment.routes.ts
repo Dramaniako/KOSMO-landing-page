@@ -795,7 +795,9 @@ export function registerPaymentRoutes(router: Router): void {
         ? Number(lockedTargetRoom.price)
         : null;
 
-      monthlyRent = roomPriceOverride || Number(existingRental?.price || property.price);
+      monthlyRent = lockedTargetRoom
+        ? (roomPriceOverride || Number(property.price))
+        : Number(existingRental?.price || property.price);
       adminFee = Number(existingRental?.admin_fee_amount ?? 5000.0);
       resolvedDuration = (durationMonths && durationMonths > 0)
         ? durationMonths

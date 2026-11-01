@@ -4257,7 +4257,7 @@ function registerPaymentRoutes(router2) {
           }
         }
         const roomPriceOverride = lockedTargetRoom && typeof lockedTargetRoom.price === "number" && lockedTargetRoom.price > 0 ? Number(lockedTargetRoom.price) : null;
-        monthlyRent = roomPriceOverride || Number(existingRental?.price || property.price);
+        monthlyRent = lockedTargetRoom ? roomPriceOverride || Number(property.price) : Number(existingRental?.price || property.price);
         adminFee = Number(existingRental?.admin_fee_amount ?? 5e3);
         resolvedDuration = durationMonths && durationMonths > 0 ? durationMonths : existingRental?.duration_months ? Number(existingRental.duration_months) : 1;
         totalAmount = monthlyRent * resolvedDuration + adminFee;

@@ -335,13 +335,70 @@ test('Midtrans Snap payment & webhook signature verification', async (t) => {
       ? Number(newTargetRoom.price)
       : null;
 
-    const monthlyRent = roomPriceOverride || Number(existingRental.price);
+    const property = { price: 2000000 };
+    const monthlyRent = newTargetRoom
+      ? (roomPriceOverride || Number(property.price))
+      : Number(existingRental.price || property.price);
     const durationMonths = 3;
     const adminFee = Number(existingRental.admin_fee_amount ?? 5000);
     const totalAmount = (monthlyRent * durationMonths) + adminFee;
 
     assert.equal(monthlyRent, 3200000);
     assert.equal(totalAmount, (3200000 * 3) + 5000); // 9605000
+  });
+
+  await t.test('pending rental room update prevents stale price pollution when switching to default-priced room (price = null)', () => {
+    const property = {
+      id: 'prop-base-101',
+      name: 'Kost Exclusive Sudirman',
+      price: 2500000
+    };
+
+    // Pending rental previously set to a high-tier suite room at 5,000,000 IDR
+    const existingRental = {
+      id: 'rent-stale-test-999',
+      propertyId: 'prop-base-101',
+      roomId: 'room-suite-expensive',
+      price: 5000000,
+      duration_months: 2,
+      admin_fee_amount: 5000,
+      status: 'pending'
+    };
+
+    // User switches to a standard room with default property pricing (price is null)
+    const lockedTargetRoom = {
+      id: 'room-standard-default',
+      propertyId: 'prop-base-101',
+      roomNumber: '101',
+      price: null as number | null,
+      status: 'available'
+    };
+
+    const roomPriceOverride = (lockedTargetRoom && typeof lockedTargetRoom.price === 'number' && lockedTargetRoom.price > 0)
+      ? Number(lockedTargetRoom.price)
+      : null;
+
+    // Fixed calculation logic:
+    const monthlyRent = lockedTargetRoom
+      ? (roomPriceOverride || Number(property.price))
+      : Number(existingRental?.price || property.price);
+
+    const resolvedDuration = (existingRental?.duration_months ? Number(existingRental.duration_months) : 1);
+    const adminFee = Number(existingRental?.admin_fee_amount ?? 5000.0);
+    const totalAmount = (monthlyRent * resolvedDuration) + adminFee;
+
+    // Verify monthlyRent fell back to property.price (2,500,000), NOT stale existingRental.price (5,000,000)
+    assert.equal(monthlyRent, 2500000, 'Monthly rent must fall back to property base price when room.price is null');
+    assert.equal(totalAmount, (2500000 * 2) + 5000, 'Total amount must be calculated using 2,500,000 base rent');
+
+    // Simulate database update
+    const updatedRental = {
+      ...existingRental,
+      roomId: lockedTargetRoom.id,
+      price: monthlyRent
+    };
+    assert.equal(updatedRental.price, property.price, 'rentals.price must be updated to property.price');
+    assert.notEqual(updatedRental.price, 5000000, 'rentals.price must NOT retain stale high price');
   });
 });
 
