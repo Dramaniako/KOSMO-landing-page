@@ -33,8 +33,10 @@ export const registerSchema = z.object({
     .regex(
       /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
       'Format nomor telepon tidak valid (contoh: 08123456789 atau +628123456789)'
-    )
+    ),
+  role: z.enum(['tenant', 'landlord']).optional().default('tenant')
 });
+
 
 export const adminCreateUserSchema = z.object({
   name: z.string().min(2, 'Nama wajib diisi minimal 2 karakter'),

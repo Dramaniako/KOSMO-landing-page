@@ -244,6 +244,7 @@ const translations: Record<Language, Translations> = {
     'auth.registerSubmit': 'Daftar Sekarang',
     'auth.noAccount': 'Belum punya akun?',
     'auth.hasAccount': 'Sudah punya akun?',
+    'auth.sessionExpired': 'Sesi Anda telah berakhir. Silakan masuk kembali.',
 
     // Footer
     'footer.about': 'Platform persewaan kos & co-living all-inclusive terpercaya untuk kemudahan tinggal jangka panjang di Pulau Dewata.',
@@ -486,6 +487,7 @@ const translations: Record<Language, Translations> = {
     'auth.registerSubmit': 'Register Now',
     'auth.noAccount': "Don't have an account?",
     'auth.hasAccount': 'Already have an account?',
+    'auth.sessionExpired': 'Your session has expired. Please sign in again.',
 
     // Footer
     'footer.about': 'Trusted all-inclusive co-living & rental platform for long-term comfort in the Island of the Gods.',

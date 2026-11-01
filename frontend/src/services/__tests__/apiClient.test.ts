@@ -90,4 +90,34 @@ describe('Shared API Client Layer Suite', () => {
     expect(result.filename).toBe('contract_test.pdf');
     expect(result.blob).toBe(mockBlob);
   });
+
+  it('triggers handleSessionExpired on 401/403 responses for authenticated endpoints', async () => {
+    localStorage.setItem('token', 'some-token');
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({ message: 'Session expired' })
+    });
+    global.fetch = mockFetch;
+
+    await expect(request('/user/profile')).rejects.toThrow('Session expired');
+    expect(localStorage.getItem('token')).toBeNull();
+  });
+
+  it('does NOT trigger handleSessionExpired on 401 for /auth/login', async () => {
+    localStorage.setItem('token', 'keep-token');
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({ message: 'Email atau password salah.' })
+    });
+    global.fetch = mockFetch;
+
+    await expect(request('/auth/login', { method: 'POST' })).rejects.toThrow('Email atau password salah.');
+    // Token is NOT wiped out because /auth/login is excluded
+    expect(localStorage.getItem('token')).toBe('keep-token');
+  });
 });
+

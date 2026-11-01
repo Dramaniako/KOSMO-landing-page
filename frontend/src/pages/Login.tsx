@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Mail, Lock, User as UserIcon, Phone, ArrowLeft } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ShieldCheck, Mail, Lock, User as UserIcon, Phone, ArrowLeft, Eye, EyeOff, AlertCircle, Building } from 'lucide-react';
 import { User } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
@@ -15,8 +15,12 @@ interface AuthResponse {
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const isSessionExpired = searchParams.get('expired') === '1';
   const { t } = useTranslation();
   const [isLogin, setIsLogin] = useState<boolean>(true);
+  const [role, setRole] = useState<'tenant' | 'landlord'>('tenant');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [name, setName] = useState<string>('');
@@ -32,7 +36,7 @@ export default function Login() {
     const endpoint = isLogin ? '/auth/login' : '/auth/register';
     const payload = isLogin
       ? { email, password }
-      : { email, password, name, phone };
+      : { email, password, name, phone, role };
 
     try {
       const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -101,9 +105,76 @@ export default function Login() {
           </div>
         )}
 
+        {isSessionExpired && !error && (
+          <div
+            data-testid="session-expired-banner"
+            role="alert"
+            style={{
+              backgroundColor: '#fffbeb',
+              border: '1px solid #fde68a',
+              color: '#92400e',
+              padding: '12px 16px',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '13px',
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}
+          >
+            <AlertCircle size={18} style={{ flexShrink: 0, color: '#f59e0b' }} />
+            <span>{t('auth.sessionExpired') || 'Sesi Anda telah berakhir. Silakan masuk kembali.'}</span>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit}>
           {!isLogin && (
             <>
+              <div className="form-group">
+                <label className="form-label">{t('auth.role') || 'Peran Akun'}</label>
+                <div
+                  data-testid="role-selector"
+                  style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}
+                >
+                  <button
+                    type="button"
+                    data-testid="role-tenant-btn"
+                    className={`btn ${role === 'tenant' ? 'btn-primary' : 'btn-outline'}`}
+                    style={{
+                      padding: '10px 12px',
+                      fontSize: '13px',
+                      fontWeight: role === 'tenant' ? 600 : 400,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px'
+                    }}
+                    onClick={() => setRole('tenant')}
+                  >
+                    <UserIcon size={15} />
+                    {t('auth.tenantRole') || 'Penyewa Kos (Tenant)'}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="role-landlord-btn"
+                    className={`btn ${role === 'landlord' ? 'btn-primary' : 'btn-outline'}`}
+                    style={{
+                      padding: '10px 12px',
+                      fontSize: '13px',
+                      fontWeight: role === 'landlord' ? 600 : 400,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px'
+                    }}
+                    onClick={() => setRole('landlord')}
+                  >
+                    <Building size={15} />
+                    {t('auth.landlordRole') || 'Pemilik Kos (Landlord)'}
+                  </button>
+                </div>
+              </div>
+
               <div className="form-group">
                 <label className="form-label">{t('auth.name')}</label>
                 <div style={{ position: 'relative' }}>
@@ -161,16 +232,39 @@ export default function Login() {
             <div style={{ position: 'relative' }}>
               <Lock size={16} style={{ position: 'absolute', left: '14px', top: '15px', color: 'var(--text-muted)' }} />
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 className="form-input"
                 placeholder="Masukkan password"
-                style={{ paddingLeft: '42px' }}
+                style={{ paddingLeft: '42px', paddingRight: '42px' }}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
+              <button
+                type="button"
+                data-testid="toggle-password-visibility"
+                aria-label={showPassword ? 'Sembunyikan password' : 'Lihat password'}
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
           </div>
+
 
           <button
             type="submit"

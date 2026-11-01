@@ -216,6 +216,57 @@ test('Authentication logic, password security gates & JWT', async (t) => {
     assert.equal(shortPassword.success, false);
   });
 
+  await t.test('Zod registerSchema accepts landlord and tenant roles, defaulting to tenant', () => {
+    // 1. Explicit landlord role
+    const landlordParse = registerSchema.safeParse({
+      name: 'Pak Landlord',
+      email: 'landlord@kosmo.id',
+      password: 'password123',
+      phone: '081234567890',
+      role: 'landlord'
+    });
+    assert.equal(landlordParse.success, true);
+    if (landlordParse.success) {
+      assert.equal(landlordParse.data.role, 'landlord');
+    }
+
+    // 2. Explicit tenant role
+    const tenantParse = registerSchema.safeParse({
+      name: 'Mbak Tenant',
+      email: 'tenant@kosmo.id',
+      password: 'password123',
+      phone: '081234567891',
+      role: 'tenant'
+    });
+    assert.equal(tenantParse.success, true);
+    if (tenantParse.success) {
+      assert.equal(tenantParse.data.role, 'tenant');
+    }
+
+    // 3. Omitted role defaults to tenant
+    const defaultParse = registerSchema.safeParse({
+      name: 'Default User',
+      email: 'default@kosmo.id',
+      password: 'password123',
+      phone: '081234567892'
+    });
+    assert.equal(defaultParse.success, true);
+    if (defaultParse.success) {
+      assert.equal(defaultParse.data.role, 'tenant');
+    }
+
+    // 4. Invalid role rejected (e.g. self-registering as admin)
+    const adminParse = registerSchema.safeParse({
+      name: 'Fake Admin',
+      email: 'admin@kosmo.id',
+      password: 'password123',
+      phone: '081234567893',
+      role: 'admin' as any
+    });
+    assert.equal(adminParse.success, false);
+  });
+
+
   await t.test('Zod propertySchema validates price, room count, and required fields', () => {
     const valid = propertySchema.safeParse({
       name: 'KOSMO Sunset Deluxe',

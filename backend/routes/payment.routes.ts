@@ -62,7 +62,49 @@ export function isMidtransConfigured(): boolean {
   return true;
 }
 
+export interface MidtransStatusResponse {
+  status_code: string;
+  status_message?: string;
+  transaction_id?: string;
+  order_id: string;
+  gross_amount: string;
+  currency?: string;
+  payment_type?: string;
+  transaction_time?: string;
+  transaction_status: string;
+  fraud_status?: string;
+  signature_key?: string;
+}
+
+export async function fetchMidtransTransactionStatus(
+  orderId: string,
+  options?: { serverKey?: string; isProduction?: boolean }
+): Promise<MidtransStatusResponse> {
+  const isProd = options?.isProduction ?? (process.env.MIDTRANS_IS_PRODUCTION === 'true');
+  const serverKey = options?.serverKey || process.env.MIDTRANS_SERVER_KEY || '';
+  const baseUrl = isProd ? 'https://api.midtrans.com' : 'https://api.sandbox.midtrans.com';
+  const url = `${baseUrl}/v2/${encodeURIComponent(orderId)}/status`;
+
+  const authHeader = `Basic ${Buffer.from(`${serverKey}:`).toString('base64')}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: authHeader,
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Midtrans status API error [HTTP ${response.status}]: ${errorBody || response.statusText}`);
+  }
+
+  return (await response.json()) as MidtransStatusResponse;
+}
+
 export const snap = new midtransClient.Snap({
+
   isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
   serverKey: process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-placeholder',
   clientKey: process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-placeholder'
@@ -209,7 +251,56 @@ export async function settleRentalPayment(
 ): Promise<{ success: boolean; statusCode?: number; message: string; rental?: RentalRow }> {
   const { rentalId: targetRentalId, isRenewal } = extractOrderRentalId(orderIdOrRentalId);
 
+  // 🛡️ Upstream Midtrans Verification Guard in Production Environments
+  // Executed OUTSIDE database transaction to adhere to kosmo-concurrency-stress
+  const isProductionMode =
+    (process.env.NODE_ENV === 'production' || process.env.MIDTRANS_IS_PRODUCTION === 'true') &&
+    process.env.NODE_ENV !== 'test' &&
+    process.env.MIDTRANS_SKIP_UPSTREAM_VERIFY !== 'true';
+
+  if (isProductionMode) {
+    if (!isMidtransConfigured()) {
+      return {
+        success: false,
+        statusCode: 500,
+        message: "Midtrans server key belum dikonfigurasi pada server produksi."
+      };
+    }
+
+    try {
+      const upstreamStatus = await fetchMidtransTransactionStatus(orderIdOrRentalId);
+      const isSettled = upstreamStatus.transaction_status === 'settlement';
+      const isAcceptedCapture =
+        upstreamStatus.transaction_status === 'capture' && upstreamStatus.fraud_status === 'accept';
+
+      if (!isSettled && !isAcceptedCapture) {
+        console.warn(
+          `[Midtrans Upstream Verification] Order ${orderIdOrRentalId} rejected: status=${upstreamStatus.transaction_status}, fraud=${upstreamStatus.fraud_status}`
+        );
+        return {
+          success: false,
+          statusCode: 400,
+          message: `Transaksi belum diselesaikan di Midtrans (status: ${upstreamStatus.transaction_status}).`
+        };
+      }
+
+      // If paidAmount was not supplied, verify and backfill from upstream gross_amount
+      const upstreamAmount = parseFloat(upstreamStatus.gross_amount);
+      if (!isNaN(upstreamAmount) && (paidAmount === undefined || isNaN(paidAmount))) {
+        paidAmount = upstreamAmount;
+      }
+    } catch (upstreamErr: unknown) {
+      console.error(`[Midtrans Upstream Verification] Failed to query status for order ${orderIdOrRentalId}:`, upstreamErr);
+      return {
+        success: false,
+        statusCode: 502,
+        message: "Gagal memverifikasi status transaksi ke payment gateway Midtrans."
+      };
+    }
+  }
+
   let connection: PoolConnection | null = null;
+
   let transactionStarted = false;
   let connectionReleased = false;
 
@@ -628,25 +719,58 @@ export function registerPaymentRoutes(router: Router): void {
         return res.status(400).json({ message: "Kamar kos sudah penuh." });
       }
 
-      // 3. Discrete Room validation & pessimistic row lock
-      let lockedRoom: RoomRow | undefined;
-      const requestedRoomId = roomId && typeof roomId === 'string' && roomId.trim() !== '' ? roomId.trim() : undefined;
+      // 3. Single Active Tenancy Check with row-level lock (FOR UPDATE)
+      let activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE";
+      const queryParams: (string | number)[] = [tenantId];
+      if (customRentalId && typeof customRentalId === 'string' && customRentalId.trim() !== '') {
+        activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? FOR UPDATE";
+        queryParams.push(customRentalId.trim());
+      }
 
-      if (requestedRoomId) {
+      const [activeRentals] = await connection.query<RentalRow[]>(activeRentalsQuery, queryParams);
+      if (activeRentals.length > 0) {
+        await safeRollback('single active tenancy');
+        return res.status(409).json({
+          message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
+        });
+      }
+
+      // 4. Existing Rental lookup with pessimistic lock (users -> properties -> rentals -> rooms)
+      const [existingRentalRows] = await connection.query<RentalRow[]>(
+        'SELECT * FROM rentals WHERE id = ? FOR UPDATE',
+        [resolvedRentalId]
+      );
+      const existingRental = existingRentalRows[0];
+      if (existingRental && existingRental.status !== 'pending') {
+        await safeRollback('rental not pending');
+        return res.status(409).json({ message: "Data sewa sudah tidak dalam status pending." });
+      }
+
+      const oldRoomId = existingRental?.roomId || null;
+      const requestedRoomId = roomId && typeof roomId === 'string' && roomId.trim() !== '' ? roomId.trim() : undefined;
+      targetRoomId = requestedRoomId || oldRoomId;
+
+      // 5. Discrete Room validation & pessimistic row lock (users -> properties -> rentals -> rooms)
+      let lockedTargetRoom: RoomRow | undefined;
+      if (targetRoomId) {
+        const roomIdsToLock = Array.from(new Set([targetRoomId, oldRoomId].filter(Boolean) as string[])).sort();
         const [roomRows] = await connection.query<RoomRow[]>(
-          'SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE',
-          [requestedRoomId, propertyId]
+          `SELECT id, propertyId, roomNumber, floor, type, price, status 
+           FROM rooms 
+           WHERE id IN (${roomIdsToLock.map(() => '?').join(',')}) AND propertyId = ? 
+           ORDER BY id FOR UPDATE`,
+          [...roomIdsToLock, propertyId]
         );
-        lockedRoom = roomRows[0];
-        if (!lockedRoom) {
+
+        lockedTargetRoom = roomRows.find(r => r.id === targetRoomId);
+        if (!lockedTargetRoom) {
           await safeRollback('room not found on property');
           return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
         }
-        if (lockedRoom.status !== 'available') {
+        if (lockedTargetRoom.status !== 'available') {
           await safeRollback('room unavailable');
           return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
         }
-        targetRoomId = lockedRoom.id;
       } else {
         // If property has discrete inventory, ensure at least one available room exists
         const [discreteCountRows] = await connection.query<RowDataPacket[]>(
@@ -666,52 +790,37 @@ export function registerPaymentRoutes(router: Router): void {
         }
       }
 
-      // 4. Single Active Tenancy Check with row-level lock (FOR UPDATE)
-      let activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE";
-      const queryParams: (string | number)[] = [tenantId];
-      if (customRentalId && typeof customRentalId === 'string' && customRentalId.trim() !== '') {
-        activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? FOR UPDATE";
-        queryParams.push(customRentalId.trim());
-      }
-
-      const [activeRentals] = await connection.query<RentalRow[]>(activeRentalsQuery, queryParams);
-      if (activeRentals.length > 0) {
-        await safeRollback('single active tenancy');
-        return res.status(409).json({
-          message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
-        });
-      }
-
-      // 5. Existing Rental lookup or pending rental insertion
-      const [existingRentalRows] = await connection.query<RentalRow[]>(
-        'SELECT * FROM rentals WHERE id = ? FOR UPDATE',
-        [resolvedRentalId]
-      );
-      const existingRental = existingRentalRows[0];
-
-      const roomPriceOverride = (lockedRoom && typeof lockedRoom.price === 'number' && lockedRoom.price > 0)
-        ? Number(lockedRoom.price)
+      // 6. Price, Duration & Fee Calculation
+      const roomPriceOverride = (lockedTargetRoom && typeof lockedTargetRoom.price === 'number' && lockedTargetRoom.price > 0)
+        ? Number(lockedTargetRoom.price)
         : null;
 
-      monthlyRent = Number(existingRental?.price || roomPriceOverride || property.price);
-      adminFee = Number(existingRental?.admin_fee_amount || 5000.0);
-      resolvedDuration = (existingRental && existingRental.duration_months)
-        ? Number(existingRental.duration_months)
-        : duration;
+      monthlyRent = roomPriceOverride || Number(existingRental?.price || property.price);
+      adminFee = Number(existingRental?.admin_fee_amount ?? 5000.0);
+      resolvedDuration = (durationMonths && durationMonths > 0)
+        ? durationMonths
+        : (existingRental?.duration_months ? Number(existingRental.duration_months) : 1);
       totalAmount = (monthlyRent * resolvedDuration) + adminFee;
 
+      // 7. Persist pending rental creation or room/pricing update
       if (!existingRental) {
         await connection.query(
           `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
           [resolvedRentalId, tenantId, propertyId, targetRoomId, property.name, monthlyRent, startDate, adminFee, resolvedDuration]
         );
-      } else if (targetRoomId && !existingRental.roomId) {
+      } else {
         await connection.query(
-          'UPDATE rentals SET roomId = ? WHERE id = ?',
-          [targetRoomId, resolvedRentalId]
+          `UPDATE rentals 
+           SET roomId = ?, 
+               price = ?, 
+               duration_months = ?, 
+               startDate = COALESCE(?, startDate) 
+           WHERE id = ? AND status = 'pending'`,
+          [targetRoomId, monthlyRent, resolvedDuration, req.body.startDate || null, resolvedRentalId]
         );
       }
+
 
       // Commit transaction: Row locks are released BEFORE external Midtrans network calls
       await connection.commit();

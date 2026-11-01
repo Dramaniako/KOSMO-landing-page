@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { clearAuthStorage, performLogout } from '../authSession';
+import { clearAuthStorage, performLogout, handleSessionExpired } from '../authSession';
+
 
 describe('authSession utility', () => {
   beforeEach(() => {
@@ -91,4 +92,21 @@ describe('authSession utility', () => {
       expect(navigate).toHaveBeenCalledWith('/login', { replace: true });
     });
   });
+
+  describe('handleSessionExpired', () => {
+    it('purges auth credentials and redirects to /login?expired=1 with replace: true', () => {
+      localStorage.setItem('token', 'expired-token');
+      localStorage.setItem('user', JSON.stringify({ id: 'u4', role: 'tenant' }));
+      localStorage.setItem('kosmo_theme', 'dark');
+
+      const navigate = vi.fn();
+      handleSessionExpired(navigate);
+
+      expect(localStorage.getItem('token')).toBeNull();
+      expect(localStorage.getItem('user')).toBeNull();
+      expect(localStorage.getItem('kosmo_theme')).toBe('dark');
+      expect(navigate).toHaveBeenCalledWith('/login?expired=1', { replace: true });
+    });
+  });
 });
+

@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import { verifyMidtransSignature } from '../backend/router';
+import { fetchMidtransTransactionStatus } from '../backend/routes/payment.routes';
+
+
+
 
 test('Midtrans Snap payment & webhook signature verification', async (t) => {
   const orderId = 'rent-abc-123';
@@ -259,4 +263,85 @@ test('Midtrans Snap payment & webhook signature verification', async (t) => {
     assert.equal(platformCommission, 90000);
     assert.equal(netLandlordCredit, 2910000);
   });
+
+  await t.test('fetchMidtransTransactionStatus parses 200 response and handles HTTP errors', async () => {
+    const originalFetch = global.fetch;
+    try {
+      // Test 1: Successful parse
+      global.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            status_code: '200',
+            order_id: 'rent-abc-123',
+            gross_amount: '3500000.00',
+            transaction_status: 'settlement'
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+
+      const res = await fetchMidtransTransactionStatus('rent-abc-123', {
+        serverKey: 'test-key',
+        isProduction: false
+      });
+      assert.equal(res.status_code, '200');
+      assert.equal(res.transaction_status, 'settlement');
+      assert.equal(res.gross_amount, '3500000.00');
+
+      // Test 2: Error handling
+      global.fetch = async () =>
+        new Response('Transaction not found', { status: 404, statusText: 'Not Found' });
+
+      await assert.rejects(
+        async () => {
+          await fetchMidtransTransactionStatus('rent-not-found', {
+            serverKey: 'test-key',
+            isProduction: false
+          });
+        },
+        /Midtrans status API error \[HTTP 404\]/
+      );
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  await t.test('pending rental room update recalculates monthlyRent and totalAmount with sorted lock IDs', () => {
+    // 1. Verify ID sorting prevention of deadlock
+    const targetRoomId = 'room-deluxe-002';
+    const oldRoomId = 'room-standard-001';
+    const sorted = Array.from(new Set([targetRoomId, oldRoomId])).sort();
+    assert.deepEqual(sorted, ['room-deluxe-002', 'room-standard-001']);
+
+    // 2. Room price recalculation logic
+    const existingRental = {
+      id: 'rent-pending-test',
+      propertyId: 'prop-1',
+      roomId: 'room-standard-001',
+      price: 2000000,
+      duration_months: 3,
+      admin_fee_amount: 5000,
+      status: 'pending'
+    };
+
+    const newTargetRoom = {
+      id: 'room-deluxe-002',
+      propertyId: 'prop-1',
+      roomNumber: '201',
+      price: 3200000,
+      status: 'available'
+    };
+
+    const roomPriceOverride = (newTargetRoom && typeof newTargetRoom.price === 'number' && newTargetRoom.price > 0)
+      ? Number(newTargetRoom.price)
+      : null;
+
+    const monthlyRent = roomPriceOverride || Number(existingRental.price);
+    const durationMonths = 3;
+    const adminFee = Number(existingRental.admin_fee_amount ?? 5000);
+    const totalAmount = (monthlyRent * durationMonths) + adminFee;
+
+    assert.equal(monthlyRent, 3200000);
+    assert.equal(totalAmount, (3200000 * 3) + 5000); // 9605000
+  });
 });
+

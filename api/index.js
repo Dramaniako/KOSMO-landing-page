@@ -1442,7 +1442,8 @@ var registerSchema = z.object({
   phone: z.string({ message: "Nomor telepon wajib diisi saat mendaftar akun" }).trim().min(9, "Nomor telepon minimal 9 digit").max(20, "Nomor telepon maksimal 20 digit").regex(
     /^(?:\+?\d{9,16}|08\d{7,13}|0\d{8,14})$/,
     "Format nomor telepon tidak valid (contoh: 08123456789 atau +628123456789)"
-  )
+  ),
+  role: z.enum(["tenant", "landlord"]).optional().default("tenant")
 });
 var adminCreateUserSchema = z.object({
   name: z.string().min(2, "Nama wajib diisi minimal 2 karakter"),
@@ -1869,10 +1870,11 @@ function registerAuthRoutes(router2) {
         }
         const userId = generateId("user");
         const hashedPassword = await bcrypt2.hash(password, 10);
+        const assignedRole = req.body.role === "landlord" ? "landlord" : "tenant";
         await pool.query(
           `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
-           VALUES (?, ?, ?, ?, 'tenant', ?, 'Virtual Account')`,
-          [userId, email, hashedPassword, name, phone.trim()]
+           VALUES (?, ?, ?, ?, ?, ?, 'Virtual Account')`,
+          [userId, email, hashedPassword, name, assignedRole, phone.trim()]
         );
         const [newUsers] = await pool.query("SELECT * FROM users WHERE id = ?", [userId]);
         const newUser = newUsers[0];
@@ -3702,6 +3704,26 @@ function isMidtransConfigured() {
   if (MIDTRANS_PLACEHOLDERS.some((p) => c.includes(p))) return false;
   return true;
 }
+async function fetchMidtransTransactionStatus(orderId, options) {
+  const isProd = options?.isProduction ?? process.env.MIDTRANS_IS_PRODUCTION === "true";
+  const serverKey = options?.serverKey || process.env.MIDTRANS_SERVER_KEY || "";
+  const baseUrl = isProd ? "https://api.midtrans.com" : "https://api.sandbox.midtrans.com";
+  const url = `${baseUrl}/v2/${encodeURIComponent(orderId)}/status`;
+  const authHeader = `Basic ${Buffer.from(`${serverKey}:`).toString("base64")}`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: authHeader,
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    }
+  });
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(`Midtrans status API error [HTTP ${response.status}]: ${errorBody || response.statusText}`);
+  }
+  return await response.json();
+}
 var snap = new midtransClient.Snap({
   isProduction: process.env.MIDTRANS_IS_PRODUCTION === "true",
   serverKey: process.env.MIDTRANS_SERVER_KEY || "SB-Mid-server-placeholder",
@@ -3795,6 +3817,42 @@ function extractOrderRentalId(orderIdOrRentalId) {
 }
 async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
   const { rentalId: targetRentalId, isRenewal } = extractOrderRentalId(orderIdOrRentalId);
+  const isProductionMode = (process.env.NODE_ENV === "production" || process.env.MIDTRANS_IS_PRODUCTION === "true") && process.env.NODE_ENV !== "test" && process.env.MIDTRANS_SKIP_UPSTREAM_VERIFY !== "true";
+  if (isProductionMode) {
+    if (!isMidtransConfigured()) {
+      return {
+        success: false,
+        statusCode: 500,
+        message: "Midtrans server key belum dikonfigurasi pada server produksi."
+      };
+    }
+    try {
+      const upstreamStatus = await fetchMidtransTransactionStatus(orderIdOrRentalId);
+      const isSettled = upstreamStatus.transaction_status === "settlement";
+      const isAcceptedCapture = upstreamStatus.transaction_status === "capture" && upstreamStatus.fraud_status === "accept";
+      if (!isSettled && !isAcceptedCapture) {
+        console.warn(
+          `[Midtrans Upstream Verification] Order ${orderIdOrRentalId} rejected: status=${upstreamStatus.transaction_status}, fraud=${upstreamStatus.fraud_status}`
+        );
+        return {
+          success: false,
+          statusCode: 400,
+          message: `Transaksi belum diselesaikan di Midtrans (status: ${upstreamStatus.transaction_status}).`
+        };
+      }
+      const upstreamAmount = parseFloat(upstreamStatus.gross_amount);
+      if (!isNaN(upstreamAmount) && (paidAmount === void 0 || isNaN(paidAmount))) {
+        paidAmount = upstreamAmount;
+      }
+    } catch (upstreamErr) {
+      console.error(`[Midtrans Upstream Verification] Failed to query status for order ${orderIdOrRentalId}:`, upstreamErr);
+      return {
+        success: false,
+        statusCode: 502,
+        message: "Gagal memverifikasi status transaksi ke payment gateway Midtrans."
+      };
+    }
+  }
   let connection = null;
   let transactionStarted = false;
   let connectionReleased = false;
@@ -4137,40 +4195,6 @@ function registerPaymentRoutes(router2) {
           await safeRollback("property full");
           return res.status(400).json({ message: "Kamar kos sudah penuh." });
         }
-        let lockedRoom;
-        const requestedRoomId = roomId && typeof roomId === "string" && roomId.trim() !== "" ? roomId.trim() : void 0;
-        if (requestedRoomId) {
-          const [roomRows] = await connection.query(
-            "SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ? FOR UPDATE",
-            [requestedRoomId, propertyId]
-          );
-          lockedRoom = roomRows[0];
-          if (!lockedRoom) {
-            await safeRollback("room not found on property");
-            return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
-          }
-          if (lockedRoom.status !== "available") {
-            await safeRollback("room unavailable");
-            return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
-          }
-          targetRoomId = lockedRoom.id;
-        } else {
-          const [discreteCountRows] = await connection.query(
-            "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
-            [propertyId]
-          );
-          const discreteCount = Number(discreteCountRows[0]?.count || 0);
-          if (discreteCount > 0) {
-            const [availableRooms] = await connection.query(
-              "SELECT id, price, status FROM rooms WHERE propertyId = ? AND status = 'available' LIMIT 1 FOR UPDATE",
-              [propertyId]
-            );
-            if (availableRooms.length === 0) {
-              await safeRollback("no available rooms");
-              return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
-            }
-          }
-        }
         let activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE";
         const queryParams = [tenantId];
         if (customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "") {
@@ -4189,10 +4213,53 @@ function registerPaymentRoutes(router2) {
           [resolvedRentalId]
         );
         const existingRental = existingRentalRows[0];
-        const roomPriceOverride = lockedRoom && typeof lockedRoom.price === "number" && lockedRoom.price > 0 ? Number(lockedRoom.price) : null;
-        monthlyRent = Number(existingRental?.price || roomPriceOverride || property.price);
-        adminFee = Number(existingRental?.admin_fee_amount || 5e3);
-        resolvedDuration = existingRental && existingRental.duration_months ? Number(existingRental.duration_months) : duration;
+        if (existingRental && existingRental.status !== "pending") {
+          await safeRollback("rental not pending");
+          return res.status(409).json({ message: "Data sewa sudah tidak dalam status pending." });
+        }
+        const oldRoomId = existingRental?.roomId || null;
+        const requestedRoomId = roomId && typeof roomId === "string" && roomId.trim() !== "" ? roomId.trim() : void 0;
+        targetRoomId = requestedRoomId || oldRoomId;
+        let lockedTargetRoom;
+        if (targetRoomId) {
+          const roomIdsToLock = Array.from(new Set([targetRoomId, oldRoomId].filter(Boolean))).sort();
+          const [roomRows] = await connection.query(
+            `SELECT id, propertyId, roomNumber, floor, type, price, status 
+           FROM rooms 
+           WHERE id IN (${roomIdsToLock.map(() => "?").join(",")}) AND propertyId = ? 
+           ORDER BY id FOR UPDATE`,
+            [...roomIdsToLock, propertyId]
+          );
+          lockedTargetRoom = roomRows.find((r) => r.id === targetRoomId);
+          if (!lockedTargetRoom) {
+            await safeRollback("room not found on property");
+            return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
+          }
+          if (lockedTargetRoom.status !== "available") {
+            await safeRollback("room unavailable");
+            return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
+          }
+        } else {
+          const [discreteCountRows] = await connection.query(
+            "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+            [propertyId]
+          );
+          const discreteCount = Number(discreteCountRows[0]?.count || 0);
+          if (discreteCount > 0) {
+            const [availableRooms] = await connection.query(
+              "SELECT id, price, status FROM rooms WHERE propertyId = ? AND status = 'available' LIMIT 1 FOR UPDATE",
+              [propertyId]
+            );
+            if (availableRooms.length === 0) {
+              await safeRollback("no available rooms");
+              return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
+            }
+          }
+        }
+        const roomPriceOverride = lockedTargetRoom && typeof lockedTargetRoom.price === "number" && lockedTargetRoom.price > 0 ? Number(lockedTargetRoom.price) : null;
+        monthlyRent = roomPriceOverride || Number(existingRental?.price || property.price);
+        adminFee = Number(existingRental?.admin_fee_amount ?? 5e3);
+        resolvedDuration = durationMonths && durationMonths > 0 ? durationMonths : existingRental?.duration_months ? Number(existingRental.duration_months) : 1;
         totalAmount = monthlyRent * resolvedDuration + adminFee;
         if (!existingRental) {
           await connection.query(
@@ -4200,10 +4267,15 @@ function registerPaymentRoutes(router2) {
            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
             [resolvedRentalId, tenantId, propertyId, targetRoomId, property.name, monthlyRent, startDate, adminFee, resolvedDuration]
           );
-        } else if (targetRoomId && !existingRental.roomId) {
+        } else {
           await connection.query(
-            "UPDATE rentals SET roomId = ? WHERE id = ?",
-            [targetRoomId, resolvedRentalId]
+            `UPDATE rentals 
+           SET roomId = ?, 
+               price = ?, 
+               duration_months = ?, 
+               startDate = COALESCE(?, startDate) 
+           WHERE id = ? AND status = 'pending'`,
+            [targetRoomId, monthlyRent, resolvedDuration, req.body.startDate || null, resolvedRentalId]
           );
         }
         await connection.commit();

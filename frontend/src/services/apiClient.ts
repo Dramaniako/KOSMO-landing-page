@@ -38,11 +38,15 @@ export class ApiError extends Error {
   }
 }
 
+import { handleSessionExpired } from '../utils/authSession';
+
 export interface RequestOptions extends RequestInit {
   timeoutMs?: number;
   retries?: number;
   retryDelayMs?: number;
+  skipAuthExpiryRedirect?: boolean;
 }
+
 
 const viteEnv = typeof import.meta !== 'undefined' && (import.meta as unknown as Record<string, unknown>)?.env
   ? ((import.meta as unknown as Record<string, unknown>).env as Record<string, unknown>)?.VITE_API_BASE
@@ -169,6 +173,16 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
       const statusText = res.statusText || 'Error';
       const message = serverMessage || `HTTP ${res.status}: ${statusText}`;
 
+      // Automatically handle session expiry for authenticated API endpoints
+      if (
+        (res.status === 401 || res.status === 403) &&
+        !options.skipAuthExpiryRedirect &&
+        !endpoint.includes('/auth/login') &&
+        !endpoint.includes('/auth/register')
+      ) {
+        handleSessionExpired();
+      }
+
       throw new ApiError(message, res.status, errorData);
     }
 
@@ -226,8 +240,12 @@ export async function requestBlob(
   });
 
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      handleSessionExpired();
+    }
     throw new ApiError(`Gagal mengunduh dokumen (HTTP ${res.status})`, res.status);
   }
+
 
   const contractHash = res.headers.get('X-Contract-Hash') || undefined;
   const contentDisposition = res.headers.get('Content-Disposition') || '';

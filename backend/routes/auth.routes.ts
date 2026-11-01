@@ -57,7 +57,9 @@ interface RegisterBody {
   password?: string;
   name?: string;
   phone?: string;
+  role?: 'tenant' | 'landlord';
 }
+
 
 export interface UserProfileBody {
   name?: string;
@@ -158,11 +160,13 @@ export function registerAuthRoutes(router: Router): void {
 
         const userId = generateId("user");
         const hashedPassword = await bcrypt.hash(password, 10);
+        const assignedRole: UserRole = req.body.role === 'landlord' ? 'landlord' : 'tenant';
         await pool.query(
           `INSERT INTO users (id, email, password, name, role, phone, paymentMethod) 
-           VALUES (?, ?, ?, ?, 'tenant', ?, 'Virtual Account')`,
-          [userId, email, hashedPassword, name, phone.trim()]
+           VALUES (?, ?, ?, ?, ?, ?, 'Virtual Account')`,
+          [userId, email, hashedPassword, name, assignedRole, phone.trim()]
         );
+
 
         const [newUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [userId]);
         const newUser = newUsers[0];

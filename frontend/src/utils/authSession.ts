@@ -1,7 +1,8 @@
 /**
  * Centralized Authentication & Session Lifecycle Utility
  */
-const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
+const API_BASE = ((import.meta as unknown as { env?: { VITE_API_BASE?: string } }).env?.VITE_API_BASE) || '/api';
+
 
 /**
  * Clears user session tokens and credentials from client storage.
@@ -54,3 +55,31 @@ export async function performLogout(
     }
   }
 }
+
+/**
+ * Handles expired/invalid session events (401/403 responses):
+ * 1. Purges auth credentials from client storage via clearAuthStorage()
+ * 2. Redirects user to /login?expired=1 with replace: true
+ * If a React Router navigate function is provided, uses it.
+ * Otherwise falls back to window.location.href / window.location.replace.
+ */
+export function handleSessionExpired(
+  navigate?: (to: string, options?: { replace?: boolean }) => void
+): void {
+  clearAuthStorage();
+  if (navigate) {
+    navigate('/login?expired=1', { replace: true });
+  } else if (typeof window !== 'undefined') {
+    const isAlreadyAtExpired =
+      window.location.pathname.startsWith('/login') &&
+      window.location.search.includes('expired=1');
+    if (!isAlreadyAtExpired) {
+      if (typeof window.location.replace === 'function') {
+        window.location.replace('/login?expired=1');
+      } else {
+        window.location.href = '/login?expired=1';
+      }
+    }
+  }
+}
+
