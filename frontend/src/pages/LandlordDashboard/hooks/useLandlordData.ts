@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Property, Review, Rental, LandlordStats, MaintenanceTicket } from '../../../types/index';
+import { handleSessionExpired } from '../../../utils/authSession';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -40,6 +41,10 @@ export function useLandlordData() {
       const statsRes = await fetch(`${API_BASE}/stats?landlordId=${encodeURIComponent(landlordId)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
+      if ((statsRes.status === 401 || statsRes.status === 403) && token && token.split('.').length === 3) {
+        handleSessionExpired(navigate);
+        return;
+      }
       if (!statsRes.ok) return;
       const statsData = (await statsRes.json()) as LandlordStats;
       setStats(statsData);
@@ -49,7 +54,7 @@ export function useLandlordData() {
     } finally {
       setTabLoading(prev => ({ ...prev, overview: false }));
     }
-  }, []);
+  }, [navigate]);
 
   const fetchLandlordProperties = useCallback(async (landlordId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, properties: true }));
@@ -97,10 +102,18 @@ export function useLandlordData() {
   const fetchLandlordRentals = useCallback(async (landlordId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, tenants: true }));
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token');
       const res = await fetch(`${API_BASE}/landlord/rentals?landlordId=${encodeURIComponent(landlordId)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
+      if ((res.status === 401 || res.status === 403) && token && token.split('.').length === 3) {
+        handleSessionExpired(navigate);
+        return;
+      }
+      if (!res.ok) {
+        setRentals([]);
+        return;
+      }
       const data = (await res.json()) as Rental[];
       setRentals(Array.isArray(data) ? data : []);
       loadedTabs.current.add('tenants');
@@ -109,7 +122,7 @@ export function useLandlordData() {
     } finally {
       setTabLoading(prev => ({ ...prev, tenants: false }));
     }
-  }, []);
+  }, [navigate]);
 
   const fetchLandlordTickets = useCallback(async (): Promise<void> => {
     try {

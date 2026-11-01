@@ -416,6 +416,8 @@ export async function settleRentalPayment(
       transactionStarted = false;
       apiCache.invalidatePattern('properties');
       apiCache.invalidatePattern('rentals');
+      apiCache.invalidatePattern('landlord:');
+      apiCache.invalidatePattern('admin:');
 
       return {
         success: true,
@@ -532,6 +534,8 @@ export async function settleRentalPayment(
     transactionStarted = false;
     apiCache.invalidatePattern('properties');
     apiCache.invalidatePattern('rentals');
+    apiCache.invalidatePattern('landlord:');
+    apiCache.invalidatePattern('admin:');
     return {
       success: true,
       statusCode: 200,
@@ -925,15 +929,26 @@ export function registerPaymentRoutes(router: Router): void {
   router.post('/payment/notification', validateBody(paymentNotificationSchema), handlePaymentNotification);
 
   router.post('/payment/finish', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
-    const { rentalId } = req.body;
+    const { rentalId, orderId } = req.body as { rentalId?: string; orderId?: string };
     const authUser = req.user;
 
-    if (!rentalId || typeof rentalId !== 'string' || rentalId.trim() === '') {
+    const rawIdentifier =
+      typeof orderId === 'string' && orderId.trim() !== ''
+        ? orderId.trim()
+        : typeof rentalId === 'string' && rentalId.trim() !== ''
+          ? rentalId.trim()
+          : '';
+
+    if (!rawIdentifier) {
       return res.status(400).json({ success: false, message: "rentalId wajib diisi." });
     }
 
+    const { rentalId: resolvedRentalId } = extractOrderRentalId(
+      typeof rentalId === 'string' && rentalId.trim() !== '' ? rentalId.trim() : rawIdentifier
+    );
+
     try {
-      const [rows] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE id = ?', [rentalId.trim()]);
+      const [rows] = await pool.query<RentalRow[]>('SELECT * FROM rentals WHERE id = ?', [resolvedRentalId]);
       const rental = rows[0];
       if (!rental) {
         return res.status(404).json({ success: false, message: "Data sewa tidak ditemukan." });
@@ -943,7 +958,7 @@ export function registerPaymentRoutes(router: Router): void {
         return res.status(403).json({ success: false, message: "Akses ditolak ke data sewa ini." });
       }
 
-      const result = await settleRentalPayment(rentalId.trim());
+      const result = await settleRentalPayment(rawIdentifier);
       if (!result.success) {
         return res.status(result.statusCode || 400).json({ success: false, message: result.message });
       }
@@ -951,7 +966,7 @@ export function registerPaymentRoutes(router: Router): void {
       return res.status(200).json({
         success: true,
         message: result.message,
-        rentalId: rentalId.trim()
+        rentalId: resolvedRentalId
       });
     } catch (err: unknown) {
       console.error("Payment finish route error:", err);

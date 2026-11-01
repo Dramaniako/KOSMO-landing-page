@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Property, Review, AdminStats, TrackingHistory, Withdrawal, MaintenanceTicket, TicketStatus } from '../../../types/index';
+import { handleSessionExpired } from '../../../utils/authSession';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -34,12 +35,23 @@ export function useAdminData() {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, [getAuthToken]);
 
+  const checkSessionStatus = useCallback((status: number): boolean => {
+    const token = getAuthToken();
+    const isRealJwt = Boolean(token && token.split('.').length === 3);
+    if ((status === 401 || status === 403) && isRealJwt) {
+      handleSessionExpired(navigate);
+      return true;
+    }
+    return false;
+  }, [getAuthToken, navigate]);
+
   const fetchUsers = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, users: true }));
     try {
       const res = await fetch(`${API_BASE}/users`, {
         headers: getAuthOnlyHeaders()
       });
+      if (checkSessionStatus(res.status)) return;
       if (!res.ok) {
         setUsers([]);
         return;
@@ -53,7 +65,7 @@ export function useAdminData() {
     } finally {
       setTabLoading(prev => ({ ...prev, users: false }));
     }
-  }, [getAuthOnlyHeaders]);
+  }, [getAuthOnlyHeaders, checkSessionStatus]);
 
   const fetchProperties = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, properties: true }));
@@ -103,6 +115,7 @@ export function useAdminData() {
       const res = await fetch(`${API_BASE}/admin/withdrawals`, {
         headers: getAuthOnlyHeaders()
       });
+      if (checkSessionStatus(res.status)) return;
       if (!res.ok) {
         setWithdrawals([]);
         return;
@@ -116,33 +129,35 @@ export function useAdminData() {
     } finally {
       setTabLoading(prev => ({ ...prev, withdrawals: false }));
     }
-  }, [getAuthOnlyHeaders]);
+  }, [getAuthOnlyHeaders, checkSessionStatus]);
 
   const fetchStats = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch(`${API_BASE}/admin/stats`, {
         headers: getAuthOnlyHeaders()
       });
+      if (checkSessionStatus(res.status)) return;
       if (!res.ok) return;
       const data = (await res.json()) as AdminStats;
       setStats(data);
     } catch (err) {
       console.error('Error loading stats:', err);
     }
-  }, [getAuthOnlyHeaders]);
+  }, [getAuthOnlyHeaders, checkSessionStatus]);
 
   const fetchTrackingHistory = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch(`${API_BASE}/admin/tracking-history`, {
         headers: getAuthOnlyHeaders()
       });
+      if (checkSessionStatus(res.status)) return;
       if (!res.ok) return;
       const data = (await res.json()) as TrackingHistory;
       setTrackingHistory(data);
     } catch (err) {
       console.error('Error loading tracking history:', err);
     }
-  }, [getAuthOnlyHeaders]);
+  }, [getAuthOnlyHeaders, checkSessionStatus]);
 
   const fetchTrackingTab = useCallback(async (): Promise<void> => {
     setTabLoading(prev => ({ ...prev, tracking: true }));

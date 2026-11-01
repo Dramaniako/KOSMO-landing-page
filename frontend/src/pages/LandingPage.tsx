@@ -371,7 +371,11 @@ export default function LandingPage() {
         contractHash: data.contractHash,
         adminFee: data.adminFee || 5000,
         totalAmount: data.totalAmount || (payload.durationMonths * (selectedProperty.price || 0) + 5000),
-        signedAt: data.signedAt || new Date().toISOString()
+        signedAt: data.signedAt || new Date().toISOString(),
+        durationMonths: payload.durationMonths || 1,
+        roomId: payload.roomId,
+        startDate: payload.startDate,
+        monthlyPrice: selectedProperty.price
       });
       setContractSigned(true);
       setShowContract(false);
@@ -407,11 +411,13 @@ export default function LandingPage() {
         body: JSON.stringify({
           propertyId: selectedProperty.id,
           propertyName: selectedProperty.name,
-          price: selectedProperty.price,
+          price: signedContractData.monthlyPrice || selectedProperty.price,
           tenantId: currentUser.id,
           tenantName: currentUser.name,
           tenantEmail: currentUser.email,
-          durationMonths: 1,
+          durationMonths: signedContractData.durationMonths || 1,
+          roomId: signedContractData.roomId,
+          startDate: signedContractData.startDate,
           rentalId: signedContractData.rentalId
         })
       });
@@ -433,6 +439,7 @@ export default function LandingPage() {
         snapToken?: string;
         token?: string;
         rentalId: string;
+        orderId?: string;
       };
 
       const snapToken = data.snapToken || data.token;
@@ -454,11 +461,15 @@ export default function LandingPage() {
         onSuccess: async (result: unknown) => {
           console.log("Midtrans payment success:", result);
           rentalStatusCache = null;
+          const snapOrderId = (result as { order_id?: string } | null)?.order_id || data.orderId;
           try {
             await fetch(`${API_BASE}/payment/finish`, {
               method: 'POST',
               headers,
-              body: JSON.stringify({ rentalId: signedContractData.rentalId })
+              body: JSON.stringify({
+                rentalId: signedContractData.rentalId,
+                ...(snapOrderId ? { orderId: snapOrderId } : {})
+              })
             });
           } catch (finishErr) {
             console.warn("Payment finish notification warning:", finishErr);

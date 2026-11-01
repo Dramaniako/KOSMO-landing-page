@@ -305,6 +305,10 @@ export interface SignedContractData {
   adminFee: number;
   totalAmount: number;
   signedAt: string;
+  durationMonths?: number;
+  roomId?: string;
+  startDate?: string;
+  monthlyPrice?: number;
 }
 
 export interface ContractSignPayload {

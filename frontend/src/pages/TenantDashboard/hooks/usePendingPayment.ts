@@ -86,6 +86,7 @@ export function usePendingPayment({
           tenantName: currentUser.name,
           tenantEmail: currentUser.email,
           durationMonths: duration,
+          roomId: selectedPendingRental.roomId || undefined,
           rentalId: selectedPendingRental.id
         })
       });
@@ -99,6 +100,7 @@ export function usePendingPayment({
         token?: string;
         snapToken?: string;
         rentalId: string;
+        orderId?: string;
       };
       const targetRentalId = selectedPendingRental.id;
       const snapToken = tokenData.snapToken || tokenData.token;
@@ -117,11 +119,15 @@ export function usePendingPayment({
 
       setShowPendingPaymentModal(false);
 
-      const finishPayment = async () => {
+      const finishPayment = async (snapOrderId?: string) => {
+        const resolvedOrderId = snapOrderId || tokenData.orderId;
         const finishRes = await fetch(`${API_BASE}/payment/finish`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ rentalId: targetRentalId })
+          body: JSON.stringify({
+            rentalId: targetRentalId,
+            ...(resolvedOrderId ? { orderId: resolvedOrderId } : {})
+          })
         });
         if (!finishRes.ok) {
           const finishErr = (await finishRes.json().catch(() => ({}))) as { message?: string };
@@ -134,8 +140,9 @@ export function usePendingPayment({
       window.snap.pay(snapToken, {
         onSuccess: async (result: unknown) => {
           console.log('Pending payment completed successfully:', result);
+          const snapOrderId = (result as { order_id?: string } | null)?.order_id;
           try {
-            await finishPayment();
+            await finishPayment(snapOrderId);
           } catch (err: unknown) {
             console.error('Finish payment error:', err);
           }

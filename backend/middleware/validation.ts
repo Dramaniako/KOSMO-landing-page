@@ -345,7 +345,10 @@ export const propertyUpdateSchema = z.object({
     .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().int().positive('Total kamar harus lebih besar dari 0').optional()),
   occupiedRooms: z
     .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().int().min(0).optional()),
-  image: z.string().optional()
+  image: z.string().optional(),
+  ownerId: z.string().trim().min(1).optional(),
+  verified_water_tank: z.boolean().optional(),
+  verified_wifi_speedtest: z.boolean().optional()
 });
 export const updatePropertySchema = propertyUpdateSchema;
 

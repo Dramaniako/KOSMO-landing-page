@@ -400,5 +400,17 @@ test('Midtrans Snap payment & webhook signature verification', async (t) => {
     assert.equal(updatedRental.price, property.price, 'rentals.price must be updated to property.price');
     assert.notEqual(updatedRental.price, 5000000, 'rentals.price must NOT retain stale high price');
   });
+
+  await t.test('extractOrderRentalId resolves both initial timestamped orderId and RENEW orderId for /api/payment/finish', async () => {
+    const { extractOrderRentalId } = await import('../backend/routes/payment.routes');
+
+    const initialParsed = extractOrderRentalId('rent-abc123xyz-1730500000000');
+    assert.equal(initialParsed.rentalId, 'rent-abc123xyz');
+    assert.equal(initialParsed.isRenewal, false);
+
+    const renewalParsed = extractOrderRentalId('RENEW-rent-abc123xyz-1126-1730500000000');
+    assert.equal(renewalParsed.rentalId, 'rent-abc123xyz');
+    assert.equal(renewalParsed.isRenewal, true);
+  });
 });
 

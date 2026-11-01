@@ -2,6 +2,7 @@ import type { Request, Response, Router } from 'express';
 import bcrypt from 'bcryptjs';
 import type { RowDataPacket } from 'mysql2/promise';
 import { pool } from '../db';
+import { apiCache } from '../services/cache';
 import { authenticateToken, requireRole } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import {
@@ -33,7 +34,7 @@ interface AdminUpdateUserBody {
 
 export function registerUserRoutes(router: Router): void {
   // Admin Route: Get all users
-  router.get('/users', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
+  const handleGetUsers = async (_req: Request, res: Response) => {
     try {
       const [rows] = await pool.query<UserRow[]>(
         'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT 50'
@@ -43,19 +44,10 @@ export function registerUserRoutes(router: Router): void {
       console.error("Get users error:", err);
       res.status(500).json({ message: "Gagal mengambil data user." });
     }
-  });
+  };
 
-  router.get('/admin/users', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
-    try {
-      const [rows] = await pool.query<UserRow[]>(
-        'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT 50'
-      );
-      res.json(rows);
-    } catch (err: unknown) {
-      console.error("Get admin users error:", err);
-      res.status(500).json({ message: "Gagal mengambil data user admin." });
-    }
-  });
+  router.get('/users', authenticateToken, requireRole(['admin']), handleGetUsers);
+  router.get('/admin/users', authenticateToken, requireRole(['admin']), handleGetUsers);
 
   // Admin Route: Create user
   router.post(
@@ -83,6 +75,7 @@ export function registerUserRoutes(router: Router): void {
           [userId, email, hashedPassword, name, role, phone || '', paymentMethod || 'Virtual Account']
         );
 
+        apiCache.invalidatePattern('admin:');
         res.status(201).json({ message: "User berhasil dibuat!" });
       } catch (err) {
         res.status(500).json({ message: "Gagal membuat user." });
@@ -119,6 +112,8 @@ export function registerUserRoutes(router: Router): void {
           );
         }
 
+        apiCache.invalidatePattern('admin:');
+        apiCache.invalidatePattern('landlord:');
         res.json({ message: "User berhasil diperbarui!" });
       } catch (err) {
         res.status(500).json({ message: "Gagal memperbarui user." });
@@ -152,18 +147,31 @@ export function registerUserRoutes(router: Router): void {
         return res.status(401).json({ message: "Password administrator salah." });
       }
 
-      // Guard: Prevent deleting user with active rentals to avoid inventory allocation leak
+      // Guard 1: Prevent deleting user with active or pending rentals to avoid inventory allocation leak
       const [activeRentals] = await pool.query<RowDataPacket[]>(
-        "SELECT COUNT(*) as activeCount FROM rentals WHERE tenantId = ? AND status = 'active'",
+        "SELECT COUNT(*) as activeCount FROM rentals WHERE tenantId = ? AND status IN ('active', 'pending')",
         [id]
       );
       if (Number(activeRentals[0]?.activeCount || 0) > 0) {
         return res.status(409).json({
-          message: "Pengguna tidak dapat dihapus karena masih memiliki sewa aktif berjalan."
+          message: "Pengguna tidak dapat dihapus karena masih memiliki sewa aktif atau pesanan menunggu pembayaran."
+        });
+      }
+
+      // Guard 2: Prevent deleting landlord who still owns properties
+      const [ownedProps] = await pool.query<RowDataPacket[]>(
+        'SELECT COUNT(*) as propCount FROM properties WHERE ownerId = ?',
+        [id]
+      );
+      if (Number(ownedProps[0]?.propCount || 0) > 0) {
+        return res.status(409).json({
+          message: "Pengguna tidak dapat dihapus karena masih memiliki properti kos yang terdaftar."
         });
       }
 
       await pool.query('DELETE FROM users WHERE id = ?', [id]);
+      apiCache.invalidatePattern('admin:');
+      apiCache.invalidatePattern('landlord:');
       res.json({ message: "User berhasil dihapus!" });
     } catch (err) {
       res.status(500).json({ message: "Gagal menghapus user." });

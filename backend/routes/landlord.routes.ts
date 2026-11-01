@@ -100,7 +100,7 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
          [landlordId]
       ),
       pool.query<WithdrawalRow[]>(
-        'SELECT * FROM withdrawals WHERE userId = ? ORDER BY date DESC LIMIT 50', 
+        'SELECT * FROM withdrawals WHERE userId = ? ORDER BY id DESC LIMIT 50', 
         [landlordId]
       )
     ]);
@@ -132,7 +132,7 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
       reviewsCount
     };
 
-    apiCache.set(cacheKey, responseData, 15000);
+    apiCache.set(cacheKey, responseData, 15);
     res.json(responseData);
   } catch (err) {
     console.error("Get stats error:", err);
@@ -141,11 +141,11 @@ const handleLandlordStats = async (req: AuthenticatedRequest, res: Response) => 
 };
 
 export function registerLandlordRoutes(router: Router): void {
-  router.get('/stats', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordStats);
-  router.get('/landlord/stats', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordStats);
-  router.get('/landlord/reports/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordExcelReport);
+  router.get('/stats', authenticateToken, requireRole(['admin', 'landlord']), handleLandlordStats);
+  router.get('/landlord/stats', authenticateToken, requireRole(['admin', 'landlord']), handleLandlordStats);
+  router.get('/landlord/reports/excel', authenticateToken, requireRole(['admin', 'landlord']), handleLandlordExcelReport);
 
-  router.get('/landlord/financials', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/landlord/financials', authenticateToken, requireRole(['admin', 'landlord']), async (req: AuthenticatedRequest, res: Response) => {
     const authUser = req.user;
     if (!authUser) {
       return res.status(401).json({ message: "Otentikasi diperlukan." });
@@ -181,11 +181,11 @@ export function registerLandlordRoutes(router: Router): void {
         pool.query<MonthlyRevenueAgg[]>(
           `SELECT 
              COALESCE(DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m'), DATE_FORMAT(r.contract_signed_at, '%Y-%m')) as month,
-             COALESCE(SUM(r.price), 0) as revenue,
+             COALESCE(SUM(r.price * COALESCE(r.duration_months, 1)), 0) as revenue,
              COUNT(r.id) as transactions
            FROM rentals r
            JOIN properties p ON r.propertyId = p.id
-           WHERE p.ownerId = ? AND r.status IN ('active', 'completed')
+           WHERE p.ownerId = ? AND r.status IN ('active', 'terminated')
            GROUP BY month
            ORDER BY month DESC
            LIMIT 12`,
@@ -223,7 +223,7 @@ export function registerLandlordRoutes(router: Router): void {
         withdrawals
       };
 
-      apiCache.set(cacheKey, responseData, 15000);
+      apiCache.set(cacheKey, responseData, 15);
       res.json(responseData);
     } catch (err) {
       console.error("Get landlord financials error:", err);
@@ -270,7 +270,7 @@ export function registerLandlordRoutes(router: Router): void {
     }
   });
 
-  router.get('/landlord/rentals', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
+  router.get('/landlord/rentals', authenticateToken, requireRole(['admin', 'landlord']), async (req: AuthenticatedRequest, res: Response) => {
     const authUser = req.user;
     if (!authUser) {
       return res.status(401).json({ message: "Otentikasi diperlukan." });
@@ -365,15 +365,15 @@ export function registerLandlordRoutes(router: Router): void {
       // Deduct balance upfront (totalWithdrawn is incremented only when admin marks status as completed)
       const newBalance = parseFloat(String(user.balance || 0)) - withdrawAmount;
       const currentWithdrawn = parseFloat(String(user.totalWithdrawn || 0));
+      const holder = accountHolder || user.bankAccountHolder || user.name || '';
 
       await connection.query(
-        'UPDATE users SET balance = ? WHERE id = ?',
-        [newBalance, targetUserId]
+        'UPDATE users SET balance = ?, bankName = ?, bankAccountNumber = ?, bankAccountHolder = ? WHERE id = ?',
+        [newBalance, bankName, accountNumber, holder, targetUserId]
       );
 
       const withdrawalId = generateId("w");
       const dateStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-      const holder = accountHolder || user.bankAccountHolder || user.name || '';
 
       await connection.query(
         `INSERT INTO withdrawals (id, userId, bankName, accountNumber, accountHolder, amount, date, status, referenceId, rejectionReason, processedAt) 
@@ -383,6 +383,7 @@ export function registerLandlordRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('landlord:');
+      apiCache.invalidatePattern('admin:');
       res.json({
         message: "Permintaan penarikan dana berhasil diajukan dan sedang menunggu proses.",
         withdrawalId,
@@ -409,7 +410,7 @@ export function registerLandlordRoutes(router: Router): void {
         SELECT w.*, u.name as userName, u.email as userEmail, u.phone as userPhone
         FROM withdrawals w
         LEFT JOIN users u ON w.userId = u.id
-        ORDER BY w.date DESC
+        ORDER BY w.id DESC
       `;
       const params: (string | number)[] = [];
 
@@ -468,6 +469,7 @@ export function registerLandlordRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('landlord:');
+      apiCache.invalidatePattern('admin:');
       res.json({
         message: targetStatus === 'completed' 
           ? "Disbursement berhasil diproses dan status diselesaikan." 
@@ -559,6 +561,7 @@ export function registerLandlordRoutes(router: Router): void {
 
         await connection.commit();
         apiCache.invalidatePattern('landlord:');
+        apiCache.invalidatePattern('admin:');
         res.json({
           message: "Penarikan berhasil ditolak dan saldo telah dikembalikan ke akun landlord.",
           withdrawalId: id,

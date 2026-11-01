@@ -282,4 +282,16 @@ test('Next payment schedule and billing computation', async (t) => {
       400
     );
   });
+
+  await t.test('normalizes Indonesian localized month abbreviations (Mei, Agu, Okt, Des) without NaN fallback', () => {
+    const refAug = new Date('2026-08-20T00:00:00Z');
+    const schedAgu = computePaymentSchedule('15 Agu 2026', 'active', 3, refAug);
+    assert.equal(schedAgu.nextPaymentDateISO, '2026-09-15');
+    assert.equal(schedAgu.leaseEndDateISO, '2026-11-15');
+
+    const refOct = new Date('2026-10-15T00:00:00Z');
+    const schedOkt = computePaymentSchedule('10 Okt 2026', 'active', 1, refOct);
+    assert.equal(schedOkt.nextPaymentDateISO, '2026-11-10');
+    assert.equal(schedOkt.leaseEndDateISO, '2026-11-10');
+  });
 });

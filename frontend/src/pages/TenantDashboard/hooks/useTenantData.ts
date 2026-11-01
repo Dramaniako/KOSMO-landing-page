@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, Property, Review, Rental } from '../../../types/index';
-import { performLogout } from '../../../utils/authSession';
+import { performLogout, handleSessionExpired } from '../../../utils/authSession';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -31,6 +31,10 @@ export function useTenantData() {
       const rentRes = await fetch(`${API_BASE}/rentals?tenantId=${encodeURIComponent(userId)}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
+      if ((rentRes.status === 401 || rentRes.status === 403) && token && token.split('.').length === 3) {
+        handleSessionExpired(navigate);
+        return;
+      }
       if (!rentRes.ok) {
         setMyRentals([]);
         return;
@@ -45,7 +49,7 @@ export function useTenantData() {
     } finally {
       setTabLoading(prev => ({ ...prev, rentals: false, bills: false }));
     }
-  }, []);
+  }, [navigate]);
 
   const fetchProperties = useCallback(async (): Promise<Property[]> => {
     try {

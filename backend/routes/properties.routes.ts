@@ -1,7 +1,7 @@
 import type { Request, Response, Router } from 'express';
 import bcrypt from 'bcryptjs';
 import type { RowDataPacket } from 'mysql2/promise';
-import { pool } from '../db';
+import { pool, syncPropertyRoomCounts } from '../db';
 import { apiCache } from '../services/cache';
 import { normalizeProperty, normalizePropertySummary } from '../services/transformers';
 import type { PropertyRow } from '../services/transformers';
@@ -223,7 +223,7 @@ export function registerPropertyRoutes(router: Router): void {
   router.post(
     '/properties',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(propertySchema),
     async (req: AuthenticatedRequest & Request<Record<string, never>, unknown, CreatePropertyBody>, res: Response) => {
       const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image, ownerId } = req.body;
@@ -261,6 +261,8 @@ export function registerPropertyRoutes(router: Router): void {
 
         await connection.commit();
         apiCache.invalidatePattern('properties');
+        apiCache.invalidatePattern('landlord:');
+        apiCache.invalidatePattern('admin:');
         res.status(201).json({ message: "Properti berhasil ditambahkan!" });
       } catch (err) {
         await connection.rollback();
@@ -272,9 +274,24 @@ export function registerPropertyRoutes(router: Router): void {
     }
   );
 
-  router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord', 'owner']), validateBody(propertyUpdateSchema), async (req: AuthenticatedRequest, res: Response) => {
+  router.put('/properties/:id', authenticateToken, requireRole(['admin', 'landlord']), validateBody(propertyUpdateSchema), async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
-    const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, occupiedRooms, image } = req.body;
+    const {
+      name,
+      district,
+      address,
+      price,
+      description,
+      facilities,
+      latitude,
+      longitude,
+      totalRooms,
+      occupiedRooms,
+      image,
+      ownerId,
+      verified_water_tank,
+      verified_wifi_speedtest
+    } = req.body;
     const authUser = req.user;
 
     const connection = await pool.getConnection();
@@ -303,16 +320,36 @@ export function registerPropertyRoutes(router: Router): void {
       const updatedRooms = totalRooms !== undefined ? parseInt(String(totalRooms), 10) : existing.totalRooms;
       const updatedOccupied = occupiedRooms !== undefined ? parseInt(String(occupiedRooms), 10) : existing.occupiedRooms;
       const updatedImage = image !== undefined ? image : existing.image;
+      const updatedOwnerId = (authUser?.role === 'admin' && ownerId !== undefined && String(ownerId).trim() !== '')
+        ? String(ownerId).trim()
+        : existing.ownerId;
+      const updatedWaterTank = verified_water_tank !== undefined
+        ? (verified_water_tank ? 1 : 0)
+        : Number(existing.verified_water_tank || 0);
+      const updatedWifiSpeedtest = verified_wifi_speedtest !== undefined
+        ? (verified_wifi_speedtest ? 1 : 0)
+        : Number(existing.verified_wifi_speedtest || 0);
 
       await connection.query(
         `UPDATE properties SET name = ?, district = ?, address = ?, price = ?, description = ?, 
-         latitude = ?, longitude = ?, totalRooms = ?, occupiedRooms = ?, image = ? 
+         latitude = ?, longitude = ?, totalRooms = ?, occupiedRooms = ?, image = ?, ownerId = ?,
+         verified_water_tank = ?, verified_wifi_speedtest = ?
          WHERE id = ?`,
         [
           updatedName, updatedDistrict, updatedAddress, updatedPrice, updatedDesc, 
-          updatedLat, updatedLng, updatedRooms, updatedOccupied, updatedImage, id
+          updatedLat, updatedLng, updatedRooms, updatedOccupied, updatedImage, updatedOwnerId,
+          updatedWaterTank, updatedWifiSpeedtest, id
         ]
       );
+
+      // Keep totalRooms and occupiedRooms synchronized if discrete rooms exist for this property
+      const [roomCountRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?',
+        [id]
+      );
+      if (Number(roomCountRows[0]?.count || 0) > 0) {
+        await syncPropertyRoomCounts(connection, String(id));
+      }
 
       if (facilities !== undefined) {
         await connection.query('DELETE FROM property_facilities WHERE propertyId = ?', [id]);
@@ -327,6 +364,8 @@ export function registerPropertyRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('landlord:');
+      apiCache.invalidatePattern('admin:');
       res.json({ message: "Properti berhasil diperbarui!" });
     } catch (err) {
       await connection.rollback();
@@ -337,7 +376,7 @@ export function registerPropertyRoutes(router: Router): void {
     }
   });
 
-  router.delete('/properties/:id', authenticateToken, requireRole(['admin', 'landlord', 'owner']), async (req: AuthenticatedRequest, res: Response) => {
+  router.delete('/properties/:id', authenticateToken, requireRole(['admin', 'landlord']), async (req: AuthenticatedRequest, res: Response) => {
     const { id } = req.params;
     const { password } = req.body as DeletePropertyBody;
     const authUser = req.user;

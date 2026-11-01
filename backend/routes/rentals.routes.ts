@@ -124,7 +124,8 @@ export function registerRentalRoutes(router: Router): void {
         durationMonths,
         signature,
         roomId,
-        rentalId: req.body.rentalId
+        rentalId: req.body.rentalId,
+        startDate: req.body.startDate
       });
 
       apiCache.invalidatePattern('rentals');

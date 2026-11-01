@@ -34,7 +34,7 @@ export function useLeaseRenewal({ currentUser, onRefreshRentals }: UseLeaseRenew
         throw new Error(errData.message || 'Gagal memproses perpanjangan sewa.');
       }
 
-      const data = (await res.json()) as { token?: string; snapToken?: string };
+      const data = (await res.json()) as { token?: string; snapToken?: string; orderId?: string; rentalId?: string };
       const snapToken = data.token || data.snapToken;
 
       if (!snapToken) {
@@ -52,6 +52,22 @@ export function useLeaseRenewal({ currentUser, onRefreshRentals }: UseLeaseRenew
       window.snap.pay(snapToken, {
         onSuccess: async (result: unknown) => {
           console.log('[Snap] Renewal settlement success:', result);
+          const snapOrderId = (result as { order_id?: string } | null)?.order_id || data.orderId;
+          try {
+            await fetch(`${API_BASE}/payment/finish`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+              },
+              body: JSON.stringify({
+                rentalId: rental.id,
+                ...(snapOrderId ? { orderId: snapOrderId } : {})
+              })
+            });
+          } catch (finishErr) {
+            console.warn('Renewal payment finish warning:', finishErr);
+          }
           try {
             await onRefreshRentals(currentUser.id);
           } catch (refreshErr) {

@@ -47,6 +47,7 @@ export interface CreateBookingInput {
   signature?: string;
   roomId?: string;
   rentalId?: string;
+  startDate?: string;
 }
 
 export class RentalServiceError extends Error {
@@ -58,6 +59,42 @@ export class RentalServiceError extends Error {
 
 export class RentalService {
   constructor(private repo: RentalsRepository = rentalsRepository) {}
+
+  private parseFlexibleStartDate(startDateStr: string, fallback: Date): Date {
+    if (!startDateStr || typeof startDateStr !== 'string') {
+      return new Date(fallback);
+    }
+    const trimmed = startDateStr.trim();
+    const direct = new Date(trimmed);
+    if (!isNaN(direct.getTime())) {
+      return direct;
+    }
+    const idMonthMap: Record<string, string> = {
+      januari: 'January',
+      februari: 'February',
+      maret: 'March',
+      april: 'April',
+      mei: 'May',
+      juni: 'June',
+      juli: 'July',
+      agustus: 'August',
+      agu: 'Aug',
+      ags: 'Aug',
+      september: 'September',
+      oktober: 'October',
+      okt: 'Oct',
+      november: 'November',
+      nopember: 'November',
+      desember: 'December',
+      des: 'Dec'
+    };
+    const normalized = trimmed.replace(
+      /\b(januari|februari|maret|april|mei|juni|juli|agustus|agu|ags|september|oktober|okt|november|nopember|desember|des)\b/gi,
+      (match) => idMonthMap[match.toLowerCase()] || match
+    );
+    const parsed = new Date(normalized);
+    return isNaN(parsed.getTime()) ? new Date(fallback) : parsed;
+  }
 
   computePaymentSchedule(
     startDateStr: string,
@@ -85,8 +122,7 @@ export class RentalService {
     const now = new Date(effectiveRef);
     now.setHours(0, 0, 0, 0);
 
-    const rawStart = new Date(startDateStr);
-    const start = isNaN(rawStart.getTime()) ? new Date(now) : new Date(rawStart);
+    const start = this.parseFlexibleStartDate(startDateStr, now);
     start.setHours(0, 0, 0, 0);
 
     const startDay = start.getDate();
@@ -376,11 +412,10 @@ export class RentalService {
           : Number(price || property.price || 0);
 
       const addedRevenue = effectivePrice * duration;
-      const startDateStr = new Date().toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-      });
+      const startDateStr =
+        input.startDate && typeof input.startDate === 'string' && input.startDate.trim() !== ''
+          ? input.startDate.trim()
+          : new Date().toISOString().split('T')[0];
       const resolvedPropertyName = propertyName || property.name || 'Kos KOSMO';
       const documentUrl = `/uploads/rental_contract_${rentalId}.pdf`;
 
@@ -394,7 +429,14 @@ export class RentalService {
       }
 
       if (property.ownerId) {
-        await this.repo.creditLandlordBalance(property.ownerId, addedRevenue, connection);
+        const platformCommission = Math.round(addedRevenue * 0.03);
+        const netLandlordCredit = addedRevenue - platformCommission;
+        await this.repo.creditLandlordNetBalance(
+          property.ownerId,
+          netLandlordCredit,
+          addedRevenue,
+          connection
+        );
       }
 
       if (existingRental) {
@@ -420,6 +462,8 @@ export class RentalService {
       await connection.commit();
       apiCache.invalidatePattern('properties');
       apiCache.invalidatePattern('rentals');
+      apiCache.invalidatePattern('landlord:');
+      apiCache.invalidatePattern('admin:');
 
       return {
         message: 'Penyewaan kos berhasil dibuat!',
@@ -508,6 +552,8 @@ export class RentalService {
       await connection.commit();
       apiCache.invalidatePattern('properties');
       apiCache.invalidatePattern('rentals');
+      apiCache.invalidatePattern('landlord:');
+      apiCache.invalidatePattern('admin:');
 
       return { message: 'Sewa kos berhasil diberhentikan.' };
     } catch (err) {
@@ -571,6 +617,8 @@ export class RentalService {
 
       apiCache.invalidatePattern('properties');
       apiCache.invalidatePattern('rentals');
+      apiCache.invalidatePattern('landlord:');
+      apiCache.invalidatePattern('admin:');
 
       return {
         message: 'Pesanan sewa berhasil dibatalkan.',

@@ -232,7 +232,7 @@ export function registerRoomRoutes(router: Router): void {
   router.post(
     '/properties/:id/rooms',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(createRoomSchema),
     async (req: AuthenticatedRequest, res: Response) => {
       const propertyId = String(req.params.id);
@@ -282,6 +282,8 @@ export function registerRoomRoutes(router: Router): void {
         await connection.commit();
         apiCache.invalidatePattern('properties');
         apiCache.invalidatePattern('rooms');
+        apiCache.invalidatePattern('landlord:');
+        apiCache.invalidatePattern('admin:');
 
         const createdRoom = formatRoomResponse(
           {
@@ -445,14 +447,14 @@ export function registerRoomRoutes(router: Router): void {
   router.put(
     '/properties/:id/rooms/:roomId',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(updateRoomSchema),
     handleUpdateRoom
   );
   router.put(
     '/rooms/:roomId',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(updateRoomSchema),
     handleUpdateRoom
   );
@@ -545,14 +547,14 @@ export function registerRoomRoutes(router: Router): void {
   router.patch(
     '/properties/:id/rooms/:roomId/status',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(updateRoomStatusSchema),
     handleToggleRoomStatus
   );
   router.patch(
     '/rooms/:roomId/status',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(updateRoomStatusSchema),
     handleToggleRoomStatus
   );
@@ -648,14 +650,14 @@ export function registerRoomRoutes(router: Router): void {
   router.delete(
     '/properties/:id/rooms/:roomId',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(deleteRoomSchema),
     handleDeleteRoom
   );
   router.delete(
     '/rooms/:roomId',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(deleteRoomSchema),
     handleDeleteRoom
   );
