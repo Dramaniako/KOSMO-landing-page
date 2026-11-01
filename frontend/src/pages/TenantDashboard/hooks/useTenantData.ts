@@ -103,7 +103,7 @@ export function useTenantData() {
       return;
     }
 
-    if ((activeTab === 'rentals' || activeTab === 'bills') && !loadedTabs.current.has('rentals')) {
+    if ((activeTab === 'rentals' || activeTab === 'bills' || activeTab === 'maintenance') && !loadedTabs.current.has('rentals')) {
       fetchMyRentals(currentUser.id);
     } else if (activeTab === 'reviews' && !loadedTabs.current.has('reviews')) {
       fetchMyReviews(currentUser.id);

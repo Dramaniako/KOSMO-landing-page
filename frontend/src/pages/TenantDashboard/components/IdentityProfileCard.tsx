@@ -28,7 +28,7 @@ export const IdentityProfileCard: React.FC<IdentityProfileCardProps> = ({
   const { t } = useTranslation();
 
   return (
-    <div className="card" style={{ padding: '32px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '32px', backgroundColor: 'var(--bg-card)' }}>
       <div className="flex-between" style={{ marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <UserCheck size={20} style={{ color: 'var(--primary)' }} />

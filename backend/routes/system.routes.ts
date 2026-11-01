@@ -69,7 +69,7 @@ export function registerSystemRoutes(router: Router): void {
   router.post(
     '/upload',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     uploadLimiter,
     upload.single('image'),
     async (req: AuthenticatedRequest & MulterRequest, res: Response) => {

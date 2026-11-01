@@ -43,6 +43,7 @@ export function registerReviewRoutes(router: Router): void {
         sql += ' AND userId = ?';
         params.push(String(userId));
       }
+      sql += ' ORDER BY id DESC';
 
       const [rows] = await pool.query<ReviewRow[]>(sql, params);
       apiCache.set(cacheKey, rows, 60);
@@ -105,6 +106,7 @@ export function registerReviewRoutes(router: Router): void {
         await connection.commit();
         apiCache.invalidatePattern('reviews');
         apiCache.invalidatePattern('properties');
+        apiCache.invalidatePattern('landlord:');
         res.status(201).json({ message: "Review berhasil ditambahkan!" });
       } catch (err) {
         await connection.rollback();
@@ -159,6 +161,7 @@ export function registerReviewRoutes(router: Router): void {
       await connection.commit();
       apiCache.invalidatePattern('reviews');
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('landlord:');
       res.json({ message: "Review berhasil diperbarui!" });
     } catch (err) {
       await connection.rollback();
@@ -205,6 +208,7 @@ export function registerReviewRoutes(router: Router): void {
       await connection.commit();
       apiCache.invalidatePattern('reviews');
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('landlord:');
       res.json({ message: "Review berhasil dihapus!" });
     } catch (err) {
       await connection.rollback();

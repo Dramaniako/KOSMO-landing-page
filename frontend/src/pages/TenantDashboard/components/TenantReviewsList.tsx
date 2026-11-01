@@ -22,7 +22,7 @@ export const TenantReviewsList: React.FC<TenantReviewsListProps> = ({
   onDeleteReview
 }) => {
   return (
-    <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '24px', backgroundColor: 'var(--bg-card)' }}>
       <div className="flex-between" style={{ marginBottom: '24px' }}>
         <h3 style={{ fontSize: '20px' }}>Ulasan Sewa Saya ({reviews.length})</h3>
         <button 
@@ -50,7 +50,7 @@ export const TenantReviewsList: React.FC<TenantReviewsListProps> = ({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {reviews.map((rev) => (
-            <div key={rev.id} style={{ padding: '20px', background: '#f8fafc', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }} className="flex-between">
+            <div key={rev.id} style={{ padding: '20px', background: 'var(--bg-surface, var(--light))', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }} className="flex-between">
               <div style={{ flex: 1, marginRight: '24px' }}>
                 <div className="flex-between" style={{ marginBottom: '6px' }}>
                   <strong style={{ fontSize: '15px' }}>{rev.propertyName}</strong>

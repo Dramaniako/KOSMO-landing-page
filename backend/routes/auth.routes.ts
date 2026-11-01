@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import type { RowDataPacket } from 'mysql2/promise';
 import { authLimiter } from '../middleware/rateLimiter';
 import { pool } from '../db';
+import { apiCache } from '../services/cache';
 import { generateJwtToken, authenticateToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import {
@@ -166,6 +167,7 @@ export function registerAuthRoutes(router: Router): void {
            VALUES (?, ?, ?, ?, ?, ?, 'Virtual Account')`,
           [userId, email, hashedPassword, name, assignedRole, phone.trim()]
         );
+        apiCache.invalidatePattern('admin:');
 
 
         const [newUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [userId]);
@@ -279,14 +281,14 @@ export function registerAuthRoutes(router: Router): void {
           return res.status(404).json({ message: "User tidak ditemukan." });
         }
 
-        const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : 1;
+        const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : null;
 
         await pool.query(
           `UPDATE users SET 
             name = COALESCE(?, name), 
             phone = COALESCE(?, phone), 
             paymentMethod = COALESCE(?, paymentMethod), 
-            notifications = ?, 
+            notifications = COALESCE(?, notifications), 
             language = COALESCE(?, language),
             identity_type = COALESCE(?, identity_type),
             identity_number = COALESCE(?, identity_number),
@@ -357,14 +359,14 @@ export function registerAuthRoutes(router: Router): void {
       } = req.body as UserProfileBody;
 
       try {
-        const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : 1;
+        const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : null;
 
         await pool.query(
           `UPDATE users SET 
             name = COALESCE(?, name), 
             phone = COALESCE(?, phone), 
             paymentMethod = COALESCE(?, paymentMethod), 
-            notifications = ?, 
+            notifications = COALESCE(?, notifications), 
             language = COALESCE(?, language),
             identity_type = COALESCE(?, identity_type),
             identity_number = COALESCE(?, identity_number),

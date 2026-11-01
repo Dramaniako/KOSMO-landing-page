@@ -1396,7 +1396,7 @@ function registerSystemRoutes(router2) {
   router2.post(
     "/upload",
     authenticateToken,
-    requireRole(["admin", "landlord", "owner"]),
+    requireRole(["admin", "landlord"]),
     uploadLimiter,
     upload.single("image"),
     async (req, res) => {
@@ -1424,6 +1424,67 @@ function registerSystemRoutes(router2) {
 
 // backend/routes/auth.routes.ts
 import bcrypt2 from "bcryptjs";
+
+// backend/services/cache.ts
+var InMemoryCache = class {
+  store = /* @__PURE__ */ new Map();
+  maxEntries;
+  constructor(maxEntries = 500) {
+    this.maxEntries = maxEntries;
+  }
+  get(key) {
+    const entry = this.store.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key);
+      return null;
+    }
+    return entry.data;
+  }
+  set(key, data, ttlSeconds = 60) {
+    if (this.store.size >= this.maxEntries) {
+      this.purgeExpired();
+      if (this.store.size >= this.maxEntries) {
+        const oldestKey = this.store.keys().next().value;
+        if (oldestKey) {
+          this.store.delete(oldestKey);
+        }
+      }
+    }
+    this.store.set(key, {
+      data,
+      expiresAt: Date.now() + ttlSeconds * 1e3
+    });
+  }
+  del(key) {
+    this.store.delete(key);
+  }
+  invalidatePattern(prefix) {
+    for (const key of this.store.keys()) {
+      if (key.startsWith(prefix)) {
+        this.store.delete(key);
+      }
+    }
+  }
+  purgeExpired() {
+    const now = Date.now();
+    let purgedCount = 0;
+    for (const [key, entry] of this.store.entries()) {
+      if (now > entry.expiresAt) {
+        this.store.delete(key);
+        purgedCount++;
+      }
+    }
+    return purgedCount;
+  }
+  clear() {
+    this.store.clear();
+  }
+  size() {
+    return this.store.size;
+  }
+};
+var apiCache = new InMemoryCache();
 
 // backend/middleware/validation.ts
 import { z } from "zod";
@@ -1879,6 +1940,7 @@ function registerAuthRoutes(router2) {
            VALUES (?, ?, ?, ?, ?, ?, 'Virtual Account')`,
           [userId, email, hashedPassword, name, assignedRole, phone.trim()]
         );
+        apiCache.invalidatePattern("admin:");
         const [newUsers] = await pool.query("SELECT * FROM users WHERE id = ?", [userId]);
         const newUser = newUsers[0];
         const safeUser = formatSafeUser(newUser);
@@ -1977,13 +2039,13 @@ function registerAuthRoutes(router2) {
         if (rows.length === 0) {
           return res.status(404).json({ message: "User tidak ditemukan." });
         }
-        const notifVal = notifications !== void 0 ? notifications ? 1 : 0 : 1;
+        const notifVal = notifications !== void 0 ? notifications ? 1 : 0 : null;
         await pool.query(
           `UPDATE users SET 
             name = COALESCE(?, name), 
             phone = COALESCE(?, phone), 
             paymentMethod = COALESCE(?, paymentMethod), 
-            notifications = ?, 
+            notifications = COALESCE(?, notifications), 
             language = COALESCE(?, language),
             identity_type = COALESCE(?, identity_type),
             identity_number = COALESCE(?, identity_number),
@@ -2050,13 +2112,13 @@ function registerAuthRoutes(router2) {
         gender
       } = req.body;
       try {
-        const notifVal = notifications !== void 0 ? notifications ? 1 : 0 : 1;
+        const notifVal = notifications !== void 0 ? notifications ? 1 : 0 : null;
         await pool.query(
           `UPDATE users SET 
             name = COALESCE(?, name), 
             phone = COALESCE(?, phone), 
             paymentMethod = COALESCE(?, paymentMethod), 
-            notifications = ?, 
+            notifications = COALESCE(?, notifications), 
             language = COALESCE(?, language),
             identity_type = COALESCE(?, identity_type),
             identity_number = COALESCE(?, identity_number),
@@ -2130,69 +2192,6 @@ function registerAuthRoutes(router2) {
 
 // backend/routes/users.routes.ts
 import bcrypt3 from "bcryptjs";
-
-// backend/services/cache.ts
-var InMemoryCache = class {
-  store = /* @__PURE__ */ new Map();
-  maxEntries;
-  constructor(maxEntries = 500) {
-    this.maxEntries = maxEntries;
-  }
-  get(key) {
-    const entry = this.store.get(key);
-    if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
-      this.store.delete(key);
-      return null;
-    }
-    return entry.data;
-  }
-  set(key, data, ttlSeconds = 60) {
-    if (this.store.size >= this.maxEntries) {
-      this.purgeExpired();
-      if (this.store.size >= this.maxEntries) {
-        const oldestKey = this.store.keys().next().value;
-        if (oldestKey) {
-          this.store.delete(oldestKey);
-        }
-      }
-    }
-    this.store.set(key, {
-      data,
-      expiresAt: Date.now() + ttlSeconds * 1e3
-    });
-  }
-  del(key) {
-    this.store.delete(key);
-  }
-  invalidatePattern(prefix) {
-    for (const key of this.store.keys()) {
-      if (key.startsWith(prefix)) {
-        this.store.delete(key);
-      }
-    }
-  }
-  purgeExpired() {
-    const now = Date.now();
-    let purgedCount = 0;
-    for (const [key, entry] of this.store.entries()) {
-      if (now > entry.expiresAt) {
-        this.store.delete(key);
-        purgedCount++;
-      }
-    }
-    return purgedCount;
-  }
-  clear() {
-    this.store.clear();
-  }
-  size() {
-    return this.store.size;
-  }
-};
-var apiCache = new InMemoryCache();
-
-// backend/routes/users.routes.ts
 function registerUserRoutes(router2) {
   const handleGetUsers = async (_req, res) => {
     try {
@@ -2990,6 +2989,7 @@ function registerReviewRoutes(router2) {
         sql += " AND userId = ?";
         params.push(String(userId));
       }
+      sql += " ORDER BY id DESC";
       const [rows] = await pool.query(sql, params);
       apiCache.set(cacheKey, rows, 60);
       res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
@@ -3040,6 +3040,7 @@ function registerReviewRoutes(router2) {
         await connection.commit();
         apiCache.invalidatePattern("reviews");
         apiCache.invalidatePattern("properties");
+        apiCache.invalidatePattern("landlord:");
         res.status(201).json({ message: "Review berhasil ditambahkan!" });
       } catch (err) {
         await connection.rollback();
@@ -3085,6 +3086,7 @@ function registerReviewRoutes(router2) {
       await connection.commit();
       apiCache.invalidatePattern("reviews");
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("landlord:");
       res.json({ message: "Review berhasil diperbarui!" });
     } catch (err) {
       await connection.rollback();
@@ -3123,6 +3125,7 @@ function registerReviewRoutes(router2) {
       await connection.commit();
       apiCache.invalidatePattern("reviews");
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("landlord:");
       res.json({ message: "Review berhasil dihapus!" });
     } catch (err) {
       await connection.rollback();
@@ -3222,7 +3225,7 @@ async function preloadTrackingData() {
       safeRoomCount(),
       safeCount("SELECT COUNT(*) as count FROM rentals WHERE status = 'active'"),
       safeCount("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'"),
-      safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'pending')")
+      safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'in_progress', 'pending')")
     ]);
     const statsData = {
       visitors,
@@ -3310,7 +3313,7 @@ function registerTrackingRoutes(router2) {
         safeRoomCount(),
         safeCount("SELECT COUNT(*) as count FROM rentals WHERE status = 'active'"),
         safeCount("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'"),
-        safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'pending')")
+        safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'in_progress', 'pending')")
       ]);
       const statsData = {
         visitors,
@@ -3458,7 +3461,7 @@ function registerTrackingRoutes(router2) {
     const downloadToken = generateJwtToken(authUser, void 0, "60s");
     res.json({ downloadToken, expiresInSeconds: 60 });
   });
-  router2.get("/reports/landlord/excel", authenticateToken, requireRole(["admin", "landlord", "owner"]), handleLandlordExcelReport);
+  router2.get("/reports/landlord/excel", authenticateToken, requireRole(["admin", "landlord"]), handleLandlordExcelReport);
   void preloadTrackingData();
 }
 var handleLandlordExcelReport = async (req, res) => {
@@ -3502,7 +3505,10 @@ var handleLandlordExcelReport = async (req, res) => {
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan Keuangan");
     const txData = [["ID Transaksi", "Properti", "Tanggal", "Jumlah", "Status"]];
-    transactions.forEach((t) => txData.push([t.id, t.propertyName || "", t.startDate || "", t.price || 0, t.status === "active" ? "Aktif" : "Selesai"]));
+    transactions.forEach((t) => {
+      const statusLabel = t.status === "active" ? "Aktif" : t.status === "pending" ? "Menunggu Pembayaran" : t.status === "cancelled" ? "Dibatalkan" : "Selesai";
+      txData.push([t.id, t.propertyName || "", t.startDate || "", t.price || 0, statusLabel]);
+    });
     const txSheet = XLSX.utils.aoa_to_sheet(txData);
     XLSX.utils.book_append_sheet(wb, txSheet, "Transaksi");
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
@@ -6156,6 +6162,8 @@ var ContractService = class {
     }
     apiCache.invalidatePattern("properties");
     apiCache.invalidatePattern("rentals");
+    apiCache.invalidatePattern("landlord:");
+    apiCache.invalidatePattern("admin:");
     return {
       success: true,
       message: "Kontrak digital berhasil ditandatangani. Silakan selesaikan pembayaran.",
@@ -6166,6 +6174,8 @@ var ContractService = class {
       contractHash,
       adminFee,
       totalAmount,
+      monthlyPrice: rentalPrice,
+      durationMonths: duration,
       signedAt: signedAtIso
     };
   }
@@ -7043,7 +7053,7 @@ function registerPhotoRoutes(router2) {
   router2.post(
     "/properties/:id/photos",
     authenticateToken,
-    requireRole(["admin", "landlord", "owner"]),
+    requireRole(["admin", "landlord"]),
     uploadLimiter,
     handleMultiPhotoUpload,
     async (req, res) => {
@@ -7192,7 +7202,7 @@ function registerPhotoRoutes(router2) {
   router2.put(
     "/properties/:id/photos/reorder",
     authenticateToken,
-    requireRole(["admin", "landlord", "owner"]),
+    requireRole(["admin", "landlord"]),
     validateBody(reorderPhotosSchema),
     async (req, res) => {
       const propertyId = String(req.params.id);
@@ -7330,13 +7340,13 @@ function registerPhotoRoutes(router2) {
   router2.delete(
     "/properties/:id/photos/:photoId",
     authenticateToken,
-    requireRole(["admin", "landlord", "owner"]),
+    requireRole(["admin", "landlord"]),
     handleDeletePhoto
   );
   router2.delete(
     "/photos/:photoId",
     authenticateToken,
-    requireRole(["admin", "landlord", "owner"]),
+    requireRole(["admin", "landlord"]),
     handleDeletePhoto
   );
 }
@@ -7555,6 +7565,7 @@ function registerTicketRoutes(router2) {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
           [ticketId, rental.id, tenantId, propertyId, roomId, category, title.trim(), description.trim(), cleanPhotoUrl]
         );
+        apiCache.invalidatePattern("admin:");
         const [createdRows] = await pool.query(
           `SELECT 
             t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId,
@@ -7673,6 +7684,7 @@ function registerTicketRoutes(router2) {
           [status, resolvedAt, ticketId]
         );
         await connection.commit();
+        apiCache.invalidatePattern("admin:");
         const [updatedRows] = await pool.query(
           `SELECT 
             t.id, t.rentalId, t.tenantId, t.propertyId, t.roomId,

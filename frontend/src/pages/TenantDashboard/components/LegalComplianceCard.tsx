@@ -3,7 +3,7 @@ import { FileText } from 'lucide-react';
 
 export const LegalComplianceCard: React.FC = () => {
   return (
-    <div className="card" style={{ padding: '24px', backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }}>
+    <div className="card" style={{ padding: '24px', backgroundColor: 'var(--bg-surface, var(--light))', borderColor: 'var(--border-color)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
         <FileText size={20} style={{ color: 'var(--primary)' }} />
         <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--primary)' }}>

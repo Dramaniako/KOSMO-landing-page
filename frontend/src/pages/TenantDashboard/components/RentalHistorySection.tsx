@@ -53,7 +53,7 @@ export const RentalHistorySection: React.FC<RentalHistorySectionProps> = ({
                 padding: '16px 20px',
                 border: isPending ? '1px solid #fde68a' : '1px solid var(--border-color)',
                 borderRadius: 'var(--radius-md)',
-                background: isPending ? '#fffbeb' : '#f8fafc'
+                background: isPending ? 'rgba(254, 243, 199, 0.35)' : 'var(--bg-surface, var(--light))'
               }}
             >
               <div>

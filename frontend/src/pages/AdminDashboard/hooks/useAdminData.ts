@@ -226,8 +226,13 @@ export function useAdminData() {
 
     if (activeTab === 'users' && !loadedTabs.current.has('users')) {
       fetchUsers();
-    } else if (activeTab === 'properties' && !loadedTabs.current.has('properties')) {
-      fetchProperties();
+    } else if (activeTab === 'properties') {
+      if (!loadedTabs.current.has('properties')) {
+        fetchProperties();
+      }
+      if (!loadedTabs.current.has('users')) {
+        fetchUsers();
+      }
     } else if (activeTab === 'reviews' && !loadedTabs.current.has('reviews')) {
       fetchReviews();
     } else if (activeTab === 'withdrawals' && !loadedTabs.current.has('withdrawals')) {

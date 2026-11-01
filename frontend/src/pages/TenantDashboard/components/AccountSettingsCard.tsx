@@ -15,16 +15,17 @@ export const AccountSettingsCard: React.FC<AccountSettingsCardProps> = ({
   profileForm,
   setProfileForm
 }) => {
-  const { t } = useTranslation();
+  const { t, setLanguage } = useTranslation();
 
   const handleNotificationChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newNotif = e.target.checked;
     setProfileForm(prev => ({ ...prev, notifications: newNotif }));
+    const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
     fetch(`${API_BASE}/users/profile/${userId}`, {
       method: 'PUT',
       headers: { 
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({ notifications: newNotif })
     });
@@ -33,18 +34,20 @@ export const AccountSettingsCard: React.FC<AccountSettingsCardProps> = ({
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newLang = e.target.value;
     setProfileForm(prev => ({ ...prev, language: newLang }));
+    setLanguage(newLang === 'English' ? 'en' : 'id');
+    const token = localStorage.getItem('token') || localStorage.getItem('kosmo_token') || '';
     fetch(`${API_BASE}/users/profile/${userId}`, {
       method: 'PUT',
       headers: { 
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({ language: newLang })
     });
   };
 
   return (
-    <div className="card" style={{ padding: '32px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '32px', backgroundColor: 'var(--bg-card)' }}>
       <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
         {t('tenant.accountSettings')}
       </h3>

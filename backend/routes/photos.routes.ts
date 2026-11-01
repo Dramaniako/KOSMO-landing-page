@@ -288,7 +288,7 @@ export function registerPhotoRoutes(router: Router): void {
   router.post(
     '/properties/:id/photos',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     uploadLimiter,
     handleMultiPhotoUpload,
     async (req: AuthenticatedRequest, res: Response) => {
@@ -464,7 +464,7 @@ export function registerPhotoRoutes(router: Router): void {
   router.put(
     '/properties/:id/photos/reorder',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     validateBody(reorderPhotosSchema),
     async (req: AuthenticatedRequest, res: Response) => {
       const propertyId = String(req.params.id);
@@ -632,13 +632,13 @@ export function registerPhotoRoutes(router: Router): void {
   router.delete(
     '/properties/:id/photos/:photoId',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     handleDeletePhoto
   );
   router.delete(
     '/photos/:photoId',
     authenticateToken,
-    requireRole(['admin', 'landlord', 'owner']),
+    requireRole(['admin', 'landlord']),
     handleDeletePhoto
   );
 }

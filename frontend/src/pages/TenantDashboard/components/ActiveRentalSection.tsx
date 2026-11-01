@@ -59,7 +59,7 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
   const isNearDue = activeRental?.status === 'active' && daysRemaining <= 3;
 
   return (
-    <div className="card" style={{ padding: '28px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '28px', backgroundColor: 'var(--bg-card)' }}>
       <div className="flex-between" style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

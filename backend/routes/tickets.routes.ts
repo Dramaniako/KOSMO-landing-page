@@ -1,5 +1,6 @@
 import type { Response, Router } from 'express';
 import { pool } from '../db';
+import { apiCache } from '../services/cache';
 import { authenticateToken } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { validateBody, createTicketSchema, updateTicketStatusSchema } from '../middleware/validation';
@@ -96,6 +97,7 @@ export function registerTicketRoutes(router: Router): void {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
           [ticketId, rental.id, tenantId, propertyId, roomId, category, title.trim(), description.trim(), cleanPhotoUrl]
         );
+        apiCache.invalidatePattern('admin:');
 
         const [createdRows] = await pool.query<MaintenanceTicketRow[]>(
           `SELECT 
@@ -253,6 +255,7 @@ export function registerTicketRoutes(router: Router): void {
         );
 
         await connection.commit();
+        apiCache.invalidatePattern('admin:');
 
         const [updatedRows] = await pool.query<MaintenanceTicketRow[]>(
           `SELECT 

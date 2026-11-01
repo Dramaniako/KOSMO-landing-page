@@ -47,7 +47,10 @@ export function useLandlordWithdraw(
       const updatedUser: User = {
         ...landlordUser,
         balance: data.balance,
-        totalWithdrawn: data.totalWithdrawn
+        totalWithdrawn: data.totalWithdrawn,
+        bankName: withdrawForm.bankName,
+        bankAccountNumber: withdrawForm.accountNumber,
+        bankAccountHolder: withdrawForm.accountHolder || landlordUser.name
       };
       setLandlordUser(updatedUser);
       localStorage.setItem('user', JSON.stringify(updatedUser));

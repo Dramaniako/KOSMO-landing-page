@@ -211,8 +211,14 @@ export default function TenantDashboard() {
 
         {activeTab === 'bills' && (
           <BillingHistoryList
+            rentals={myRentals}
             isLoading={tabLoading.bills}
             isLoaded={loadedTabs.current.has('bills')}
+            contractDownloading={contractDownloading}
+            onOpenContract={handleOpenContract}
+            onOpenPendingPayment={handleOpenPendingPayment}
+            onCancelPendingRental={handleCancelPendingRental}
+            cancellingRentalId={cancellingRentalId}
           />
         )}
 

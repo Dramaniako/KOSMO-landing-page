@@ -358,10 +358,13 @@ export default function LandingPage() {
 
       const data = (await res.json()) as {
         rentalId: string;
+        roomId?: string | null;
         contractUrl: string;
         contractHash: string;
         adminFee?: number;
         totalAmount?: number;
+        monthlyPrice?: number;
+        durationMonths?: number;
         signedAt?: string;
       };
 
@@ -370,12 +373,12 @@ export default function LandingPage() {
         contractUrl: data.contractUrl,
         contractHash: data.contractHash,
         adminFee: data.adminFee || 5000,
-        totalAmount: data.totalAmount || (payload.durationMonths * (selectedProperty.price || 0) + 5000),
+        totalAmount: data.totalAmount || (payload.durationMonths * (data.monthlyPrice || selectedProperty.price || 0) + 5000),
         signedAt: data.signedAt || new Date().toISOString(),
-        durationMonths: payload.durationMonths || 1,
-        roomId: payload.roomId,
+        durationMonths: data.durationMonths || payload.durationMonths || 1,
+        roomId: data.roomId || payload.roomId,
         startDate: payload.startDate,
-        monthlyPrice: selectedProperty.price
+        monthlyPrice: data.monthlyPrice || selectedProperty.price
       });
       setContractSigned(true);
       setShowContract(false);

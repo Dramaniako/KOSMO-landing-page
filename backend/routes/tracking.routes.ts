@@ -149,7 +149,7 @@ export async function preloadTrackingData(): Promise<void> {
       safeRoomCount(),
       safeCount("SELECT COUNT(*) as count FROM rentals WHERE status = 'active'"),
       safeCount("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'"),
-      safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'pending')")
+      safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'in_progress', 'pending')")
     ]);
 
     const statsData = {
@@ -256,7 +256,7 @@ export function registerTrackingRoutes(router: Router): void {
         safeRoomCount(),
         safeCount("SELECT COUNT(*) as count FROM rentals WHERE status = 'active'"),
         safeCount("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'"),
-        safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'pending')")
+        safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'in_progress', 'pending')")
       ]);
 
       const statsData = {
@@ -437,7 +437,7 @@ export function registerTrackingRoutes(router: Router): void {
     res.json({ downloadToken, expiresInSeconds: 60 });
   });
 
-  router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord', 'owner']), handleLandlordExcelReport);
+  router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord']), handleLandlordExcelReport);
 
   // Prewarm admin stats cache asynchronously on router registration
   void preloadTrackingData();
@@ -493,7 +493,17 @@ export const handleLandlordExcelReport = async (req: AuthenticatedRequest, res: 
 
     // Transactions sheet
     const txData: (string | number)[][] = [['ID Transaksi', 'Properti', 'Tanggal', 'Jumlah', 'Status']];
-    transactions.forEach(t => txData.push([t.id, t.propertyName || '', t.startDate || '', t.price || 0, t.status === 'active' ? 'Aktif' : 'Selesai']));
+    transactions.forEach(t => {
+      const statusLabel =
+        t.status === 'active'
+          ? 'Aktif'
+          : t.status === 'pending'
+            ? 'Menunggu Pembayaran'
+            : t.status === 'cancelled'
+              ? 'Dibatalkan'
+              : 'Selesai';
+      txData.push([t.id, t.propertyName || '', t.startDate || '', t.price || 0, statusLabel]);
+    });
     const txSheet = XLSX.utils.aoa_to_sheet(txData);
     XLSX.utils.book_append_sheet(wb, txSheet, 'Transaksi');
 

@@ -405,6 +405,8 @@ export class ContractService {
 
     apiCache.invalidatePattern('properties');
     apiCache.invalidatePattern('rentals');
+    apiCache.invalidatePattern('landlord:');
+    apiCache.invalidatePattern('admin:');
 
     return {
       success: true,
@@ -416,6 +418,8 @@ export class ContractService {
       contractHash,
       adminFee,
       totalAmount,
+      monthlyPrice: rentalPrice,
+      durationMonths: duration,
       signedAt: signedAtIso
     };
   }
