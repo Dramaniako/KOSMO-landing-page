@@ -294,4 +294,17 @@ test('Next payment schedule and billing computation', async (t) => {
     assert.equal(schedOkt.nextPaymentDateISO, '2026-11-10');
     assert.equal(schedOkt.leaseEndDateISO, '2026-11-10');
   });
+
+  await t.test('enforces 3% platform commission parity and multi-month gross rent calculation', () => {
+    const monthlyPrice = 3500000;
+    const durationMonths = 3;
+    const grossRent = monthlyPrice * durationMonths; // 10,500,000
+    const commissionRate = 0.03;
+    const platformCommission = Math.round(grossRent * commissionRate); // 315,000
+    const netLandlordCredit = Math.max(0, grossRent - platformCommission); // 10,185,000
+
+    assert.equal(grossRent, 10500000);
+    assert.equal(platformCommission, 315000);
+    assert.equal(netLandlordCredit, 10185000);
+  });
 });

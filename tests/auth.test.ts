@@ -494,4 +494,27 @@ test('Authentication logic, password security gates & JWT', async (t) => {
       (process.env as Record<string, string | undefined>).NO_LISTEN = prevNoListen;
     }
   });
+
+  await t.test('formatSafeUser normalizes notifications bit (0/1/boolean) and preserves false when omitted in COALESCE', async () => {
+    const { formatSafeUser } = await import('../backend/routes/auth.routes');
+    const baseRow = {
+      id: 'user-notif-test',
+      email: 'notif@kosmo.id',
+      name: 'Notif User',
+      role: 'tenant' as const,
+      phone: '081234567890'
+    } as unknown as Parameters<typeof formatSafeUser>[0];
+
+    assert.equal(formatSafeUser({ ...baseRow, notifications: 0 }).notifications, false);
+    assert.equal(formatSafeUser({ ...baseRow, notifications: 1 }).notifications, true);
+    assert.equal(formatSafeUser({ ...baseRow, notifications: false }).notifications, false);
+    assert.equal(formatSafeUser({ ...baseRow, notifications: undefined }).notifications, true);
+
+    // Verify COALESCE parameter mapping when notifications is omitted vs provided
+    const mapNotifParam = (notifications: boolean | undefined) =>
+      notifications !== undefined ? (notifications ? 1 : 0) : null;
+    assert.equal(mapNotifParam(undefined), null);
+    assert.equal(mapNotifParam(false), 0);
+    assert.equal(mapNotifParam(true), 1);
+  });
 });

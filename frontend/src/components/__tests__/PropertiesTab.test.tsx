@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import PropertiesTab from '../../pages/AdminDashboard/components/PropertiesTab';
 import { Property } from '../../types/index';
 
@@ -96,6 +96,8 @@ describe('Admin PropertiesTab Component Suite', () => {
     expect(toggleBtn).toHaveTextContent('Reguler');
 
     fireEvent.click(toggleBtn);
-    expect(onToggleFeatured).toHaveBeenCalledWith(mockProperties[1]);
+    await waitFor(() => {
+      expect(onToggleFeatured).toHaveBeenCalledWith(mockProperties[1]);
+    });
   });
 });
