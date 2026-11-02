@@ -1,5 +1,6 @@
 import React from 'react';
-import { ShieldAlert, Users, Building, MessageSquare, Landmark, BarChart3, Wrench, LogOut } from 'lucide-react';
+import { Users, Building, MessageSquare, Landmark, BarChart3, Wrench, LogOut } from 'lucide-react';
+import KosmoLogo from '../../../components/KosmoLogo';
 
 export interface AdminSidebarProps {
   activeTab: 'users' | 'properties' | 'reviews' | 'tracking' | 'withdrawals' | 'maintenance';
@@ -19,9 +20,8 @@ export default function AdminSidebar({
   return (
     <aside className="sidebar">
       <div>
-        <div className="nav-brand" style={{ marginBottom: '40px', paddingLeft: '16px' }}>
-          <ShieldAlert size={26} style={{ color: 'var(--danger)' }} />
-          <span>KOSMO Admin</span>
+        <div className="nav-brand" style={{ marginBottom: '40px', paddingLeft: '8px' }}>
+          <KosmoLogo size={34} variant="danger" title="KOSMO" badgeText="Admin" />
         </div>
 
         <ul className="sidebar-links">

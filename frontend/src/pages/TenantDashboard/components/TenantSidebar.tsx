@@ -2,6 +2,7 @@ import React from 'react';
 import { User as UserIcon, Building, FileText, MessageSquare, LogOut, Wrench } from 'lucide-react';
 import { User } from '../../../types/index';
 import { useTranslation } from '../../../context/LanguageContext';
+import KosmoLogo from '../../../components/KosmoLogo';
 
 interface TenantSidebarProps {
   currentUser: User;
@@ -23,15 +24,19 @@ export const TenantSidebar: React.FC<TenantSidebarProps> = ({
   return (
     <aside className="sidebar">
       <div>
+        <div className="nav-brand" style={{ marginBottom: '28px', paddingLeft: '8px' }}>
+          <KosmoLogo size={34} title="KOSMO" badgeText="Tenant" />
+        </div>
+
         {/* Tenant short profile summary */}
-        <div style={{ textAlign: 'center', marginBottom: '32px', padding: '0 8px' }}>
-          <div style={{ position: 'relative', width: '72px', height: '72px', margin: '0 auto 12px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <UserIcon size={36} style={{ color: 'var(--primary)' }} />
-            <div style={{ position: 'absolute', bottom: '0', right: '0', background: 'var(--success)', border: '2px solid white', width: '18px', height: '18px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', marginBottom: '28px', padding: '0 8px' }}>
+          <div style={{ position: 'relative', width: '64px', height: '64px', margin: '0 auto 10px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <UserIcon size={32} style={{ color: 'var(--primary)' }} />
+            <div style={{ position: 'absolute', bottom: '0', right: '0', background: 'var(--success)', border: '2px solid var(--bg-surface)', width: '18px', height: '18px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: '6px', height: '6px', backgroundColor: 'white', borderRadius: '50%' }}></div>
             </div>
           </div>
-          <h3 style={{ fontSize: '18px' }}>{currentUser.name}</h3>
+          <h3 style={{ fontSize: '17px' }}>{currentUser.name}</h3>
           <span className="badge badge-success" style={{ fontSize: '10px', marginTop: '6px' }}>
             Akun Terverifikasi
           </span>

@@ -254,7 +254,7 @@ export default function PhotoGalleryManager({ property, onClose, onPhotosUpdated
             style={{
               padding: '16px',
               borderRadius: '12px',
-              backgroundColor: '#f8fafc',
+              backgroundColor: 'var(--bg-main)',
               border: '1px solid var(--border-color)',
               marginBottom: '24px'
             }}

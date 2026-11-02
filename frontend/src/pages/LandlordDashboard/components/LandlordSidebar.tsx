@@ -1,5 +1,6 @@
 import React from 'react';
 import { Building, LayoutDashboard, MessageSquare, Users, LogOut, Wrench } from 'lucide-react';
+import KosmoLogo from '../../../components/KosmoLogo';
 
 export interface LandlordSidebarProps {
   activeTab: 'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance';
@@ -15,9 +16,8 @@ export default function LandlordSidebar({
   return (
     <aside className="sidebar">
       <div>
-        <div className="nav-brand" style={{ marginBottom: '40px', paddingLeft: '16px' }}>
-          <Building size={26} />
-          <span>KOSMO Landlord</span>
+        <div className="nav-brand" style={{ marginBottom: '40px', paddingLeft: '8px' }}>
+          <KosmoLogo size={34} title="KOSMO" badgeText="Landlord" />
         </div>
 
         <ul className="sidebar-links">

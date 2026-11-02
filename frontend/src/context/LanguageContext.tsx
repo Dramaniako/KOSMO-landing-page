@@ -246,7 +246,20 @@ const translations: Record<Language, Translations> = {
     'auth.hasAccount': 'Sudah punya akun?',
     'auth.sessionExpired': 'Sesi Anda telah berakhir. Silakan masuk kembali.',
 
-    // Footer
+    // Landing Sections & Footer
+    'landing.choicesTitle': 'Pilihan Kos & Co-Living',
+    'landing.choicesSubtitle': 'Daftar hunian eksklusif dengan sistem smart lock dan fasilitas lengkap di Bali',
+    'landing.whyBadge': 'KOSMO Experience & Transparency',
+    'landing.whyTitle': 'Kenapa Memilih KOSMO All-Inclusive?',
+    'landing.whySubtitle': 'Temukan kemudahan mencari dan menyewa kos impian, transparansi fasilitas & infrastruktur tanpa biaya tersembunyi, serta opsi pencarian yang dipersonalisasi sesuai kebutuhan gaya hidup Anda.',
+    'landing.why1Title': 'Kemudahan Cari & Sewa Kos',
+    'landing.why1Desc': 'Jelajahi pilihan hunian terbaik, booking instan secara online, dan tandatangani e-contract resmi dalam hitungan menit tanpa birokrasi berbelit.',
+    'landing.why2Title': 'Kejelasan Fasilitas & Infrastruktur',
+    'landing.why2Desc': 'Detail infrastruktur transparan: listrik, air PDAM, WiFi fiber berkecepatan tinggi, hingga sistem keamanan smart lock 24 jam tanpa ada biaya tersembunyi.',
+    'landing.why3Title': 'Opsi Pencarian Terpersonalisasi',
+    'landing.why3Desc': 'Saring hunian idaman berdasarkan lokasi strategis di Bali, rentang anggaran fleksibel, dan kombinasi fasilitas spesifik yang paling Anda butuhkan.',
+    'landing.reviewsTitle': 'Apa Kata Penghuni KOSMO?',
+    'landing.reviewsSubtitle': 'Ulasan asli dan pengalaman langsung dari para digital nomad & tenant kami di Bali',
     'footer.about': 'Platform persewaan kos & co-living all-inclusive terpercaya untuk kemudahan tinggal jangka panjang di Pulau Dewata.',
     'footer.copyright': 'Seluruh hak cipta dilindungi undang-undang.'
   },
@@ -489,7 +502,20 @@ const translations: Record<Language, Translations> = {
     'auth.hasAccount': 'Already have an account?',
     'auth.sessionExpired': 'Your session has expired. Please sign in again.',
 
-    // Footer
+    // Landing Sections & Footer
+    'landing.choicesTitle': 'Curated Kos & Co-Living Spaces',
+    'landing.choicesSubtitle': 'Exclusive residences equipped with smart lock access and full amenities across Bali',
+    'landing.whyBadge': 'KOSMO Experience & Transparency',
+    'landing.whyTitle': 'Why Choose KOSMO All-Inclusive?',
+    'landing.whySubtitle': 'Experience effortless room discovery and instant online booking, transparent utility & infrastructure standards with zero hidden fees, and personalized filters tailored to your Bali lifestyle.',
+    'landing.why1Title': 'Effortless Search & Instant Booking',
+    'landing.why1Desc': 'Browse verified residences, book online in seconds, and execute legally binding digital leases in minutes without paperwork hassle.',
+    'landing.why2Title': 'Transparent Utilities & Infrastructure',
+    'landing.why2Desc': 'Clear infrastructure specs: electricity quota, clean water, high-speed fiber WiFi, and 24/7 smart-lock security with zero surprise charges.',
+    'landing.why3Title': 'Personalized Search Filters',
+    'landing.why3Desc': 'Filter your ideal living space by strategic Bali districts, flexible budget presets, and the exact amenity combination you need.',
+    'landing.reviewsTitle': 'What Do KOSMO Residents Say?',
+    'landing.reviewsSubtitle': 'Authentic reviews and firsthand stories from our digital nomads & long-term tenants in Bali',
     'footer.about': 'Trusted all-inclusive co-living & rental platform for long-term comfort in the Island of the Gods.',
     'footer.copyright': 'All rights reserved.'
   }

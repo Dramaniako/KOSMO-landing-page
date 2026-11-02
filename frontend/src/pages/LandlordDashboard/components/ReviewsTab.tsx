@@ -10,7 +10,7 @@ export interface ReviewsTabProps {
 
 export default function ReviewsTab({ reviews, loading }: ReviewsTabProps) {
   return (
-    <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '24px', backgroundColor: 'var(--bg-card)' }}>
       <h3 style={{ fontSize: '20px', marginBottom: '24px' }}>Ulasan Properti Saya ({reviews.length})</h3>
 
       {loading ? (
@@ -27,7 +27,7 @@ export default function ReviewsTab({ reviews, loading }: ReviewsTabProps) {
               className="card"
               style={{
                 padding: '20px',
-                backgroundColor: '#f8fafc',
+                backgroundColor: 'var(--bg-main)',
                 border: '1px solid var(--border-color)',
                 display: 'flex',
                 justifyContent: 'space-between',

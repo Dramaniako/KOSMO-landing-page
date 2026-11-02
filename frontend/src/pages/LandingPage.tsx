@@ -10,6 +10,7 @@ import KosCardSkeleton from '../components/KosCardSkeleton';
 import SearchFilterBar from '../components/SearchFilterBar';
 import BookingModal from '../components/BookingModal';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
+import KosmoLogo from '../components/KosmoLogo';
 import { useTranslation } from '../context/LanguageContext';
 import { loadSnapSdk } from '../utils/snapLoader';
 
@@ -545,13 +546,7 @@ export default function LandingPage() {
       <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 site-header transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer nav-brand" onClick={() => navigate('/')}>
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
-              <ShieldCheck size={20} />
-            </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-xl font-bold text-blue-600 dark:text-blue-400 tracking-tight">KOSMO</span>
-              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-wider hidden sm:inline">BALI CO-LIVING</span>
-            </div>
+            <KosmoLogo size={38} title="KOSMO" subtitle="BALI CO-LIVING" />
           </div>
 
           <nav className="flex items-center gap-3 sm:gap-6">
@@ -620,9 +615,9 @@ export default function LandingPage() {
       <section id="properties" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-8">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-2">
           <div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">Pilihan Kos & Co-Living</h2>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">{t('landing.choicesTitle')}</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Daftar hunian eksklusif dengan sistem smart lock dan fasilitas lengkap di Bali
+              {t('landing.choicesSubtitle')}
             </p>
           </div>
           <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
@@ -685,13 +680,13 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold mb-4 border border-blue-100 dark:border-blue-800">
             <Zap size={14} />
-            <span>KOSMO Experience & Transparency</span>
+            <span>{t('landing.whyBadge')}</span>
           </div>
           <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-4">
-            Kenapa Memilih KOSMO All-Inclusive?
+            {t('landing.whyTitle')}
           </h2>
           <p className="text-slate-600 dark:text-slate-300 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed mb-12">
-            Temukan kemudahan mencari dan menyewa kos impian, transparansi fasilitas & infrastruktur tanpa biaya tersembunyi, serta opsi pencarian yang dipersonalisasi sesuai kebutuhan gaya hidup Anda.
+            {t('landing.whySubtitle')}
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
@@ -699,9 +694,9 @@ export default function LandingPage() {
               <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4">
                 <Search size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Kemudahan Cari & Sewa Kos</h3>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">{t('landing.why1Title')}</h3>
               <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
-                Jelajahi pilihan hunian terbaik, booking instan secara online, dan tandatangani e-contract resmi dalam hitungan menit tanpa birokrasi berbelit.
+                {t('landing.why1Desc')}
               </p>
             </div>
 
@@ -709,9 +704,9 @@ export default function LandingPage() {
               <div className="w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-4">
                 <ShieldCheck size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Kejelasan Fasilitas & Infrastruktur</h3>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">{t('landing.why2Title')}</h3>
               <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
-                Detail infrastruktur transparan: listrik, air PDAM, WiFi fiber berkecepatan tinggi, hingga sistem keamanan smart lock 24 jam tanpa ada biaya tersembunyi.
+                {t('landing.why2Desc')}
               </p>
             </div>
 
@@ -719,9 +714,9 @@ export default function LandingPage() {
               <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4">
                 <SlidersHorizontal size={24} />
               </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">Opsi Pencarian Terpersonalisasi</h3>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-2">{t('landing.why3Title')}</h3>
               <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
-                Saring hunian idaman berdasarkan lokasi strategis di Bali, rentang anggaran fleksibel, dan kombinasi fasilitas spesifik yang paling Anda butuhkan.
+                {t('landing.why3Desc')}
               </p>
             </div>
           </div>
@@ -731,9 +726,9 @@ export default function LandingPage() {
       {/* Reviews Section */}
       <section id="reviews" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center mb-12">
-          <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">Apa Kata Penghuni KOSMO?</h2>
+          <h2 className="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">{t('landing.reviewsTitle')}</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-            Ulasan asli dan pengalaman langsung dari para digital nomad & tenant kami di Bali
+            {t('landing.reviewsSubtitle')}
           </p>
         </div>
 
@@ -767,12 +762,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 py-12 text-center transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
-              <ShieldCheck size={18} />
-            </div>
-            <span className="text-base font-extrabold text-slate-900 dark:text-slate-100">KOSMO Bali</span>
-          </div>
+          <KosmoLogo size={34} title="KOSMO Bali" />
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md">
             {t('footer.about')}
           </p>

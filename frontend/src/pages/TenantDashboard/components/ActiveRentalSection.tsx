@@ -286,8 +286,8 @@ export const ActiveRentalSection: React.FC<ActiveRentalSectionProps> = ({
           </div>
         </div>
       ) : (
-        <div style={{ textAlign: 'center', padding: '36px 20px', backgroundColor: '#f8fafc', borderRadius: 'var(--radius-md)', border: '1px dashed var(--border-color)' }}>
-          <div style={{ width: '48px', height: '48px', margin: '0 auto 12px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', padding: '36px 20px', backgroundColor: 'var(--bg-main)', borderRadius: 'var(--radius-md)', border: '1px dashed var(--border-color)' }}>
+          <div style={{ width: '48px', height: '48px', margin: '0 auto 12px', borderRadius: '50%', backgroundColor: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Home size={24} style={{ color: '#94a3b8' }} />
           </div>
           <p style={{ fontWeight: 600, fontSize: '15px', color: 'var(--dark)' }}>{t('tenant.noActive')}</p>

@@ -31,7 +31,7 @@ export const RentalHistorySection: React.FC<RentalHistorySectionProps> = ({
     <div className="card" style={{ padding: '28px', backgroundColor: 'var(--bg-card, #ffffff)' }}>
       <div className="flex-between" style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <History size={20} style={{ color: 'var(--text-muted)' }} />
           </div>
           <div>

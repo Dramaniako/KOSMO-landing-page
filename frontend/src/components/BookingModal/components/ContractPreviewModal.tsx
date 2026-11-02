@@ -73,7 +73,8 @@ export default function ContractPreviewModal({
         {/* Preview Details */}
         <div
           style={{
-            backgroundColor: 'white',
+            backgroundColor: 'var(--bg-card)',
+            color: 'var(--text-main)',
             border: '1px solid var(--border-color)',
             borderRadius: 'var(--radius-sm)',
             padding: '16px',

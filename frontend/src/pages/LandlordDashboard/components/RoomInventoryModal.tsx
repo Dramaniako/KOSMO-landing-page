@@ -311,7 +311,7 @@ export default function RoomInventoryModal({ property, onClose, onRoomUpdated }:
 
           {/* Summary Metric Badges */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
-            <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+            <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Total Kamar</span>
               <strong style={{ fontSize: '18px', color: 'var(--dark)' }}>{totalRoomsCount}</strong>
             </div>
@@ -362,7 +362,7 @@ export default function RoomInventoryModal({ property, onClose, onRoomUpdated }:
 
           {/* Add Room Collapsible Form */}
           {showAddForm && (
-            <form onSubmit={handleAddRoomSubmit} style={{ padding: '16px', borderRadius: '12px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', marginBottom: '20px' }}>
+            <form onSubmit={handleAddRoomSubmit} style={{ padding: '16px', borderRadius: '12px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', marginBottom: '20px' }}>
               <h4 style={{ fontSize: '15px', marginBottom: '12px', color: 'var(--dark)' }}>Tambah Unit Kamar Baru</h4>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>

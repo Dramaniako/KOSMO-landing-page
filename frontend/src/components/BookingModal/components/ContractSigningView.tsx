@@ -285,7 +285,8 @@ export default function ContractSigningView({
               border: `1px solid ${idTouched && idValidationMsg ? '#ef4444' : isIdValid ? '#22c55e' : 'var(--border-color)'}`,
               fontSize: '13px',
               fontFamily: 'monospace',
-              backgroundColor: 'white',
+              backgroundColor: 'var(--bg-card)',
+              color: 'var(--text-main)',
               outline: 'none'
             }}
           />
@@ -313,7 +314,8 @@ export default function ContractSigningView({
                 borderRadius: 'var(--radius-sm)',
                 border: '1px solid var(--border-color)',
                 fontSize: '12px',
-                backgroundColor: 'white'
+                backgroundColor: 'var(--bg-card)',
+                color: 'var(--text-main)'
               }}
             />
           </div>
@@ -333,7 +335,8 @@ export default function ContractSigningView({
                 borderRadius: 'var(--radius-sm)',
                 border: '1px solid var(--border-color)',
                 fontSize: '12px',
-                backgroundColor: 'white'
+                backgroundColor: 'var(--bg-card)',
+                color: 'var(--text-main)'
               }}
             >
               {[1, 2, 3, 6, 12].map((m) => (

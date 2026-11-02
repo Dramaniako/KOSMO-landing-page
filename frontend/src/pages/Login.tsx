@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ShieldCheck, Mail, Lock, User as UserIcon, Phone, ArrowLeft, Eye, EyeOff, AlertCircle, Building } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, Phone, ArrowLeft, Eye, EyeOff, AlertCircle, Building } from 'lucide-react';
 import { User } from '../types/index';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
+import KosmoLogo from '../components/KosmoLogo';
 import { useTranslation } from '../context/LanguageContext';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
@@ -90,8 +91,8 @@ export default function Login() {
 
         {/* Logo */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '32px' }}>
-          <div className="flex-center" style={{ width: '56px', height: '56px', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', marginBottom: '12px' }}>
-            <ShieldCheck size={32} />
+          <div style={{ marginBottom: '12px' }}>
+            <KosmoLogo size={56} showText={false} title="KOSMO Portal" />
           </div>
           <h2 style={{ fontSize: '24px', fontWeight: 800 }}>KOSMO Portal</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '4px', textAlign: 'center' }}>

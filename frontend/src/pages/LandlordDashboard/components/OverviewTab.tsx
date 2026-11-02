@@ -269,7 +269,7 @@ export default function OverviewTab({
                 const isCompleted = w.status === 'completed';
                 const isProcessing = w.status === 'processing';
                 return (
-                  <div key={w.id} className="flex-between" style={{ padding: '10px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #f1f5f9' }}>
+                  <div key={w.id} className="flex-between" style={{ padding: '10px', background: 'var(--bg-main)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
                     <div>
                       <p style={{ fontWeight: 600, fontSize: '13px' }}>Transfer ke {w.bankName}</p>
                       <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.date} &bull; Rek: {w.accountNumber}</p>

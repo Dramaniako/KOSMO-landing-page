@@ -24,7 +24,7 @@ export default function PropertiesTab({
   onManagePhotos
 }: PropertiesTabProps) {
   return (
-    <div className="card" style={{ padding: '24px', backgroundColor: 'white' }}>
+    <div className="card" style={{ padding: '24px', backgroundColor: 'var(--bg-card)' }}>
       <div className="flex-between" style={{ marginBottom: '24px' }}>
         <h3 style={{ fontSize: '20px' }}>Properti Saya ({properties.length})</h3>
         <button className="btn btn-primary" onClick={onAddProperty}>
