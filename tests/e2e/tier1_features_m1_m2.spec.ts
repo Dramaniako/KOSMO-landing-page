@@ -39,13 +39,18 @@ test.describe('Tier 1: Feature Coverage (Milestones 1 & 2: Features 1 - 13)', ()
         });
       });
 
-      const res = await page.request.post('http://localhost:5000/api/payment/token', {
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer mock-token' },
-        data: { propertyId: 'prop-01', durationMonths: 1 }
-      }).catch(() => null);
-
-      // Verify interface contract expectations
-      expect(true).toBeTruthy();
+      await page.goto('/');
+      const result = await page.evaluate(async () => {
+        const r = await fetch('/api/payment/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer mock-token' },
+          body: JSON.stringify({ propertyId: 'prop-01', durationMonths: 1 })
+        });
+        return { status: r.status, data: (await r.json()) as { token: string; orderId: string; grossAmount: number } };
+      });
+      expect(result.status).toBe(200);
+      expect(result.data.token).toBe('snap-token-f1-01');
+      expect(result.data.grossAmount).toBe(3505000);
     });
 
     test('T1-01-02: returns HTTP 409 Conflict when user already holds an active lease', async ({ page }) => {
@@ -60,8 +65,16 @@ test.describe('Tier 1: Feature Coverage (Milestones 1 & 2: Features 1 - 13)', ()
       });
 
       await page.goto('/');
-      // Verifies contract endpoint response schema
-      expect(true).toBeTruthy();
+      const conflictRes = await page.evaluate(async () => {
+        const r = await fetch('/api/payment/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ propertyId: 'prop-01', durationMonths: 1 })
+        });
+        return { status: r.status, data: (await r.json()) as { message: string } };
+      });
+      expect(conflictRes.status).toBe(409);
+      expect(conflictRes.data.message).toContain('sewa kos yang aktif');
     });
 
     test('T1-01-03: allows token generation if customRentalId matches existing pending lease', async ({ page }) => {
@@ -80,7 +93,18 @@ test.describe('Tier 1: Feature Coverage (Milestones 1 & 2: Features 1 - 13)', ()
           });
         }
       });
-      expect(true).toBeTruthy();
+      await page.goto('/');
+      const resumed = await page.evaluate(async () => {
+        const r = await fetch('/api/payment/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ propertyId: 'prop-01', customRentalId: 'rent-pending-101' })
+        });
+        return { status: r.status, data: (await r.json()) as { token: string; rentalId: string } };
+      });
+      expect(resumed.status).toBe(200);
+      expect(resumed.data.token).toBe('snap-token-resumed');
+      expect(resumed.data.rentalId).toBe('rent-pending-101');
     });
 
     test('T1-01-04: gross amount includes monthly rent plus flat Rp5,000 tenant admin fee', async () => {
@@ -116,7 +140,17 @@ test.describe('Tier 1: Feature Coverage (Milestones 1 & 2: Features 1 - 13)', ()
           body: JSON.stringify({ message: 'Kamar sudah terisi atau tidak tersedia.' })
         });
       });
-      expect(true).toBeTruthy();
+      await page.goto('/');
+      const res = await page.evaluate(async () => {
+        const r = await fetch('/api/rentals/contract/sign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ propertyId: 'prop-01', roomId: 'room-occupied' })
+        });
+        return { status: r.status, data: (await r.json()) as { message: string } };
+      });
+      expect(res.status).toBe(409);
+      expect(res.data.message).toContain('Kamar sudah terisi');
     });
 
     test('T1-02-03: rejects contract sign with HTTP 409 Conflict if target room is in maintenance', async ({ page }) => {
@@ -127,7 +161,17 @@ test.describe('Tier 1: Feature Coverage (Milestones 1 & 2: Features 1 - 13)', ()
           body: JSON.stringify({ message: 'Kamar sedang dalam pemeliharaan (maintenance).' })
         });
       });
-      expect(true).toBeTruthy();
+      await page.goto('/');
+      const res = await page.evaluate(async () => {
+        const r = await fetch('/api/rentals/contract/sign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ propertyId: 'prop-01', roomId: 'room-maint' })
+        });
+        return { status: r.status, data: (await r.json()) as { message: string } };
+      });
+      expect(res.status).toBe(409);
+      expect(res.data.message).toContain('maintenance');
     });
 
     test('T1-02-04: auto-selects and locks lowest available room number when no roomId specified', async () => {
@@ -491,7 +535,17 @@ test.describe('Tier 1: Feature Coverage (Milestones 1 & 2: Features 1 - 13)', ()
           });
         }
       });
-      expect(true).toBeTruthy();
+      await page.goto('/');
+      const res = await page.evaluate(async () => {
+        const r = await fetch('/api/rentals/contract/sign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ propertyId: 'prop-01', unexpectedField: 'malicious' })
+        });
+        return { status: r.status, data: (await r.json()) as { message: string } };
+      });
+      expect(res.status).toBe(400);
+      expect(res.data.message).toContain('Validation error');
     });
 
     test('T1-12-02: rejects withdrawal request with negative amount or non-numeric string', async () => {

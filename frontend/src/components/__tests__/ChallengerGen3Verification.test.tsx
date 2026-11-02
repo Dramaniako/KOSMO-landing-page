@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import BookingModal, { Props as BookingModalProps } from '../BookingModal';
 import TenantDashboard from '../../pages/TenantDashboard';
@@ -272,9 +272,12 @@ describe('Empirical Verification: Challenger Gen 3 Suite (R1, R2, R3)', () => {
       );
     };
 
-    it('displays distinct inline error messages for all invalid states simultaneously upon submit', () => {
+    it('displays distinct inline error messages for all invalid states simultaneously upon submit', async () => {
       const onSignContractMock = vi.fn();
       renderModal({ onSignContract: onSignContractMock });
+      await act(async () => {
+        await Promise.resolve();
+      });
 
       // Clear the NIK field to make it invalid
       const idInput = screen.getByPlaceholderText(/16 digit NIK KTP/i);

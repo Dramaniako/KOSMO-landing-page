@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import BookingModal, { Props } from '../BookingModal';
 import { Property, User, SignedContractData } from '../../types/index';
 import { LanguageProvider } from '../../context/LanguageContext';
@@ -93,10 +93,13 @@ describe('BookingModal Evidentiary UI & Contract Signing Suite', () => {
     );
   };
 
-  it('renders property details, all-inclusive price, and facilities', () => {
+  it('renders property details, all-inclusive price, and facilities', async () => {
     renderWithContext({ showContract: false, showPayment: false });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
-    expect(screen.getByText('KOSMO Sunset Suite Canggu')).toBeInTheDocument();
+    expect(screen.getAllByText('KOSMO Sunset Suite Canggu').length).toBeGreaterThan(0);
     expect(screen.getByText(/Jl. Pantai Batu Bolong No. 88/)).toBeInTheDocument();
     expect(screen.getByText('Rp 4.500.000')).toBeInTheDocument();
     expect(screen.getByText('Sewa Sekarang (All-Inclusive)')).toBeInTheDocument();

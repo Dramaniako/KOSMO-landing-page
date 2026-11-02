@@ -99,7 +99,7 @@ test.describe('Tier 3: Cross-Feature Combinations (Pairwise Permutations)', () =
     expect(webpVariants.hero.format).toBe('webp');
   });
 
-  test('T3-PW-05 (F19 + F20 + F16): Adaptive recommendation engine blends telemetry weights with Featured Listing monetization boost', async () => {
+  test('T3-PW-05 (F19 + F20 + F16): Adaptive recommendation engine blends telemetry weights with Featured Listing monetization boost', async ({ request }) => {
     const properties = [
       { id: 'p1', baseScore: 0.85, isFeatured: true },
       { id: 'p2', baseScore: 0.88, isFeatured: false }
@@ -113,6 +113,11 @@ test.describe('Tier 3: Cross-Feature Combinations (Pairwise Permutations)', () =
 
     scoredProperties.sort((a, b) => b.finalScore - a.finalScore);
     expect(scoredProperties[0].id).toBe('p1'); // 0.85 + 0.10 = 0.95 beats 0.88
+
+    const recRes = await request.get('/api/properties/recommended');
+    expect(recRes.ok()).toBe(true);
+    const recData = (await recRes.json()) as unknown[];
+    expect(Array.isArray(recData)).toBe(true);
   });
 
   test('T3-PW-06 (F9 + F13 + F8): Zero-disk streaming to Cloudinary maintains API latency < 200ms while generating SHA-256 audit trail', async () => {

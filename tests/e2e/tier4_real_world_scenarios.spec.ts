@@ -242,7 +242,7 @@ test.describe('Tier 4: Real-World Application Scenarios (Persona Workloads)', ()
   // --------------------------------------------------------------------------
   // Scenario 5: 3-Tier Monetization & Payout Cycle with Rejection Recovery
   // --------------------------------------------------------------------------
-  test('T4-WL-05: 3-Tier Monetization & Payout Cycle with Rejection Recovery (Gross rent -> Admin fee -> 3% commission -> Landlord credit -> Atomic rollback)', async () => {
+  test('T4-WL-05: 3-Tier Monetization & Payout Cycle with Rejection Recovery (Gross rent -> Admin fee -> 3% commission -> Landlord credit -> Atomic rollback)', async ({ request }) => {
     const monthlyRent = 4000000;
     const flatAdminFee = 5000;
     const tenantGrossPayment = monthlyRent + flatAdminFee;
@@ -264,6 +264,12 @@ test.describe('Tier 4: Real-World Application Scenarios (Persona Workloads)', ()
     // Admin rejects withdrawal -> Atomic rollback to landlord balance
     landlordBalance += withdrawalRequest;
     expect(landlordBalance).toBe(3880000);
+
+    // Verify unauthenticated withdrawal attempt is blocked by API gate
+    const unauthRes = await request.post('/api/withdraw', {
+      data: { amount: 2000000, bankName: 'BCA', accountNumber: '1234567890', accountHolder: 'Wayan' }
+    });
+    expect(unauthRes.status()).toBe(401);
   });
 
 });

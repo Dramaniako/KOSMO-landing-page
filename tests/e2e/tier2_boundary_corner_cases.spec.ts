@@ -130,10 +130,12 @@ test.describe('Tier 2: Boundary & Corner Cases (Boundary Value Analysis)', () =>
       expect(sanitized).toBe('');
     });
 
-    test('T2-BVA-C05: SQL injection metacharacters in property query do not alter SQL syntax', async () => {
+    test('T2-BVA-C05: SQL injection metacharacters in property query do not alter SQL syntax', async ({ request }) => {
       const injectionParam = "1' OR '1'='1";
-      const parameterized = true; // Using connection.execute with parameterized inputs
-      expect(parameterized).toBe(true);
+      const res = await request.get(`/api/properties?district=${encodeURIComponent(injectionParam)}`);
+      expect(res.status()).toBe(200);
+      const data = (await res.json()) as unknown[];
+      expect(Array.isArray(data)).toBe(true);
     });
   });
 
@@ -204,11 +206,16 @@ test.describe('Tier 2: Boundary & Corner Cases (Boundary Value Analysis)', () =>
       expect(eventsBatch).toHaveLength(50);
     });
 
-    test('T2-BVA-E05: unrecognized telemetry event type is rejected by strict Zod schema', async () => {
+    test('T2-BVA-E05: unrecognized telemetry event type is rejected by strict Zod schema', async ({ request }) => {
       const invalidEvent = 'hack_system';
       const validEvents = ['view', 'like', 'bookmark', 'chat', 'booking', 'rating', 'filter'];
       const isValid = validEvents.includes(invalidEvent);
       expect(isValid).toBe(false);
+
+      const res = await request.post('/api/tracking/interaction', {
+        data: { propertyId: 'prop-01', interactionType: invalidEvent }
+      });
+      expect(res.status()).toBe(400);
     });
   });
 

@@ -52,7 +52,13 @@ test.describe('Tier 1: Feature Coverage (Milestones 3, 4, 5: Features 14 - 23)',
           }])
         });
       });
-      expect(true).toBeTruthy();
+      await page.goto('/');
+      const rentals = await page.evaluate(async () => {
+        const r = await fetch('/api/rentals');
+        return (await r.json()) as Array<{ id: string; daysRemaining: number }>;
+      });
+      expect(rentals[0].id).toBe('rent-due-soon-01');
+      expect(rentals[0].daysRemaining).toBe(2);
     });
 
     test('T1-14-04: hides "Bayar Sewa Bulan Berikutnya" button when lease has > 3 days remaining', async () => {
@@ -88,7 +94,14 @@ test.describe('Tier 1: Feature Coverage (Milestones 3, 4, 5: Features 14 - 23)',
           })
         });
       });
-      expect(true).toBeTruthy();
+      await page.goto('/');
+      const renewData = await page.evaluate(async () => {
+        const r = await fetch('/api/rentals/rent-101/renew-token', { method: 'POST' });
+        return { status: r.status, body: (await r.json()) as { token: string; orderId: string; grossAmount: number } };
+      });
+      expect(renewData.status).toBe(200);
+      expect(renewData.body.token).toBe('snap-token-renewal-101');
+      expect(renewData.body.orderId).toContain('RENEW-rent-101-');
     });
 
     test('T1-15-02: generates orderId with RENEW-{rentalId}-{timestamp} prefix format', async () => {
