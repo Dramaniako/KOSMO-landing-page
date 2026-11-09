@@ -2702,7 +2702,23 @@ function registerPropertyRoutes(router2) {
     requireRole(["admin", "landlord"]),
     validateBody(propertySchema),
     async (req, res) => {
-      const { name, district, address, price, description, facilities, latitude, longitude, totalRooms, image, ownerId } = req.body;
+      const {
+        name,
+        district,
+        address,
+        price,
+        description,
+        facilities,
+        latitude,
+        longitude,
+        totalRooms,
+        occupiedRooms,
+        image,
+        ownerId,
+        verified_water_tank,
+        verified_wifi_speedtest,
+        document
+      } = req.body;
       const authUser = req.user;
       if (!name || !district || !address || !price) {
         return res.status(400).json({ message: "Nama, wilayah, alamat, dan harga wajib diisi." });
@@ -2712,9 +2728,13 @@ function registerPropertyRoutes(router2) {
         await connection.beginTransaction();
         const propId = generateId("prop");
         const landlordId = authUser?.role === "admin" && ownerId ? ownerId : authUser?.id || ownerId || "user-landlord";
+        const initialWaterTank = verified_water_tank ? 1 : 0;
+        const initialWifiSpeedtest = verified_wifi_speedtest ? 1 : 0;
+        const initialOccupied = occupiedRooms !== void 0 ? Math.max(0, parseInt(String(occupiedRooms), 10) || 0) : 0;
+        const docName = document && String(document).trim() !== "" ? String(document).trim() : "sertifikat_kepemilikan.pdf";
         await connection.query(
-          `INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document) 
-           VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, 0, ?, 'sertifikat_kepemilikan.pdf')`,
+          `INSERT INTO properties (id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms, ownerId, document, verified_water_tank, verified_wifi_speedtest) 
+           VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             propId,
             name,
@@ -2726,7 +2746,11 @@ function registerPropertyRoutes(router2) {
             latitude || "-8.6500",
             longitude || "115.2166",
             parseInt(String(totalRooms || "5"), 10),
-            landlordId
+            initialOccupied,
+            landlordId,
+            docName,
+            initialWaterTank,
+            initialWifiSpeedtest
           ]
         );
         if (facilities && facilities.length > 0) {

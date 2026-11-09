@@ -22,6 +22,8 @@ export interface PropertyFormState {
   image: string;
   ownerId: string;
   facilities: FacilityFilterState;
+  verified_water_tank?: boolean;
+  verified_wifi_speedtest?: boolean;
 }
 
 export interface ReviewFormState {

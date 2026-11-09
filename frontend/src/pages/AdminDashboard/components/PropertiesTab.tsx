@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Star, Edit, Trash2, Search, Sparkles, Loader2 } from 'lucide-react';
+import { Star, Edit, Trash2, Search, Sparkles, Loader2, ClipboardCheck, Wifi, Droplet } from 'lucide-react';
 import { Property } from '../../../types/index';
 import { formatRupiah } from '../../../utils/format';
 
@@ -9,6 +9,7 @@ export interface PropertiesTabProps {
   onEditProperty: (prop: Property) => void;
   onDeleteProperty: (id: string) => void;
   onToggleFeatured?: (prop: Property) => Promise<void>;
+  onVerifyProperty?: (prop?: Property) => void;
 }
 
 export default function PropertiesTab({
@@ -16,7 +17,8 @@ export default function PropertiesTab({
   loading,
   onEditProperty,
   onDeleteProperty,
-  onToggleFeatured
+  onToggleFeatured,
+  onVerifyProperty
 }: PropertiesTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -61,9 +63,22 @@ export default function PropertiesTab({
             {filteredProperties.length !== properties.length && ` / ${properties.length}`})
           </h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '2px' }}>
-            Moderasi unit kos, kelola status unggulan (featured), dan pantau okupansi kamar.
+            Moderasi unit kos, verifikasi lapangan saat bertemu landlord, dan kelola status unggulan (featured).
           </p>
         </div>
+
+        {onVerifyProperty && (
+          <button
+            type="button"
+            data-testid="open-field-verification-btn"
+            className="btn btn-primary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+            onClick={() => onVerifyProperty(undefined)}
+          >
+            <ClipboardCheck size={16} />
+            Formulir Verifikasi Lapangan
+          </button>
+        )}
       </div>
 
       {/* Search Input Bar */}
@@ -133,6 +148,44 @@ export default function PropertiesTab({
                         <div>
                           <strong style={{ color: 'var(--text-main)' }}>{p.name}</strong>
                           <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{p.address}</p>
+                          {(p.verified_wifi_speedtest || p.verified_water_tank) && (
+                            <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+                              {p.verified_wifi_speedtest && (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    padding: '1px 6px',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'rgba(16, 185, 129, 0.14)',
+                                    color: '#059669'
+                                  }}
+                                >
+                                  <Wifi size={10} /> Wi-Fi Verified
+                                </span>
+                              )}
+                              {p.verified_water_tank && (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    padding: '1px 6px',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'rgba(14, 165, 233, 0.14)',
+                                    color: '#0284c7'
+                                  }}
+                                >
+                                  <Droplet size={10} /> Tandon 24/7
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -180,6 +233,19 @@ export default function PropertiesTab({
                     <td style={{ padding: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>{p.ownerId}</td>
                     <td style={{ padding: '16px', textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', gap: '8px' }}>
+                        {onVerifyProperty && (
+                          <button
+                            type="button"
+                            data-testid={`verify-property-${p.id}`}
+                            className="btn btn-outline"
+                            style={{ padding: '6px 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                            onClick={() => onVerifyProperty(p)}
+                            title="Formulir Verifikasi Lapangan & Audit Kos"
+                          >
+                            <ClipboardCheck size={14} style={{ color: 'var(--primary)' }} />
+                            Verifikasi
+                          </button>
+                        )}
                         <button className="btn btn-outline" style={{ padding: '6px 12px' }} onClick={() => onEditProperty(p)} title="Edit properti">
                           <Edit size={14} />
                         </button>

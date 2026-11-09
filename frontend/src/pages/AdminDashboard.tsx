@@ -14,6 +14,7 @@ import TrackingTab from './AdminDashboard/components/TrackingTab';
 import MaintenanceTab from './AdminDashboard/components/MaintenanceTab';
 import UserModal from './AdminDashboard/components/UserModal';
 import PropertyModerationModal from './AdminDashboard/components/PropertyModerationModal';
+import FieldVerificationModal from './AdminDashboard/components/FieldVerificationModal';
 import ReviewModal from './AdminDashboard/components/ReviewModal';
 import { performLogout } from '../utils/authSession';
 
@@ -60,13 +61,19 @@ export default function AdminDashboard() {
   const {
     showPropModal,
     setShowPropModal,
+    showVerifyModal,
+    setShowVerifyModal,
+    verifyingProperty,
+    setVerifyingProperty,
     propertyForm,
     setPropertyForm,
     resetPropertyForm,
     handlePropertySubmit,
     handleEditProperty,
     handleDeleteProperty,
-    handleToggleFeatured
+    handleToggleFeatured,
+    handleOpenVerification,
+    handleSaveFieldVerification
   } = useAdminPropertyManagement(getAuthHeaders, users, fetchProperties);
 
   const {
@@ -149,6 +156,7 @@ export default function AdminDashboard() {
             onEditProperty={handleEditProperty}
             onDeleteProperty={handleDeleteProperty}
             onToggleFeatured={handleToggleFeatured}
+            onVerifyProperty={handleOpenVerification}
           />
         )}
 
@@ -220,6 +228,19 @@ export default function AdminDashboard() {
             resetPropertyForm();
           }}
           onSubmit={handlePropertySubmit}
+        />
+      )}
+
+      {/* On-Site Landlord & Kos Field Verification Modal */}
+      {showVerifyModal && (
+        <FieldVerificationModal
+          property={verifyingProperty}
+          landlordUsers={landlordUsers}
+          onClose={() => {
+            setShowVerifyModal(false);
+            setVerifyingProperty(null);
+          }}
+          onSaveVerification={handleSaveFieldVerification}
         />
       )}
 

@@ -10,7 +10,9 @@ export function useAdminPropertyManagement(
   fetchProperties: () => Promise<void>
 ) {
   const [showPropModal, setShowPropModal] = useState<boolean>(false);
+  const [showVerifyModal, setShowVerifyModal] = useState<boolean>(false);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [verifyingProperty, setVerifyingProperty] = useState<Property | null>(null);
   const [propertyForm, setPropertyForm] = useState<PropertyFormState>({
     name: '',
     district: 'Denpasar',
@@ -30,7 +32,9 @@ export function useAdminPropertyManagement(
       Kebersihan: true,
       Keamanan: false,
       Parkir: false
-    }
+    },
+    verified_water_tank: false,
+    verified_wifi_speedtest: false
   });
 
   const resetPropertyForm = (): void => {
@@ -54,7 +58,9 @@ export function useAdminPropertyManagement(
         Kebersihan: true,
         Keamanan: false,
         Parkir: false
-      }
+      },
+      verified_water_tank: false,
+      verified_wifi_speedtest: false
     });
   };
 
@@ -76,7 +82,9 @@ export function useAdminPropertyManagement(
       occupiedRooms: parseInt(propertyForm.occupiedRooms, 10),
       image: propertyForm.image || undefined,
       ownerId: propertyForm.ownerId || undefined,
-      facilities: facilityList
+      facilities: facilityList,
+      verified_water_tank: Boolean(propertyForm.verified_water_tank),
+      verified_wifi_speedtest: Boolean(propertyForm.verified_wifi_speedtest)
     };
 
     const url = editingProperty
@@ -132,9 +140,67 @@ export function useAdminPropertyManagement(
       occupiedRooms: prop.occupiedRooms.toString(),
       image: prop.image || '',
       ownerId: prop.ownerId || '',
-      facilities: facilitiesMap
+      facilities: facilitiesMap,
+      verified_water_tank: Boolean(prop.verified_water_tank),
+      verified_wifi_speedtest: Boolean(prop.verified_wifi_speedtest)
     });
     setShowPropModal(true);
+  };
+
+  const handleOpenVerification = (prop?: Property): void => {
+    setVerifyingProperty(prop || null);
+    setShowVerifyModal(true);
+  };
+
+  const handleSaveFieldVerification = async (payload: {
+    propertyId?: string;
+    name: string;
+    district: string;
+    address: string;
+    description: string;
+    price: number;
+    latitude: string;
+    longitude: string;
+    totalRooms: number;
+    occupiedRooms: number;
+    ownerId?: string;
+    facilities: string[];
+    verified_water_tank: boolean;
+    verified_wifi_speedtest: boolean;
+  }): Promise<void> => {
+    const url = payload.propertyId
+      ? `${API_BASE}/properties/${payload.propertyId}`
+      : `${API_BASE}/properties`;
+    const method = payload.propertyId ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        name: payload.name,
+        district: payload.district,
+        address: payload.address,
+        description: payload.description,
+        price: payload.price,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        totalRooms: payload.totalRooms,
+        occupiedRooms: payload.occupiedRooms,
+        ownerId: payload.ownerId || undefined,
+        facilities: payload.facilities,
+        verified_water_tank: payload.verified_water_tank,
+        verified_wifi_speedtest: payload.verified_wifi_speedtest
+      })
+    });
+
+    const data = (await res.json()) as { message?: string };
+    if (!res.ok) {
+      throw new Error(data.message || 'Gagal menyimpan hasil verifikasi lapangan.');
+    }
+
+    await fetchProperties();
+    setShowVerifyModal(false);
+    setVerifyingProperty(null);
   };
 
   const handleDeleteProperty = async (id: string): Promise<void> => {
@@ -180,14 +246,20 @@ export function useAdminPropertyManagement(
   return {
     showPropModal,
     setShowPropModal,
+    showVerifyModal,
+    setShowVerifyModal,
     editingProperty,
     setEditingProperty,
+    verifyingProperty,
+    setVerifyingProperty,
     propertyForm,
     setPropertyForm,
     resetPropertyForm,
     handlePropertySubmit,
     handleEditProperty,
     handleDeleteProperty,
-    handleToggleFeatured
+    handleToggleFeatured,
+    handleOpenVerification,
+    handleSaveFieldVerification
   };
 }

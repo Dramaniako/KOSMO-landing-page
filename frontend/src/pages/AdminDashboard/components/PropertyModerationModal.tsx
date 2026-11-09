@@ -181,6 +181,40 @@ export default function PropertyModerationModal({
               </div>
             </div>
 
+            <div className="form-group" style={{ gridColumn: 'span 2' }}>
+              <label className="form-label">Status Verifikasi Infrastruktur Lapangan</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: '16px', height: '16px' }}
+                    checked={Boolean(propertyForm.verified_water_tank)}
+                    onChange={(e) =>
+                      setPropertyForm({
+                        ...propertyForm,
+                        verified_water_tank: e.target.checked
+                      })
+                    }
+                  />
+                  Tandon Air Cadangan & Pompa 24/7
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: '16px', height: '16px' }}
+                    checked={Boolean(propertyForm.verified_wifi_speedtest)}
+                    onChange={(e) =>
+                      setPropertyForm({
+                        ...propertyForm,
+                        verified_wifi_speedtest: e.target.checked
+                      })
+                    }
+                  />
+                  Speedtest Wi-Fi &ge; 50 Mbps Terverifikasi
+                </label>
+              </div>
+            </div>
+
             <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
               <button type="button" className="btn btn-outline" onClick={onClose}>
                 Batal
