@@ -94,6 +94,7 @@ export default function LandlordDashboard() {
       <LandlordSidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        onOpenOnboarding={() => navigate('/landlord/onboarding')}
         onLogout={handleLogout}
       />
 
@@ -128,6 +129,7 @@ export default function LandlordDashboard() {
               setShowPropModal(true);
             }}
             onNavigateTab={(tab) => setActiveTab(tab)}
+            onStartOnboarding={() => navigate('/landlord/onboarding')}
           />
         )}
 

@@ -18,9 +18,12 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isSessionExpired = searchParams.get('expired') === '1';
+  const initialIsLogin = searchParams.get('mode') !== 'register';
+  const initialRole: 'tenant' | 'landlord' =
+    searchParams.get('role') === 'landlord' ? 'landlord' : 'tenant';
   const { t } = useTranslation();
-  const [isLogin, setIsLogin] = useState<boolean>(true);
-  const [role, setRole] = useState<'tenant' | 'landlord'>('tenant');
+  const [isLogin, setIsLogin] = useState<boolean>(initialIsLogin);
+  const [role, setRole] = useState<'tenant' | 'landlord'>(initialRole);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -59,7 +62,7 @@ export default function Login() {
       if (data.user.role === 'admin') {
         navigate('/admin');
       } else if (data.user.role === 'landlord') {
-        navigate('/landlord');
+        navigate(isLogin ? '/landlord' : '/landlord/onboarding');
       } else {
         navigate('/tenant');
       }

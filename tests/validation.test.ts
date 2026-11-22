@@ -906,4 +906,36 @@ test('Zod request body validation middleware & schemas', async (t) => {
     });
     assert.equal(missingSig.success, false);
   });
+
+  await t.test('updateProfileSchema validates and sanitizes landlord payout bank fields', () => {
+    const validBankPayload = updateProfileSchema.safeParse({
+      name: 'Wayan Landlord',
+      bankName: '<b>BCA</b>',
+      bankAccountNumber: '8870123456',
+      bankAccountHolder: '<script>alert(1)</script>Wayan Landlord'
+    });
+    assert.equal(validBankPayload.success, true);
+    if (validBankPayload.success) {
+      assert.equal(validBankPayload.data.bankName, 'BCA');
+      assert.equal(validBankPayload.data.bankAccountNumber, '8870123456');
+      assert.equal(validBankPayload.data.bankAccountHolder, 'Wayan Landlord');
+    }
+
+    const emptyBankOptional = updateProfileSchema.safeParse({
+      bankName: '',
+      bankAccountNumber: '',
+      bankAccountHolder: ''
+    });
+    assert.equal(emptyBankOptional.success, true);
+
+    const invalidNonNumericAcc = updateProfileSchema.safeParse({
+      bankAccountNumber: 'ABC-12345'
+    });
+    assert.equal(invalidNonNumericAcc.success, false);
+
+    const tooShortAcc = updateProfileSchema.safeParse({
+      bankAccountNumber: '1234'
+    });
+    assert.equal(tooShortAcc.success, false);
+  });
 });

@@ -287,7 +287,7 @@ export function registerPropertyRoutes(router: Router): void {
         apiCache.invalidatePattern('properties');
         apiCache.invalidatePattern('landlord:');
         apiCache.invalidatePattern('admin:');
-        res.status(201).json({ message: "Properti berhasil ditambahkan!" });
+        res.status(201).json({ message: "Properti berhasil ditambahkan!", id: propId, propertyId: propId });
       } catch (err) {
         await connection.rollback();
         console.error("Create property error:", err);

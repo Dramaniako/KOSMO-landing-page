@@ -1,18 +1,23 @@
 import React from 'react';
-import { Building, LayoutDashboard, MessageSquare, Users, LogOut, Wrench } from 'lucide-react';
+import { Building, LayoutDashboard, MessageSquare, Users, LogOut, Wrench, Compass } from 'lucide-react';
 import KosmoLogo from '../../../components/KosmoLogo';
+import { useTranslation } from '../../../context/LanguageContext';
 
 export interface LandlordSidebarProps {
   activeTab: 'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance';
   setActiveTab: (tab: 'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance') => void;
+  onOpenOnboarding?: () => void;
   onLogout: () => void;
 }
 
 export default function LandlordSidebar({
   activeTab,
   setActiveTab,
+  onOpenOnboarding,
   onLogout
 }: LandlordSidebarProps) {
+  const { t } = useTranslation();
+
   return (
     <aside className="sidebar">
       <div>
@@ -66,6 +71,19 @@ export default function LandlordSidebar({
               Pemeliharaan Unit
             </button>
           </li>
+          {onOpenOnboarding && (
+            <li>
+              <button
+                type="button"
+                data-testid="sidebar-onboarding-btn"
+                className="sidebar-link"
+                onClick={onOpenOnboarding}
+              >
+                <Compass size={18} />
+                {t('onboarding.sidebarLink')}
+              </button>
+            </li>
+          )}
         </ul>
       </div>
 

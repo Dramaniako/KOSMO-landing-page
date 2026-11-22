@@ -133,4 +133,16 @@ describe('Login Component Tier 3 Enhancements', () => {
 
     expect(localStorage.getItem('token')).toBe('landlord-jwt-token');
   });
+
+  it('opens directly in registration mode with landlord role selected when ?mode=register&role=landlord', () => {
+    renderLogin('/login?mode=register&role=landlord');
+
+    const roleSelector = screen.getByTestId('role-selector');
+    expect(roleSelector).toBeInTheDocument();
+
+    const tenantBtn = screen.getByTestId('role-tenant-btn');
+    const landlordBtn = screen.getByTestId('role-landlord-btn');
+    expect(landlordBtn.className).toContain('btn-primary');
+    expect(tenantBtn.className).toContain('btn-outline');
+  });
 });

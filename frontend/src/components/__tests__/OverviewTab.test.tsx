@@ -122,4 +122,24 @@ describe('OverviewTab Operational Alerts & Bank Details Suite', () => {
     expect(bankCard).toHaveTextContent('Wayan Landlord');
     expect(bankCard).toHaveTextContent('Terverifikasi');
   });
+
+  it('renders onboarding banner when landlord has zero properties or missing bank account', () => {
+    const onStartOnboarding = vi.fn();
+    render(
+      <OverviewTab
+        stats={{ ...mockStats, totalProperti: 0 }}
+        landlordUser={{ ...mockLandlordUser, bankAccountNumber: '' }}
+        loading={false}
+        rentals={[]}
+        tickets={[]}
+        onOpenWithdraw={vi.fn()}
+        onOpenAddProperty={vi.fn()}
+        onStartOnboarding={onStartOnboarding}
+      />
+    );
+
+    expect(screen.getByTestId('landlord-onboarding-banner')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('overview-start-onboarding-btn'));
+    expect(onStartOnboarding).toHaveBeenCalledTimes(1);
+  });
 });

@@ -122,7 +122,25 @@ export const updateProfileSchema = z.object({
     .optional()
     .or(z.literal('')),
   date_of_birth: z.string().optional().or(z.literal('')),
-  gender: z.string().optional().or(z.literal(''))
+  gender: z.string().optional().or(z.literal('')),
+  bankName: z
+    .string()
+    .transform((val) => sanitizeText(val))
+    .refine((val) => val === '' || val.length >= 2, { message: 'Nama bank minimal 2 karakter' })
+    .optional()
+    .or(z.literal('')),
+  bankAccountNumber: z
+    .string()
+    .trim()
+    .regex(/^\d{5,25}$/, 'Nomor rekening bank harus 5-25 digit angka')
+    .optional()
+    .or(z.literal('')),
+  bankAccountHolder: z
+    .string()
+    .transform((val) => sanitizeText(val))
+    .refine((val) => val === '' || val.length >= 2, { message: 'Nama pemilik rekening minimal 2 karakter' })
+    .optional()
+    .or(z.literal(''))
 });
 
 export const propertySchema = z.object({

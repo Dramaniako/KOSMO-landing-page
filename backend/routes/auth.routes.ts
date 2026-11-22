@@ -77,6 +77,9 @@ export interface UserProfileBody {
   emergency_contact_phone?: string;
   date_of_birth?: string;
   gender?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountHolder?: string;
 }
 
 export function formatSafeUser(user: UserRow): Partial<UserRow> & {
@@ -94,6 +97,88 @@ export function formatSafeUser(user: UserRow): Partial<UserRow> & {
     missingProfileFields: profileStatus.missingFields,
     missingProfileFieldLabels: profileStatus.missingFieldLabels
   };
+}
+
+/** Persists validated profile and payout bank updates for a user ID and invalidates stats cache. */
+async function applyProfileUpdate(
+  targetUserId: string,
+  body: UserProfileBody
+): Promise<ReturnType<typeof formatSafeUser> | null> {
+  const [existingRows] = await pool.query<UserRow[]>('SELECT id FROM users WHERE id = ?', [targetUserId]);
+  if (existingRows.length === 0) {
+    return null;
+  }
+
+  const {
+    name,
+    phone,
+    paymentMethod,
+    notifications,
+    language,
+    identity_type,
+    identity_number,
+    address,
+    occupation,
+    emergency_contact_name,
+    emergency_contact_relation,
+    emergency_contact_phone,
+    date_of_birth,
+    gender,
+    bankName,
+    bankAccountNumber,
+    bankAccountHolder
+  } = body;
+
+  const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : null;
+  const nonEmptyOrNull = (val?: string): string | null =>
+    val && val.trim() !== '' ? val.trim() : null;
+
+  await pool.query(
+    `UPDATE users SET 
+      name = COALESCE(?, name), 
+      phone = COALESCE(?, phone), 
+      paymentMethod = COALESCE(?, paymentMethod), 
+      notifications = COALESCE(?, notifications), 
+      language = COALESCE(?, language),
+      identity_type = COALESCE(?, identity_type),
+      identity_number = COALESCE(?, identity_number),
+      address = COALESCE(?, address),
+      occupation = COALESCE(?, occupation),
+      emergency_contact_name = COALESCE(?, emergency_contact_name),
+      emergency_contact_relation = COALESCE(?, emergency_contact_relation),
+      emergency_contact_phone = COALESCE(?, emergency_contact_phone),
+      date_of_birth = COALESCE(?, date_of_birth),
+      gender = COALESCE(?, gender),
+      bankName = COALESCE(?, bankName),
+      bankAccountNumber = COALESCE(?, bankAccountNumber),
+      bankAccountHolder = COALESCE(?, bankAccountHolder)
+    WHERE id = ?`,
+    [
+      name,
+      phone,
+      paymentMethod,
+      notifVal,
+      language,
+      identity_type,
+      identity_number,
+      address,
+      occupation,
+      emergency_contact_name,
+      emergency_contact_relation,
+      emergency_contact_phone,
+      date_of_birth,
+      gender,
+      nonEmptyOrNull(bankName),
+      nonEmptyOrNull(bankAccountNumber),
+      nonEmptyOrNull(bankAccountHolder),
+      targetUserId
+    ]
+  );
+  apiCache.invalidatePattern('landlord:');
+
+  const [updatedUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [targetUserId]);
+  const updatedUser = updatedUsers[0];
+  return updatedUser ? formatSafeUser(updatedUser) : null;
 }
 
 export function registerAuthRoutes(router: Router): void {
@@ -254,74 +339,16 @@ export function registerAuthRoutes(router: Router): void {
     async (req: AuthenticatedRequest, res: Response) => {
       const { id } = req.params;
       const authUser = req.user;
-      const {
-        name,
-        phone,
-        paymentMethod,
-        notifications,
-        language,
-        identity_type,
-        identity_number,
-        address,
-        occupation,
-        emergency_contact_name,
-        emergency_contact_relation,
-        emergency_contact_phone,
-        date_of_birth,
-        gender
-      } = req.body as UserProfileBody;
 
       if (authUser?.role !== 'admin' && authUser?.id !== id) {
         return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat mengubah profil pengguna lain." });
       }
 
       try {
-        const [rows] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [id]);
-        if (rows.length === 0) {
+        const safeUser = await applyProfileUpdate(String(id), req.body as UserProfileBody);
+        if (!safeUser) {
           return res.status(404).json({ message: "User tidak ditemukan." });
         }
-
-        const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : null;
-
-        await pool.query(
-          `UPDATE users SET 
-            name = COALESCE(?, name), 
-            phone = COALESCE(?, phone), 
-            paymentMethod = COALESCE(?, paymentMethod), 
-            notifications = COALESCE(?, notifications), 
-            language = COALESCE(?, language),
-            identity_type = COALESCE(?, identity_type),
-            identity_number = COALESCE(?, identity_number),
-            address = COALESCE(?, address),
-            occupation = COALESCE(?, occupation),
-            emergency_contact_name = COALESCE(?, emergency_contact_name),
-            emergency_contact_relation = COALESCE(?, emergency_contact_relation),
-            emergency_contact_phone = COALESCE(?, emergency_contact_phone),
-            date_of_birth = COALESCE(?, date_of_birth),
-            gender = COALESCE(?, gender)
-          WHERE id = ?`,
-          [
-            name,
-            phone,
-            paymentMethod,
-            notifVal,
-            language,
-            identity_type,
-            identity_number,
-            address,
-            occupation,
-            emergency_contact_name,
-            emergency_contact_relation,
-            emergency_contact_phone,
-            date_of_birth,
-            gender,
-            id
-          ]
-        );
-
-        const [updatedUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [id]);
-        const updatedUser = updatedUsers[0];
-        const safeUser = formatSafeUser(updatedUser);
         res.json({
           message: "Profil berhasil diperbarui!",
           user: safeUser
@@ -341,66 +368,12 @@ export function registerAuthRoutes(router: Router): void {
     async (req: AuthenticatedRequest, res: Response) => {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: "Otentikasi diperlukan." });
-      const {
-        name,
-        phone,
-        paymentMethod,
-        notifications,
-        language,
-        identity_type,
-        identity_number,
-        address,
-        occupation,
-        emergency_contact_name,
-        emergency_contact_relation,
-        emergency_contact_phone,
-        date_of_birth,
-        gender
-      } = req.body as UserProfileBody;
 
       try {
-        const notifVal = notifications !== undefined ? (notifications ? 1 : 0) : null;
-
-        await pool.query(
-          `UPDATE users SET 
-            name = COALESCE(?, name), 
-            phone = COALESCE(?, phone), 
-            paymentMethod = COALESCE(?, paymentMethod), 
-            notifications = COALESCE(?, notifications), 
-            language = COALESCE(?, language),
-            identity_type = COALESCE(?, identity_type),
-            identity_number = COALESCE(?, identity_number),
-            address = COALESCE(?, address),
-            occupation = COALESCE(?, occupation),
-            emergency_contact_name = COALESCE(?, emergency_contact_name),
-            emergency_contact_relation = COALESCE(?, emergency_contact_relation),
-            emergency_contact_phone = COALESCE(?, emergency_contact_phone),
-            date_of_birth = COALESCE(?, date_of_birth),
-            gender = COALESCE(?, gender)
-          WHERE id = ?`,
-          [
-            name,
-            phone,
-            paymentMethod,
-            notifVal,
-            language,
-            identity_type,
-            identity_number,
-            address,
-            occupation,
-            emergency_contact_name,
-            emergency_contact_relation,
-            emergency_contact_phone,
-            date_of_birth,
-            gender,
-            userId
-          ]
-        );
-
-        const [updatedUsers] = await pool.query<UserRow[]>('SELECT * FROM users WHERE id = ?', [userId]);
-        const updatedUser = updatedUsers[0];
-        if (!updatedUser) return res.status(404).json({ message: "User tidak ditemukan." });
-        const safeUser = formatSafeUser(updatedUser);
+        const safeUser = await applyProfileUpdate(userId, req.body as UserProfileBody);
+        if (!safeUser) {
+          return res.status(404).json({ message: "User tidak ditemukan." });
+        }
         res.json({
           message: "Profil berhasil diperbarui!",
           user: safeUser

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Wifi, Tv, Wind, Shield, Droplet, Check, ShieldCheck, Heart,
-  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal, RotateCcw
+  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal, RotateCcw, Building
 } from 'lucide-react';
 import { Property, Review, User, FacilityFilterState, ContractSignPayload, SignedContractData } from '../types/index';
 import KosCard from '../components/KosCard';
@@ -554,6 +554,20 @@ export default function LandingPage() {
               <a href="#properties" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.explore')}</a>
               <a href="#all-inclusive" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.whyUs')}</a>
               <a href="#reviews" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{t('nav.testimonials')}</a>
+              <button
+                type="button"
+                data-testid="nav-become-landlord"
+                onClick={() =>
+                  navigate(
+                    currentUser?.role === 'landlord'
+                      ? '/landlord/onboarding'
+                      : '/login?mode=register&role=landlord'
+                  )
+                }
+                className="text-blue-600 dark:text-blue-400 font-semibold hover:underline bg-transparent border-0 cursor-pointer p-0"
+              >
+                {t('nav.becomeLandlord')}
+              </button>
             </div>
 
             <ThemeLanguageToggle showCurrencyToggle={true} />
@@ -756,6 +770,37 @@ export default function LandingPage() {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Landlord Partner CTA Banner */}
+      <section data-testid="landlord-partner-cta" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+        <div className="rounded-3xl bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-8 sm:p-10 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-blue-50 text-xs font-bold mb-3">
+              <Building size={14} />
+              <span>{t('landing.partnerBadge')}</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight mb-2">
+              {t('landing.partnerTitle')}
+            </h2>
+            <p className="text-sm sm:text-base text-blue-100 leading-relaxed">
+              {t('landing.partnerDesc')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              navigate(
+                currentUser?.role === 'landlord'
+                  ? '/landlord/onboarding'
+                  : '/login?mode=register&role=landlord'
+              )
+            }
+            className="px-6 py-3.5 rounded-xl bg-white text-blue-700 hover:bg-blue-50 font-bold text-sm shadow-sm min-h-[44px] shrink-0 cursor-pointer border-0 transition"
+          >
+            {t('landing.partnerCta')} &rarr;
+          </button>
         </div>
       </section>
 

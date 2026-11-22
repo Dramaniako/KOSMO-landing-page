@@ -12,6 +12,7 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const Login = lazy(() => import('./pages/Login'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const LandlordDashboard = lazy(() => import('./pages/LandlordDashboard'));
+const LandlordOnboarding = lazy(() => import('./pages/LandlordOnboarding'));
 const TenantDashboard = lazy(() => import('./pages/TenantDashboard'));
 
 function RouteLoadingFallback() {
@@ -81,6 +82,14 @@ export default function App() {
                     element={
                       <ProtectedRoute allowedRoles={['landlord']}>
                         <LandlordDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/landlord/onboarding"
+                    element={
+                      <ProtectedRoute allowedRoles={['landlord']}>
+                        <LandlordOnboarding />
                       </ProtectedRoute>
                     }
                   />

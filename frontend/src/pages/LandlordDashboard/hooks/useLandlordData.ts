@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { User, Property, Review, Rental, LandlordStats, MaintenanceTicket } from '../../../types/index';
 import { handleSessionExpired } from '../../../utils/authSession';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
+type LandlordTab = 'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance';
+
 export function useLandlordData() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance'>('overview');
+  const location = useLocation();
+  const initialTabFromState = (location.state as { initialTab?: LandlordTab } | null)?.initialTab;
+  const [activeTab, setActiveTab] = useState<LandlordTab>(initialTabFromState || 'overview');
 
   const [landlordUser, setLandlordUser] = useState<User | null>(() => {
     const raw = localStorage.getItem('user');

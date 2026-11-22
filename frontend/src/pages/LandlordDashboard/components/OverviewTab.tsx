@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
-import { DollarSign, ArrowUpRight, CreditCard, Percent, Landmark, Plus, AlertTriangle, Wrench } from 'lucide-react';
+import { DollarSign, ArrowUpRight, CreditCard, Percent, Landmark, Plus, AlertTriangle, Wrench, Compass } from 'lucide-react';
 import { User, LandlordStats, Rental, MaintenanceTicket } from '../../../types/index';
 import { formatRupiah } from '../../../utils/format';
+import { useTranslation } from '../../../context/LanguageContext';
 import { shimmerStyle } from '../types';
 
 export interface OverviewTabProps {
@@ -13,6 +14,7 @@ export interface OverviewTabProps {
   onOpenWithdraw: () => void;
   onOpenAddProperty: () => void;
   onNavigateTab?: (tab: 'overview' | 'properties' | 'reviews' | 'tenants' | 'maintenance') => void;
+  onStartOnboarding?: () => void;
 }
 
 export default function OverviewTab({
@@ -23,8 +25,13 @@ export default function OverviewTab({
   tickets,
   onOpenWithdraw,
   onOpenAddProperty,
-  onNavigateTab
+  onNavigateTab,
+  onStartOnboarding
 }: OverviewTabProps) {
+  const { t } = useTranslation();
+  const needsOnboarding =
+    Boolean(onStartOnboarding) &&
+    (stats.totalProperti === 0 || (!landlordUser?.bankAccountNumber && !stats.bankAccountNumber));
   const expiringLeases = useMemo(() => {
     if (!rentals) return [];
     return rentals.filter(
@@ -58,6 +65,60 @@ export default function OverviewTab({
 
   return (
     <>
+      {needsOnboarding && onStartOnboarding && (
+        <div
+          data-testid="landlord-onboarding-banner"
+          style={{
+            padding: '18px 20px',
+            marginBottom: '24px',
+            borderRadius: '12px',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--primary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px',
+            flexWrap: 'wrap'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div
+              style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '10px',
+                backgroundColor: 'var(--primary-light)',
+                color: 'var(--primary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              <Compass size={22} />
+            </div>
+            <div>
+              <strong style={{ fontSize: '15px', color: 'var(--text-main)' }}>
+                {t('onboarding.bannerTitle')}
+              </strong>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {t('onboarding.bannerDesc')}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="overview-start-onboarding-btn"
+            className="btn btn-primary"
+            onClick={onStartOnboarding}
+            style={{ fontSize: '13px', padding: '10px 16px' }}
+          >
+            <Compass size={15} />
+            {t('onboarding.bannerCta')}
+          </button>
+        </div>
+      )}
+
       {/* Operational Alert Banners */}
       {(expiringLeases.length > 0 || openTickets.length > 0) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
