@@ -51,11 +51,11 @@
   "rewrites": [
     {
       "source": "/robots.txt",
-      "destination": "/api/robots.txt"
+      "destination": "/api/index.js"
     },
     {
       "source": "/sitemap.xml",
-      "destination": "/api/sitemap.xml"
+      "destination": "/api/index.js"
     },
     {
       "source": "/kos/:propertyId/:slug*",
@@ -66,7 +66,7 @@
           "value": ".*(Googlebot|googlebot|Bingbot|bingbot|WhatsApp|whatsapp|Twitterbot|twitterbot|facebookexternalhit|TelegramBot|LinkedInBot|Discordbot|Slackbot|DuckDuckBot|Applebot).*"
         }
       ],
-      "destination": "/api/seo/prerender?propertyId=:propertyId"
+      "destination": "/api/index.js"
     },
     {
       "source": "/kos/:propertyId",
@@ -77,7 +77,7 @@
           "value": ".*(Googlebot|googlebot|Bingbot|bingbot|WhatsApp|whatsapp|Twitterbot|twitterbot|facebookexternalhit|TelegramBot|LinkedInBot|Discordbot|Slackbot|DuckDuckBot|Applebot).*"
         }
       ],
-      "destination": "/api/seo/prerender?propertyId=:propertyId"
+      "destination": "/api/index.js"
     },
     {
       "source": "/area/:districtSlug",
@@ -88,18 +88,7 @@
           "value": ".*(Googlebot|googlebot|Bingbot|bingbot|WhatsApp|whatsapp|Twitterbot|twitterbot|facebookexternalhit|TelegramBot|LinkedInBot|Discordbot|Slackbot|DuckDuckBot|Applebot).*"
         }
       ],
-      "destination": "/api/seo/prerender?district=:districtSlug"
-    },
-    {
-      "source": "/",
-      "has": [
-        {
-          "type": "header",
-          "key": "user-agent",
-          "value": ".*(Googlebot|googlebot|Bingbot|bingbot|WhatsApp|whatsapp|Twitterbot|twitterbot|facebookexternalhit|TelegramBot|LinkedInBot|Discordbot|Slackbot|DuckDuckBot|Applebot).*"
-        }
-      ],
-      "destination": "/api/seo/prerender"
+      "destination": "/api/index.js"
     },
     {
       "source": "/api/(.*)",

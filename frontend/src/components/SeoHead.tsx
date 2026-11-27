@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { Property } from '../types/index';
 import {
   DEFAULT_SITE_URL,
+  normalizeKosmoSiteUrl,
   buildPropertySeoPath,
   buildDistrictSeoPath
 } from '../../../shared/seo';
@@ -28,12 +29,12 @@ const DEFAULT_SEO_IMAGE =
 export function resolveFrontendSiteUrl(): string {
   const configured = (import.meta.env.VITE_SITE_URL as string | undefined)?.trim();
   if (configured && /^https?:\/\//i.test(configured)) {
-    return configured.replace(/\/+$/, '');
+    return normalizeKosmoSiteUrl(configured);
   }
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin;
     if (!origin.includes('localhost') && !origin.includes('127.0.0.1')) {
-      return origin.replace(/\/+$/, '');
+      return normalizeKosmoSiteUrl(origin);
     }
   }
   return DEFAULT_SITE_URL;

@@ -8510,7 +8510,22 @@ function isOriginAllowed(origin) {
 }
 
 // shared/seo.ts
-var DEFAULT_SITE_URL = "https://kosmobali.my.id";
+var DEFAULT_SITE_URL = "https://www.kosmobali.my.id";
+function normalizeKosmoSiteUrl(rawUrl) {
+  const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return DEFAULT_SITE_URL;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname.toLowerCase() === "kosmobali.my.id") {
+      parsed.protocol = "https:";
+      parsed.hostname = "www.kosmobali.my.id";
+      parsed.port = "";
+    }
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return DEFAULT_SITE_URL;
+  }
+}
 var BALI_SEO_DISTRICTS = [
   "Canggu",
   "Seminyak",
@@ -8549,10 +8564,11 @@ function escapeHtml(value) {
 }
 
 // backend/routes/seo.routes.ts
+var PUBLIC_PROPERTY_WHERE = "id NOT LIKE 'prop-cstorm-%' AND id NOT LIKE 'test-%' AND id NOT LIKE 'e2e-%'";
 function resolveCanonicalSiteUrl(req) {
   const configured = process.env.SITE_URL?.trim();
   if (configured && /^https?:\/\//i.test(configured)) {
-    return configured.replace(/\/+$/, "");
+    return normalizeKosmoSiteUrl(configured);
   }
   const rawProto = req.headers["x-forwarded-proto"] || req.protocol || "https";
   const protoStr = Array.isArray(rawProto) ? rawProto[0] : String(rawProto);
@@ -8566,7 +8582,7 @@ function resolveCanonicalSiteUrl(req) {
     const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
     const isProd = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
     if (isOriginAllowed(candidate) && !(isProd && isLocalHost)) {
-      return candidate.replace(/\/+$/, "");
+      return normalizeKosmoSiteUrl(candidate);
     }
   }
   return DEFAULT_SITE_URL;
@@ -8609,7 +8625,7 @@ var handleSitemapXml = async (req, res) => {
   const cachedXml = apiCache.get(cacheKey);
   if (cachedXml) {
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300, stale-while-revalidate=3600");
     res.status(200).send(cachedXml);
     return;
   }
@@ -8617,7 +8633,7 @@ var handleSitemapXml = async (req, res) => {
   try {
     await ensureDbReady();
     const [rows] = await pool.query(
-      "SELECT id, name, district FROM properties ORDER BY is_featured DESC, id DESC LIMIT 1000"
+      `SELECT id, name, district FROM properties WHERE ${PUBLIC_PROPERTY_WHERE} ORDER BY is_featured DESC, id DESC LIMIT 1000`
     );
     properties = rows;
   } catch (err) {
@@ -8658,7 +8674,7 @@ var handleSitemapXml = async (req, res) => {
     apiCache.set(cacheKey, xml, 300);
   }
   res.setHeader("Content-Type", "application/xml; charset=utf-8");
-  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+  res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300, stale-while-revalidate=3600");
   res.status(200).send(xml);
 };
 var handleSeoPrerender = async (req, res) => {
@@ -8821,14 +8837,14 @@ var handleSeoPrerender = async (req, res) => {
     if (matchedDistrict) {
       const [rows] = await pool.query(
         `SELECT id, name, district, address, price, rating, image, description, totalRooms, occupiedRooms
-         FROM properties WHERE district = ? ORDER BY is_featured DESC, id DESC LIMIT 30`,
+         FROM properties WHERE district = ? AND ${PUBLIC_PROPERTY_WHERE} ORDER BY is_featured DESC, id DESC LIMIT 30`,
         [matchedDistrict]
       );
       listRows = rows;
     } else {
       const [rows] = await pool.query(
         `SELECT id, name, district, address, price, rating, image, description, totalRooms, occupiedRooms
-         FROM properties ORDER BY is_featured DESC, id DESC LIMIT 30`
+         FROM properties WHERE ${PUBLIC_PROPERTY_WHERE} ORDER BY is_featured DESC, id DESC LIMIT 30`
       );
       listRows = rows;
     }
@@ -8919,6 +8935,22 @@ function registerSeoRoutes(router2) {
   router2.get("/robots.txt", handleRobotsTxt);
   router2.get("/sitemap.xml", handleSitemapXml);
   router2.get("/seo/prerender", handleSeoPrerender);
+}
+function registerRootSeoRoutes(app2) {
+  app2.get("/robots.txt", handleRobotsTxt);
+  app2.get("/sitemap.xml", handleSitemapXml);
+  app2.get("/kos/:propertyId/:slug", (req, res) => {
+    req.query.propertyId = String(req.params.propertyId || "");
+    return handleSeoPrerender(req, res);
+  });
+  app2.get("/kos/:propertyId", (req, res) => {
+    req.query.propertyId = String(req.params.propertyId || "");
+    return handleSeoPrerender(req, res);
+  });
+  app2.get("/area/:districtSlug", (req, res) => {
+    req.query.district = String(req.params.districtSlug || "");
+    return handleSeoPrerender(req, res);
+  });
 }
 
 // backend/router.ts
@@ -9321,8 +9353,7 @@ async function dbReadinessMiddleware(req, res, next, dbReadyFn = ensureDbReady) 
   next();
 }
 app.use((req, res, next) => dbReadinessMiddleware(req, res, next));
-app.get("/robots.txt", handleRobotsTxt);
-app.get("/sitemap.xml", handleSitemapXml);
+registerRootSeoRoutes(app);
 app.use("/api", router_default);
 app.use("/api", notFoundHandler);
 app.use(errorHandler);

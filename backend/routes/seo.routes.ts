@@ -1,4 +1,4 @@
-import type { Request, Response, Router } from 'express';
+import type { Request, Response, Router, Application } from 'express';
 import type { RowDataPacket } from 'mysql2/promise';
 import { pool, ensureDbReady } from '../db';
 import { apiCache } from '../services/cache';
@@ -6,6 +6,7 @@ import { isOriginAllowed } from '../utils/cors';
 import { DEFAULT_PROPERTY_IMAGE } from '../services/transformers';
 import {
   DEFAULT_SITE_URL,
+  normalizeKosmoSiteUrl,
   BALI_SEO_DISTRICTS,
   slugifySeo,
   buildPropertySeoPath,
@@ -14,6 +15,9 @@ import {
   escapeXml,
   escapeHtml
 } from '../../shared/seo';
+
+const PUBLIC_PROPERTY_WHERE =
+  "id NOT LIKE 'prop-cstorm-%' AND id NOT LIKE 'test-%' AND id NOT LIKE 'e2e-%'";
 
 interface SitemapPropertyRow extends RowDataPacket {
   id: string;
@@ -53,7 +57,7 @@ interface ReviewRow extends RowDataPacket {
 export function resolveCanonicalSiteUrl(req: Request): string {
   const configured = process.env.SITE_URL?.trim();
   if (configured && /^https?:\/\//i.test(configured)) {
-    return configured.replace(/\/+$/, '');
+    return normalizeKosmoSiteUrl(configured);
   }
 
   const rawProto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
@@ -71,7 +75,7 @@ export function resolveCanonicalSiteUrl(req: Request): string {
     const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
 
     if (isOriginAllowed(candidate) && !(isProd && isLocalHost)) {
-      return candidate.replace(/\/+$/, '');
+      return normalizeKosmoSiteUrl(candidate);
     }
   }
 
@@ -120,7 +124,7 @@ export const handleSitemapXml = async (req: Request, res: Response): Promise<voi
 
   if (cachedXml) {
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=3600');
     res.status(200).send(cachedXml);
     return;
   }
@@ -129,7 +133,7 @@ export const handleSitemapXml = async (req: Request, res: Response): Promise<voi
   try {
     await ensureDbReady();
     const [rows] = await pool.query<SitemapPropertyRow[]>(
-      'SELECT id, name, district FROM properties ORDER BY is_featured DESC, id DESC LIMIT 1000'
+      `SELECT id, name, district FROM properties WHERE ${PUBLIC_PROPERTY_WHERE} ORDER BY is_featured DESC, id DESC LIMIT 1000`
     );
     properties = rows;
   } catch (err: unknown) {
@@ -172,7 +176,7 @@ export const handleSitemapXml = async (req: Request, res: Response): Promise<voi
   }
 
   res.setHeader('Content-Type', 'application/xml; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+  res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=3600');
   res.status(200).send(xml);
 };
 
@@ -362,14 +366,14 @@ export const handleSeoPrerender = async (req: Request, res: Response): Promise<v
     if (matchedDistrict) {
       const [rows] = await pool.query<PrerenderPropertyRow[]>(
         `SELECT id, name, district, address, price, rating, image, description, totalRooms, occupiedRooms
-         FROM properties WHERE district = ? ORDER BY is_featured DESC, id DESC LIMIT 30`,
+         FROM properties WHERE district = ? AND ${PUBLIC_PROPERTY_WHERE} ORDER BY is_featured DESC, id DESC LIMIT 30`,
         [matchedDistrict]
       );
       listRows = rows;
     } else {
       const [rows] = await pool.query<PrerenderPropertyRow[]>(
         `SELECT id, name, district, address, price, rating, image, description, totalRooms, occupiedRooms
-         FROM properties ORDER BY is_featured DESC, id DESC LIMIT 30`
+         FROM properties WHERE ${PUBLIC_PROPERTY_WHERE} ORDER BY is_featured DESC, id DESC LIMIT 30`
       );
       listRows = rows;
     }
@@ -474,4 +478,25 @@ export function registerSeoRoutes(router: Router): void {
   router.get('/robots.txt', handleRobotsTxt);
   router.get('/sitemap.xml', handleSitemapXml);
   router.get('/seo/prerender', handleSeoPrerender);
+}
+
+/**
+ * Mounts root-level SEO & crawler prerender routes so Vercel rewrites to `/api/index.js`
+ * resolve clean public URLs (`/sitemap.xml`, `/robots.txt`, `/kos/*`, `/area/*`) directly.
+ */
+export function registerRootSeoRoutes(app: Application): void {
+  app.get('/robots.txt', handleRobotsTxt);
+  app.get('/sitemap.xml', handleSitemapXml);
+  app.get('/kos/:propertyId/:slug', (req: Request, res: Response) => {
+    req.query.propertyId = String(req.params.propertyId || '');
+    return handleSeoPrerender(req, res);
+  });
+  app.get('/kos/:propertyId', (req: Request, res: Response) => {
+    req.query.propertyId = String(req.params.propertyId || '');
+    return handleSeoPrerender(req, res);
+  });
+  app.get('/area/:districtSlug', (req: Request, res: Response) => {
+    req.query.district = String(req.params.districtSlug || '');
+    return handleSeoPrerender(req, res);
+  });
 }

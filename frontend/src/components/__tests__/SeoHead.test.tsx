@@ -2,6 +2,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import SeoHead, { buildLandingJsonLd } from '../SeoHead';
+import { normalizeKosmoSiteUrl } from '../../../../shared/seo';
 import KosCard from '../KosCard';
 import { ThemeProvider } from '../../context/ThemeContext';
 import { LanguageProvider } from '../../context/LanguageContext';
@@ -32,8 +33,11 @@ describe('SeoHead, JSON-LD & Crawlable KosCard Links', () => {
   });
 
   it('updates canonical, meta description, robots, and Schema.org JSON-LD cleanly', () => {
+    expect(normalizeKosmoSiteUrl('https://kosmobali.my.id')).toBe('https://www.kosmobali.my.id');
+    expect(normalizeKosmoSiteUrl('https://www.kosmobali.my.id/')).toBe('https://www.kosmobali.my.id');
+
     const jsonLd = buildLandingJsonLd({
-      siteUrl: 'https://kosmobali.my.id',
+      siteUrl: 'https://www.kosmobali.my.id',
       properties: [sampleProperty],
       selectedProperty: sampleProperty,
       activeDistrict: 'Semua',
@@ -56,7 +60,7 @@ describe('SeoHead, JSON-LD & Crawlable KosCard Links', () => {
     expect(document.title).toBe('Cove Nuansa Home Jimbaran | KOSMO');
     expect(
       document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')
-    ).toBe('https://kosmobali.my.id/kos/prop-01/cove-nuansa-home-jimbaran');
+    ).toBe('https://www.kosmobali.my.id/kos/prop-01/cove-nuansa-home-jimbaran');
     expect(
       document.head.querySelector('meta[name="robots"]')?.getAttribute('content')
     ).toContain('index, follow');

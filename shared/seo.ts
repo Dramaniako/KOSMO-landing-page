@@ -2,7 +2,27 @@
  * Pure Shared SEO Utilities for KOSMO (Frontend + Backend)
  */
 
-export const DEFAULT_SITE_URL = 'https://kosmobali.my.id';
+export const DEFAULT_SITE_URL = 'https://www.kosmobali.my.id';
+
+/**
+ * Normalizes a KOSMO canonical origin onto `https://www.kosmobali.my.id` when
+ * bare `kosmobali.my.id` is provided, preventing 308-redirecting sitemap URLs.
+ */
+export function normalizeKosmoSiteUrl(rawUrl: string): string {
+  const trimmed = (rawUrl || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return DEFAULT_SITE_URL;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.hostname.toLowerCase() === 'kosmobali.my.id') {
+      parsed.protocol = 'https:';
+      parsed.hostname = 'www.kosmobali.my.id';
+      parsed.port = '';
+    }
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return DEFAULT_SITE_URL;
+  }
+}
 
 export const BALI_SEO_DISTRICTS = [
   'Canggu',

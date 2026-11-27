@@ -16,6 +16,14 @@ export default defineConfig({
       '/uploads': {
         target: 'http://localhost:5000',
         changeOrigin: true,
+      },
+      '/robots.txt': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+      '/sitemap.xml': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
       }
     }
   },

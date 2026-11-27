@@ -15,7 +15,7 @@ import { setupProcessSafety } from './utils/processSafety';
 import { assertMidtransProductionConfig } from './routes/payment.routes';
 import { validateServerEnv } from './config/env';
 import { isOriginAllowed } from './utils/cors';
-import { handleRobotsTxt, handleSitemapXml } from './routes/seo.routes';
+import { registerRootSeoRoutes } from './routes/seo.routes';
 
 export { isOriginAllowed };
 
@@ -190,9 +190,8 @@ export async function dbReadinessMiddleware(
 
 app.use((req: Request, res: Response, next: NextFunction) => dbReadinessMiddleware(req, res, next));
 
-// Root-level SEO endpoints (mirrored by vercel.json rewrites in production)
-app.get('/robots.txt', handleRobotsTxt);
-app.get('/sitemap.xml', handleSitemapXml);
+// Root-level SEO & crawler prerender endpoints (mirrored by vercel.json rewrites in production)
+registerRootSeoRoutes(app);
 
 // Mount API router
 app.use('/api', router);
