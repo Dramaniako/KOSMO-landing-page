@@ -211,7 +211,7 @@ export function registerAuthRoutes(router: Router): void {
         res.cookie('token', token, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
-          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+          sameSite: process.env.CROSS_SITE_COOKIES === 'true' ? 'none' : 'lax',
           maxAge: 7 * 24 * 60 * 60 * 1000,
           path: '/'
         });
@@ -267,7 +267,7 @@ export function registerAuthRoutes(router: Router): void {
         res.cookie('token', token, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
-          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+          sameSite: process.env.CROSS_SITE_COOKIES === 'true' ? 'none' : 'lax',
           maxAge: 7 * 24 * 60 * 60 * 1000,
           path: '/'
         });
@@ -288,7 +288,7 @@ export function registerAuthRoutes(router: Router): void {
     const cookieOpts = {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
+      sameSite: (process.env.CROSS_SITE_COOKIES === 'true' ? 'none' : 'lax') as 'none' | 'lax',
       path: '/'
     };
     res.clearCookie('token', cookieOpts);

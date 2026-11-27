@@ -78,6 +78,15 @@ export function uploadImageStream(
       });
     }
 
+    let settled = false;
+    const timeoutMs = Number(process.env.CLOUDINARY_TIMEOUT_MS || 8000);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      uploadStream.destroy(new Error('Cloudinary image upload timed out'));
+      reject(new Error('Cloudinary image upload timed out'));
+    }, timeoutMs);
+
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder,
@@ -88,6 +97,9 @@ export function uploadImageStream(
         ]
       },
       (error, result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (error || !result) {
           return reject(error || new Error('Upload to Cloudinary failed'));
         }
@@ -105,7 +117,12 @@ export function uploadImageStream(
       }
     });
 
-    readableStream.on('error', reject);
+    readableStream.on('error', (streamErr) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(streamErr);
+    });
     readableStream.pipe(uploadStream);
   });
 }
@@ -158,6 +175,15 @@ export function uploadContractStream(
       });
     }
 
+    let settled = false;
+    const timeoutMs = Number(process.env.CLOUDINARY_TIMEOUT_MS || 8000);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      uploadStream.destroy(new Error('Cloudinary contract upload timed out'));
+      reject(new Error('Cloudinary contract upload timed out'));
+    }, timeoutMs);
+
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder,
@@ -166,6 +192,9 @@ export function uploadContractStream(
         overwrite: true
       },
       (error, result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (error || !result) {
           return reject(error || new Error('Upload PDF contract to Cloudinary failed'));
         }
@@ -183,7 +212,12 @@ export function uploadContractStream(
       }
     });
 
-    readableStream.on('error', reject);
+    readableStream.on('error', (streamErr) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(streamErr);
+    });
     readableStream.pipe(uploadStream);
   });
 }

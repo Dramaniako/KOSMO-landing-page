@@ -13,6 +13,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { notFoundHandler } from './middleware/notFoundHandler';
 import { setupProcessSafety } from './utils/processSafety';
 import { assertMidtransProductionConfig } from './routes/payment.routes';
+import { validateServerEnv } from './config/env';
 
 // Initialize defensive process-level safety net
 setupProcessSafety();
@@ -81,16 +82,19 @@ export function isOriginAllowed(origin: string | undefined): boolean {
 
   if (isExactMatch) return true;
 
-  // Support Vercel deployments and custom domain subdomains
+  // Support project-scoped Vercel deployments and custom domain subdomains
   try {
     const parsed = new URL(origin);
     const hostname = parsed.hostname.toLowerCase();
+    const isProjectVercelDomain =
+      /^kosmo(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname) ||
+      /^juragankost(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname);
     if (
       hostname === 'kosmobali.my.id' ||
       hostname.endsWith('.kosmobali.my.id') ||
       hostname === 'juragankost.net' ||
       hostname.endsWith('.juragankost.net') ||
-      hostname.endsWith('.vercel.app')
+      isProjectVercelDomain
     ) {
       return true;
     }
@@ -112,7 +116,7 @@ export const corsOptions: CorsOptions = {
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Request-Id'],
-  exposedHeaders: ['Content-Disposition', 'X-Request-Id', 'X-Contract-Hash'],
+  exposedHeaders: ['Content-Disposition', 'X-Request-Id', 'X-Contract-Hash', 'X-Total-Count'],
   credentials: true,
   maxAge: 86400
 };
@@ -127,7 +131,6 @@ app.use(
         scriptSrc: [
           "'self'",
           "'unsafe-inline'",
-          "'unsafe-eval'",
           'https://app.midtrans.com',
           'https://app.sandbox.midtrans.com',
           'https://api.midtrans.com'
@@ -182,7 +185,29 @@ app.use(
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-app.use(morgan('dev'));
+if (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) {
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const startNs = process.hrtime.bigint();
+    res.on('finish', () => {
+      const latencyMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+      console.log(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: res.statusCode >= 500 ? 'error' : 'info',
+          requestId: req.requestId || req.id || null,
+          method: req.method,
+          path: req.originalUrl || req.url,
+          status: res.statusCode,
+          latencyMs: Number(latencyMs.toFixed(2)),
+          contentLength: res.getHeader('content-length') || null
+        })
+      );
+    });
+    next();
+  });
+} else {
+  app.use(morgan('dev'));
+}
 app.use('/uploads', express.static(uploadsDir));
 
 // Memoized database initialization for standalone/direct runs
@@ -225,6 +250,7 @@ app.use(errorHandler);
 const isDirectRun = Boolean(process.argv[1] && /server(\.ts|\.js)?$/i.test(process.argv[1]));
 
 if (!process.env.VERCEL && process.env.NO_LISTEN !== 'true' && (isDirectRun || process.env.NODE_ENV !== 'test')) {
+  validateServerEnv();
   assertMidtransProductionConfig();
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);

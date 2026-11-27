@@ -1,4 +1,43 @@
 import type { RowDataPacket } from 'mysql2/promise';
+import {
+  isUserProfileComplete,
+  type CanonicalUserRole,
+  type LegacyCompatibleUserRole,
+  type IdentityType,
+  type ProfileCompletenessResult,
+  type RentalStatus,
+  type DiscreteRoomStatus,
+  type WithdrawalStatus,
+  type PhotoCategory,
+  type TicketCategory,
+  type TicketStatus,
+  type UtilityQuotas,
+  type RentalContractData,
+  type ContractPreviewRequest,
+  type ContractPreviewResponse,
+  type ContractSignRequest,
+  type ContractSignResponse
+} from '../../shared/types/index';
+
+export {
+  isUserProfileComplete,
+  type CanonicalUserRole,
+  type LegacyCompatibleUserRole,
+  type IdentityType,
+  type ProfileCompletenessResult,
+  type RentalStatus,
+  type DiscreteRoomStatus,
+  type WithdrawalStatus,
+  type PhotoCategory,
+  type TicketCategory,
+  type TicketStatus,
+  type UtilityQuotas,
+  type RentalContractData,
+  type ContractPreviewRequest,
+  type ContractPreviewResponse,
+  type ContractSignRequest,
+  type ContractSignResponse
+};
 
 /**
  * Core Domain Type Definitions for KOSMO
@@ -9,7 +48,7 @@ export type RoomType = 'putra' | 'putri' | 'campur';
 
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 
-export type UserRole = 'tenant' | 'landlord' | 'admin' | 'owner';
+export type UserRole = LegacyCompatibleUserRole;
 
 export type Amenity =
   | 'Wifi'
@@ -55,8 +94,6 @@ export interface Booking {
   totalPrice: number;
 }
 
-export type IdentityType = 'NIK' | 'PASSPORT';
-
 export interface User {
   id: string;
   name: string;
@@ -86,99 +123,7 @@ export interface User {
   missingProfileFields?: string[];
 }
 
-export interface ProfileCompletenessResult {
-  complete: boolean;
-  missingFields: string[];
-  missingFieldLabels: string[];
-}
-
-export function isUserProfileComplete(user: {
-  name?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  identity_type?: string | null;
-  identity_number?: string | null;
-  address?: string | null;
-  occupation?: string | null;
-  emergency_contact_name?: string | null;
-  emergency_contact_phone?: string | null;
-} | null | undefined): ProfileCompletenessResult {
-  const missingFields: string[] = [];
-  const missingFieldLabels: string[] = [];
-
-  if (!user) {
-    return {
-      complete: false,
-      missingFields: ['user'],
-      missingFieldLabels: ['Data Pengguna']
-    };
-  }
-
-  // 1. Name
-  if (!user.name || user.name.trim().length < 2) {
-    missingFields.push('name');
-    missingFieldLabels.push('Nama Lengkap (min. 2 karakter)');
-  }
-
-  // 2. Email
-  if (!user.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email.trim())) {
-    missingFields.push('email');
-    missingFieldLabels.push('Alamat Email Valid');
-  }
-
-  // 3. Phone
-  const cleanPhone = (user.phone || '').trim().replace(/[\s-]/g, '');
-  if (!cleanPhone || cleanPhone.length < 9) {
-    missingFields.push('phone');
-    missingFieldLabels.push('Nomor HP/WhatsApp (min. 9 digit)');
-  }
-
-  // 4. Identity Document (NIK / Passport)
-  const idType = user.identity_type || 'NIK';
-  const cleanId = (user.identity_number || '').trim();
-  if (idType === 'NIK') {
-    if (!/^\d{16}$/.test(cleanId)) {
-      missingFields.push('identity_number');
-      missingFieldLabels.push('Nomor NIK KTP (tepat 16 digit angka)');
-    }
-  } else {
-    if (!/^[A-Za-z0-9]{6,12}$/.test(cleanId)) {
-      missingFields.push('identity_number');
-      missingFieldLabels.push('Nomor Paspor (6-12 karakter alfanumerik)');
-    }
-  }
-
-  // 5. Permanent / Domicile Address
-  if (!user.address || user.address.trim().length < 5) {
-    missingFields.push('address');
-    missingFieldLabels.push('Alamat Domisili/KTP (min. 5 karakter)');
-  }
-
-  // 6. Occupation
-  if (!user.occupation || user.occupation.trim().length < 2) {
-    missingFields.push('occupation');
-    missingFieldLabels.push('Pekerjaan/Profesi/Instansi');
-  }
-
-  // 7. Emergency Contact Name
-  if (!user.emergency_contact_name || user.emergency_contact_name.trim().length < 2) {
-    missingFields.push('emergency_contact_name');
-    missingFieldLabels.push('Nama Kontak Darurat');
-  }
-
-  // 8. Emergency Contact Phone
-  const cleanEmerPhone = (user.emergency_contact_phone || '').trim().replace(/[\s-]/g, '');
-  if (!cleanEmerPhone || cleanEmerPhone.length < 9) {
-    missingFields.push('emergency_contact_phone');
-    missingFieldLabels.push('Nomor Telepon Kontak Darurat');
-  }
-
-  return {
-    complete: missingFields.length === 0,
-    missingFields,
-    missingFieldLabels
-  };
-}
+// isUserProfileComplete & ProfileCompletenessResult re-exported from ../../shared/types/index
 
 export const VALID_ROOM_TYPES: readonly RoomType[] = ['putra', 'putri', 'campur'] as const;
 export const VALID_BOOKING_STATUSES: readonly BookingStatus[] = ['pending', 'confirmed', 'cancelled'] as const;
@@ -455,7 +400,6 @@ export function validateReview(data: unknown): { valid: boolean; errors: string[
   return { valid: errors.length === 0, errors };
 }
 
-export type RentalStatus = 'pending' | 'active' | 'completed' | 'terminated' | 'cancelled';
 export const VALID_RENTAL_STATUSES: readonly RentalStatus[] = [
   'pending',
   'active',
@@ -515,47 +459,6 @@ export interface RentalRow extends RowDataPacket {
   terminated_at?: string | Date | null;
 }
 
-export interface UtilityQuotas {
-  electricityKwh?: number | string;
-  water?: string;
-  wifiMbps?: number | string;
-  security?: string;
-  waste?: string;
-}
-
-export interface RentalContractData {
-  rentalId?: string;
-  roomId?: string;
-  roomNumber?: string;
-  roomFloor?: number;
-  roomType?: string;
-  propertyName: string;
-  propertyAddress?: string;
-  landlordName?: string;
-  landlordEmail?: string;
-  landlordPhone?: string;
-  tenantName: string;
-  tenantEmail: string;
-  tenantPhone?: string;
-  tenantNikPassport?: string;
-  tenantAddress?: string;
-  tenantOccupation?: string;
-  emergencyContactName?: string;
-  emergencyContactPhone?: string;
-  emergencyContactRelation?: string;
-  startDate: string;
-  durationMonths?: number;
-  monthlyPrice?: number;
-  pricePerMonth?: number;
-  totalPrice?: number;
-  adminFee?: number;
-  signatureBase64?: string;
-  signerIp?: string;
-  signerUserAgent?: string;
-  signedAt?: string | Date;
-  utilityQuotas?: UtilityQuotas;
-}
-
 export interface GeneratedContractResult {
   pdfBuffer: Buffer;
   contractHash: string;
@@ -613,46 +516,7 @@ export function validateRental(data: unknown): { valid: boolean; errors: string[
   return { valid: errors.length === 0, errors };
 }
 
-export interface ContractPreviewRequest {
-  propertyId: string;
-  durationMonths?: number;
-  startDate?: string;
-  tenantNikPassport?: string;
-  signatureBase64?: string;
-  rentalId?: string;
-}
-
-export interface ContractPreviewResponse {
-  success: boolean;
-  contractData: RentalContractData;
-  contractHash: string;
-  previewUrl?: string;
-  monthlyPrice: number;
-  adminFee: number;
-  totalPrice: number;
-  totalAmount: number;
-}
-
-export interface ContractSignRequest {
-  propertyId: string;
-  durationMonths: number;
-  startDate: string;
-  tenantNikPassport: string;
-  signatureBase64: string;
-  affirmativeConsent: true;
-  rentalId?: string;
-}
-
-export interface ContractSignResponse {
-  success: boolean;
-  message: string;
-  rentalId: string;
-  contractUrl: string;
-  contractHash: string;
-  adminFee: number;
-  totalAmount: number;
-  signedAt: string;
-}
+// Contract DTOs re-exported from ../../shared/types/index
 
 export interface RentalContractJoinedRow extends RowDataPacket {
   rental_id: string;
@@ -700,23 +564,11 @@ export interface RentalContractJoinedRow extends RowDataPacket {
  * ============================================================
  */
 
-export type DiscreteRoomStatus = 'available' | 'occupied' | 'maintenance';
 export const VALID_DISCRETE_ROOM_STATUSES: readonly DiscreteRoomStatus[] = [
   'available',
   'occupied',
   'maintenance'
 ] as const;
-
-export type PhotoCategory =
-  | 'thumbnail'
-  | 'bedroom'
-  | 'bathroom'
-  | 'kitchen'
-  | 'pool'
-  | 'living_room'
-  | 'wifi_speedtest'
-  | 'exterior'
-  | 'other';
 
 export const VALID_PHOTO_CATEGORIES: readonly PhotoCategory[] = [
   'thumbnail',
@@ -765,6 +617,8 @@ export interface Room {
   price?: number | null;
   effectivePrice?: number;
   status: DiscreteRoomStatus;
+  reserved_until?: string | Date | null;
+  reserved_by_rental_id?: string | null;
   photos?: PropertyPhoto[];
   createdAt?: string | Date;
   updatedAt?: string | Date;
@@ -778,6 +632,9 @@ export interface RoomRow extends RowDataPacket {
   type: string;
   price: number | null;
   status: DiscreteRoomStatus;
+  reserved_until?: Date | string | null;
+  reserved_by_rental_id?: string | null;
+  holdRemainingSeconds?: number;
   createdAt: Date | string;
   updatedAt: Date | string;
 }
@@ -849,9 +706,6 @@ export function validatePropertyPhoto(data: unknown): { valid: boolean; errors: 
 
   return { valid: errors.length === 0, errors };
 }
-
-export type TicketCategory = 'ac' | 'plumbing' | 'wifi' | 'electricity' | 'cleaning' | 'other';
-export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'cancelled';
 
 export const VALID_TICKET_CATEGORIES: readonly TicketCategory[] = [
   'ac',

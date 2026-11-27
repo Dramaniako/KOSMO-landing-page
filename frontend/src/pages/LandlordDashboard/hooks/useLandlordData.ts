@@ -83,17 +83,13 @@ export function useLandlordData() {
   const fetchLandlordReviews = useCallback(async (landlordId: string): Promise<void> => {
     setTabLoading(prev => ({ ...prev, reviews: true }));
     try {
-      const [propRes, revRes] = await Promise.all([
-        fetch(`${API_BASE}/properties?ownerId=${encodeURIComponent(landlordId)}`),
-        fetch(`${API_BASE}/reviews`)
-      ]);
-      const propData = propRes.ok ? ((await propRes.json()) as Property[]) : [];
-      const revData = revRes.ok ? ((await revRes.json()) as Review[]) : [];
-      const safeProps = Array.isArray(propData) ? propData : [];
-      const safeReviews = Array.isArray(revData) ? revData : [];
-      const propIds = safeProps.map((p) => p.id);
-      const landlordReviews = safeReviews.filter((r) => propIds.includes(r.propertyId));
-      setReviews(landlordReviews);
+      const revRes = await fetch(`${API_BASE}/reviews?ownerId=${encodeURIComponent(landlordId)}`);
+      if (!revRes.ok) {
+        setReviews([]);
+        return;
+      }
+      const revData = (await revRes.json()) as Review[];
+      setReviews(Array.isArray(revData) ? revData : []);
       loadedTabs.current.add('reviews');
     } catch (err) {
       console.error("Error loading landlord reviews:", err);

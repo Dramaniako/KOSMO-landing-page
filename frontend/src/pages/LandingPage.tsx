@@ -187,7 +187,7 @@ export default function LandingPage() {
       (fac) => facilities[fac as keyof FacilityFilterState]
     );
     if (selectedFacilities.length > 0) {
-      params.append('facilities', selectedFacilities.join(','));
+      params.append('facility', selectedFacilities.join(','));
     }
 
     const queryString = params.toString() ? `?${params.toString()}` : '';

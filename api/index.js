@@ -11,6 +11,11 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import bcrypt from "bcryptjs";
+function parseEnvValue(raw) {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^(['"])(.*)\1$/);
+  return match ? match[2] : trimmed;
+}
 try {
   const possibleEnvPaths = [
     path.resolve(".env"),
@@ -22,9 +27,12 @@ try {
       envContent.split(/\r?\n/).forEach((line) => {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith("#")) return;
-        const [key, ...valParts] = trimmed.split("=");
-        if (key && valParts.length > 0 && !process.env[key.trim()]) {
-          process.env[key.trim()] = valParts.join("=").trim();
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx <= 0) return;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const rawVal = trimmed.slice(eqIdx + 1);
+        if (key && !process.env[key]) {
+          process.env[key] = parseEnvValue(rawVal);
         }
       });
     }
@@ -105,24 +113,31 @@ async function ensureDbReady() {
   if (isInitialized) return;
   await initDb();
 }
+var SCHEMA_MIGRATION_VERSION = 2;
 async function ensureIndexes(executor = pool) {
   if (process.env.VERCEL) return;
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
     "ALTER TABLE properties ADD INDEX idx_properties_featured (is_featured)",
+    "ALTER TABLE properties ADD INDEX idx_properties_featured_until_id (is_featured, featured_until, id)",
+    "ALTER TABLE properties ADD INDEX idx_properties_district_badges_price (district, verified_water_tank, verified_wifi_speedtest, price)",
     // ⚡ Bolt Performance Optimization:
     // Added index on property_facilities.propertyId to optimize the GROUP_CONCAT join query in GET /api/properties.
     // Why: property_facilities is frequently joined by propertyId, causing slow full table scans as the table grows.
     // Impact: Significantly reduces query execution time (O(n) -> O(log n)) when filtering or fetching properties with facilities.
     "ALTER TABLE property_facilities ADD INDEX idx_property_facilities_property (propertyId)",
+    "ALTER TABLE property_facilities ADD INDEX idx_pf_facility_property (facility, propertyId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_prop_status_start (propertyId, status, start_date_iso)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_room (roomId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_contract_hash (contract_hash)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_signed_at (contract_signed_at)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_terminated_at (terminated_at)",
     "ALTER TABLE rooms ADD INDEX idx_rooms_property_status (propertyId, status)",
+    "ALTER TABLE rooms ADD INDEX idx_rooms_prop_status_reserved (propertyId, status, reserved_until)",
+    "ALTER TABLE rooms ADD INDEX idx_rooms_prop_floor (propertyId, floor)",
     "ALTER TABLE rooms ADD INDEX idx_rooms_status (status)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_property (propertyId, orderIndex)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_room (roomId, orderIndex)",
@@ -133,14 +148,19 @@ async function ensureIndexes(executor = pool) {
     "ALTER TABLE visitor_tracking ADD INDEX idx_visitor_tracking_ip_time (ip_address, visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
+    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_created (userId, created_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_status (status)",
     "ALTER TABLE users ADD INDEX idx_users_role (role)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_status (status)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)",
+    "ALTER TABLE reviews ADD INDEX idx_reviews_prop_user (propertyId, userId)",
     "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_tenant (tenantId)",
     "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_property (propertyId)",
-    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_status (status)"
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_status (status)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_prop_status_created (propertyId, status, createdAt)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_tenant_status_created (tenantId, status, createdAt)",
+    "ALTER TABLE payment_transactions ADD INDEX idx_payment_tx_rental_status (rental_id, status)"
   ];
   await Promise.allSettled(
     indexStatements.map(async (sql) => {
@@ -181,6 +201,25 @@ async function createTables(executor = pool) {
         date_of_birth VARCHAR(30) DEFAULT '',
         gender VARCHAR(20) DEFAULT '',
         INDEX idx_users_role (role)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INT PRIMARY KEY,
+        applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        order_id VARCHAR(100) PRIMARY KEY,
+        rental_id VARCHAR(50) NOT NULL,
+        tx_type ENUM('initial', 'renewal') NOT NULL DEFAULT 'initial',
+        gross_amount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        months INT NOT NULL DEFAULT 1,
+        status ENUM('pending', 'settled', 'cancelled', 'refund_required') NOT NULL DEFAULT 'pending',
+        settled_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_payment_tx_rental_status (rental_id, status)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `),
     executor.query(`
@@ -234,8 +273,10 @@ async function createTables(executor = pool) {
         referenceId VARCHAR(100) DEFAULT '',
         rejectionReason TEXT,
         processedAt VARCHAR(50) DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_withdrawals_user_date (userId, date),
         INDEX idx_withdrawals_user_status (userId, status),
+        INDEX idx_withdrawals_user_created (userId, created_at),
         INDEX idx_withdrawals_status (status),
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -251,10 +292,14 @@ async function createTables(executor = pool) {
         type VARCHAR(50) NOT NULL DEFAULT 'Standard',
         price INT NULL,
         status ENUM('available', 'occupied', 'maintenance') NOT NULL DEFAULT 'available',
+        reserved_until DATETIME NULL,
+        reserved_by_rental_id VARCHAR(50) NULL,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_property_room_number (propertyId, roomNumber),
         INDEX idx_rooms_property_status (propertyId, status),
+        INDEX idx_rooms_prop_status_reserved (propertyId, status, reserved_until),
+        INDEX idx_rooms_prop_floor (propertyId, floor),
         INDEX idx_rooms_status (status),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -292,6 +337,7 @@ async function createTables(executor = pool) {
         roomId VARCHAR(50),
         price INT NOT NULL,
         startDate VARCHAR(50) NOT NULL,
+        start_date_iso DATE NULL,
         status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending',
         document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
         contract_url VARCHAR(500),
@@ -500,10 +546,14 @@ async function applyMigrations(executor = pool) {
         type VARCHAR(50) NOT NULL DEFAULT 'Standard',
         price INT NULL,
         status ENUM('available', 'occupied', 'maintenance') NOT NULL DEFAULT 'available',
+        reserved_until DATETIME NULL,
+        reserved_by_rental_id VARCHAR(50) NULL,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_property_room_number (propertyId, roomNumber),
         INDEX idx_rooms_property_status (propertyId, status),
+        INDEX idx_rooms_prop_status_reserved (propertyId, status, reserved_until),
+        INDEX idx_rooms_prop_floor (propertyId, floor),
         INDEX idx_rooms_status (status),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -527,6 +577,25 @@ async function applyMigrations(executor = pool) {
         INDEX idx_photos_prop_room (propertyId, roomId, orderIndex),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INT PRIMARY KEY,
+        applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        order_id VARCHAR(100) PRIMARY KEY,
+        rental_id VARCHAR(50) NOT NULL,
+        tx_type ENUM('initial', 'renewal') NOT NULL DEFAULT 'initial',
+        gross_amount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        months INT NOT NULL DEFAULT 1,
+        status ENUM('pending', 'settled', 'cancelled', 'refund_required') NOT NULL DEFAULT 'pending',
+        settled_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_payment_tx_rental_status (rental_id, status)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
     await executor.query(`
@@ -581,7 +650,12 @@ async function applyMigrations(executor = pool) {
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT",
-    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''"
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+  ];
+  const roomsQueries = [
+    "ALTER TABLE rooms ADD COLUMN IF NOT EXISTS reserved_until DATETIME NULL",
+    "ALTER TABLE rooms ADD COLUMN IF NOT EXISTS reserved_by_rental_id VARCHAR(50) NULL"
   ];
   const rentalsQueries = [
     "ALTER TABLE rentals MODIFY status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending'",
@@ -595,7 +669,9 @@ async function applyMigrations(executor = pool) {
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS roomId VARCHAR(50)",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS terminated_at DATETIME NULL"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS terminated_at DATETIME NULL",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS start_date_iso DATE NULL",
+    "UPDATE rentals SET start_date_iso = STR_TO_DATE(startDate, '%Y-%m-%d') WHERE start_date_iso IS NULL AND startDate REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'"
   ];
   const photosQueries = [
     "ALTER TABLE property_photos ADD COLUMN IF NOT EXISTS updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
@@ -605,6 +681,7 @@ async function applyMigrations(executor = pool) {
     runTableQueries(usersQueries),
     runTableQueries(visitorTrackingQueries),
     runTableQueries(withdrawalsQueries),
+    runTableQueries(roomsQueries),
     runTableQueries(rentalsQueries),
     runTableQueries(photosQueries)
   ]);
@@ -613,6 +690,13 @@ async function applyMigrations(executor = pool) {
     await backfillDiscreteRooms(executor);
   } catch (err) {
     console.warn("Initial backfillDiscreteRooms skipped or deferred:", err);
+  }
+  try {
+    await executor.query(
+      "INSERT INTO schema_migrations (version) VALUES (?) ON DUPLICATE KEY UPDATE applied_at = CURRENT_TIMESTAMP",
+      [SCHEMA_MIGRATION_VERSION]
+    );
+  } catch {
   }
 }
 async function seedUsers(executor = pool) {
@@ -753,13 +837,26 @@ async function initDb() {
         "rentals",
         "rooms",
         "property_photos",
-        "maintenance_tickets"
+        "maintenance_tickets",
+        "payment_transactions",
+        "schema_migrations"
       ];
       const missingTables = requiredTables.filter((t) => !existingTables.includes(t));
       if (missingTables.length === 0) {
-        await applyMigrations(pool);
+        let currentVersion = 0;
+        try {
+          const [verRows] = await pool.query(
+            "SELECT MAX(version) AS currentVersion FROM schema_migrations"
+          );
+          currentVersion = Number(verRows[0]?.currentVersion || 0);
+        } catch {
+          currentVersion = 0;
+        }
+        if (currentVersion < SCHEMA_MIGRATION_VERSION) {
+          await applyMigrations(pool);
+        }
         isInitialized = true;
-        console.log("MySQL Database Kosmo tables already initialized and migrations applied.");
+        console.log("MySQL Database Kosmo tables already initialized and migrations up to date.");
         return;
       }
       console.log(`Database tables missing: ${missingTables.join(", ")}. Initializing modular schema...`);
@@ -789,7 +886,13 @@ function getJwtSecret() {
   if (secret && secret.trim() !== "") {
     return secret;
   }
+  const isStrictProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
   if (!defaultSecret) {
+    if (isStrictProduction && !process.env.JWT_FALLBACK_SECRET) {
+      throw new Error(
+        "[Auth Security] JWT_SECRET environment variable is required in production."
+      );
+    }
     if (process.env.NODE_ENV === "production") {
       console.warn("\u26A0\uFE0F [Auth Warning] JWT_SECRET environment variable is missing in production. Using random fallback secret. Sessions will not persist across server restarts.");
       defaultSecret = process.env.JWT_FALLBACK_SECRET || randomBytes(32).toString("hex");
@@ -813,11 +916,11 @@ function verifyJwtToken(token, secret = getJwtSecret()) {
   if (!decoded || typeof decoded !== "object") {
     throw new Error("Invalid token payload");
   }
-  const { id, email, role } = decoded;
+  const { id, email, role, purpose } = decoded;
   if (!id || !email || !role) {
     throw new Error("Malformed token claims");
   }
-  return { id, email, role };
+  return purpose ? { id, email, role, purpose } : { id, email, role };
 }
 function parseCookies(header) {
   if (!header) return {};
@@ -867,6 +970,21 @@ var authenticateToken = (req, res, next) => {
   }
   try {
     const user = verifyJwtToken(token);
+    if (user.purpose === "download_report") {
+      const methodAllowed = !req.method || req.method.toUpperCase() === "GET";
+      const pathStr = req.path || req.originalUrl || "";
+      const pathAllowed = !pathStr || pathStr.includes("/reports/") || pathStr.includes("/contract");
+      if (!methodAllowed || !pathAllowed) {
+        res.status(403).json({
+          status: "fail",
+          statusCode: 403,
+          code: "AUTH_TOKEN_SCOPE_INVALID",
+          message: "Download token hanya berlaku untuk mengunduh laporan/kontrak.",
+          error: "Download token hanya berlaku untuk mengunduh laporan/kontrak."
+        });
+        return;
+      }
+    }
     req.user = user;
     next();
   } catch (err) {
@@ -1066,6 +1184,14 @@ function uploadImageStream(buffer, folder = "kosmo_properties") {
         public_id: mockPublicId
       });
     }
+    let settled = false;
+    const timeoutMs = Number(process.env.CLOUDINARY_TIMEOUT_MS || 8e3);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      uploadStream.destroy(new Error("Cloudinary image upload timed out"));
+      reject(new Error("Cloudinary image upload timed out"));
+    }, timeoutMs);
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder,
@@ -1076,6 +1202,9 @@ function uploadImageStream(buffer, folder = "kosmo_properties") {
         ]
       },
       (error, result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (error || !result) {
           return reject(error || new Error("Upload to Cloudinary failed"));
         }
@@ -1091,7 +1220,12 @@ function uploadImageStream(buffer, folder = "kosmo_properties") {
         this.push(null);
       }
     });
-    readableStream.on("error", reject);
+    readableStream.on("error", (streamErr) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(streamErr);
+    });
     readableStream.pipe(uploadStream);
   });
 }
@@ -1123,6 +1257,14 @@ function uploadContractStream(buffer, filename, folder = "kosmo_contracts") {
         public_id: fullPublicId
       });
     }
+    let settled = false;
+    const timeoutMs = Number(process.env.CLOUDINARY_TIMEOUT_MS || 8e3);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      uploadStream.destroy(new Error("Cloudinary contract upload timed out"));
+      reject(new Error("Cloudinary contract upload timed out"));
+    }, timeoutMs);
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder,
@@ -1131,6 +1273,9 @@ function uploadContractStream(buffer, filename, folder = "kosmo_contracts") {
         overwrite: true
       },
       (error, result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (error || !result) {
           return reject(error || new Error("Upload PDF contract to Cloudinary failed"));
         }
@@ -1146,7 +1291,12 @@ function uploadContractStream(buffer, filename, folder = "kosmo_contracts") {
         this.push(null);
       }
     });
-    readableStream.on("error", reject);
+    readableStream.on("error", (streamErr) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(streamErr);
+    });
     readableStream.pipe(uploadStream);
   });
 }
@@ -1560,6 +1710,7 @@ var propertySchema = z.object({
   address: z.string().min(1, "Alamat wajib diisi"),
   price: z.number().positive("Harga harus lebih besar dari 0"),
   totalRooms: z.number().int().positive("Total kamar harus lebih besar dari 0"),
+  image: z.string().max(75e4, "Ukuran gambar sampul terlalu besar. Gunakan unggah foto maksimal 5MB.").optional(),
   ownerId: z.string().min(1, "ownerId wajib diisi").optional()
 }).passthrough();
 var withdrawalSchema = z.object({
@@ -1704,7 +1855,7 @@ var propertyUpdateSchema = z.object({
   longitude: z.preprocess((val) => val !== void 0 && val !== null && val !== "" ? Number(val) : void 0, z.number().optional()),
   totalRooms: z.preprocess((val) => val !== void 0 && val !== null && val !== "" ? Number(val) : void 0, z.number().int().positive("Total kamar harus lebih besar dari 0").optional()),
   occupiedRooms: z.preprocess((val) => val !== void 0 && val !== null && val !== "" ? Number(val) : void 0, z.number().int().min(0).optional()),
-  image: z.string().optional(),
+  image: z.string().max(75e4, "Ukuran gambar sampul terlalu besar. Gunakan unggah foto maksimal 5MB.").optional(),
   ownerId: z.string().trim().min(1).optional(),
   verified_water_tank: z.boolean().optional(),
   verified_wifi_speedtest: z.boolean().optional()
@@ -1789,7 +1940,7 @@ var visitorTrackingSchema = z.object({
   deviceType: z.string().trim().max(50).optional()
 }).optional().default({});
 
-// backend/types/index.ts
+// shared/types/index.ts
 function isUserProfileComplete(user) {
   const missingFields = [];
   const missingFieldLabels = [];
@@ -1849,6 +2000,8 @@ function isUserProfileComplete(user) {
     missingFieldLabels
   };
 }
+
+// backend/types/index.ts
 var VALID_PHOTO_CATEGORIES = [
   "thumbnail",
   "bedroom",
@@ -1978,7 +2131,7 @@ function registerAuthRoutes(router2) {
         res.cookie("token", token, {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
-          sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+          sameSite: process.env.CROSS_SITE_COOKIES === "true" ? "none" : "lax",
           maxAge: 7 * 24 * 60 * 60 * 1e3,
           path: "/"
         });
@@ -2027,7 +2180,7 @@ function registerAuthRoutes(router2) {
         res.cookie("token", token, {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
-          sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+          sameSite: process.env.CROSS_SITE_COOKIES === "true" ? "none" : "lax",
           maxAge: 7 * 24 * 60 * 60 * 1e3,
           path: "/"
         });
@@ -2046,7 +2199,7 @@ function registerAuthRoutes(router2) {
     const cookieOpts = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      sameSite: process.env.CROSS_SITE_COOKIES === "true" ? "none" : "lax",
       path: "/"
     };
     res.clearCookie("token", cookieOpts);
@@ -2161,11 +2314,23 @@ function registerAuthRoutes(router2) {
 // backend/routes/users.routes.ts
 import bcrypt3 from "bcryptjs";
 function registerUserRoutes(router2) {
-  const handleGetUsers = async (_req, res) => {
+  const handleGetUsers = async (req, res) => {
     try {
-      const [rows] = await pool.query(
-        "SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT 50"
-      );
+      const rawLimit = req.query.limit ? parseInt(String(req.query.limit), 10) : 50;
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 50;
+      const rawPage = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+      const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+      const rawOffset = req.query.offset ? parseInt(String(req.query.offset), 10) : (page - 1) * limit;
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+      const [[rows], [countRows]] = await Promise.all([
+        pool.query(
+          "SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT ? OFFSET ?",
+          [limit, offset]
+        ),
+        pool.query("SELECT COUNT(*) as total FROM users")
+      ]);
+      const totalCount = Number(countRows[0]?.total || rows.length);
+      res.setHeader("X-Total-Count", String(totalCount));
       res.json(rows);
     } catch (err) {
       console.error("Get users error:", err);
@@ -2522,6 +2687,7 @@ function registerPropertyRoutes(router2) {
       minPrice,
       maxPrice,
       facility,
+      facilities: facilitiesQuery,
       ownerId,
       owner,
       is_featured,
@@ -2529,6 +2695,7 @@ function registerPropertyRoutes(router2) {
       verified_water_tank,
       verified_wifi_speedtest
     } = req.query;
+    const rawFacilityParam = facility ?? facilitiesQuery;
     const targetOwner = ownerId || owner;
     const effectiveMin = priceMin !== void 0 ? priceMin : minPrice;
     const effectiveMax = priceMax !== void 0 ? priceMax : maxPrice;
@@ -2538,8 +2705,18 @@ function registerPropertyRoutes(router2) {
     const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : void 0;
     const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
     const offsetParam = req.query.offset ? parseInt(String(req.query.offset), 10) : limitParam ? (pageParam - 1) * limitParam : 0;
-    const rawFacilities = facility ? Array.isArray(facility) ? facility.flatMap((f) => String(f).split(",")) : typeof facility === "string" ? facility.split(",") : [] : [];
+    const rawFacilities = rawFacilityParam ? Array.isArray(rawFacilityParam) ? rawFacilityParam.flatMap((f) => String(f).split(",")) : typeof rawFacilityParam === "string" ? rawFacilityParam.split(",") : [] : [];
     const uniqueFacilitiesList = Array.from(new Set(rawFacilities.map((f) => f.trim().toLowerCase()).filter(Boolean)));
+    const expandedFacilityVariants = Array.from(
+      new Set(
+        uniqueFacilitiesList.flatMap((f) => [
+          f,
+          f.charAt(0).toUpperCase() + f.slice(1),
+          f.toUpperCase(),
+          f.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
+        ])
+      )
+    );
     const sortedFacilityKey = uniqueFacilitiesList.slice().sort().join(",");
     const featuredKey = wantsFeatured ? "featured" : "all";
     const badgeKey = `${wantsWaterTank ? "wt1" : "wt0"}-${wantsWifiSpeedtest ? "wf1" : "wf0"}`;
@@ -2583,15 +2760,15 @@ function registerPropertyRoutes(router2) {
         sql += " AND p.verified_wifi_speedtest = 1";
       }
       if (uniqueFacilitiesList.length > 0) {
-        const placeholders = uniqueFacilitiesList.map(() => "?").join(", ");
+        const placeholders = expandedFacilityVariants.map(() => "?").join(", ");
         sql += ` AND p.id IN (
           SELECT pf_sub.propertyId
           FROM property_facilities pf_sub
-          WHERE LOWER(pf_sub.facility) IN (${placeholders})
+          WHERE pf_sub.facility IN (${placeholders})
           GROUP BY pf_sub.propertyId
           HAVING COUNT(DISTINCT LOWER(pf_sub.facility)) = ?
         )`;
-        params.push(...uniqueFacilitiesList, uniqueFacilitiesList.length);
+        params.push(...expandedFacilityVariants, uniqueFacilitiesList.length);
       }
       sql += " GROUP BY p.id ORDER BY (p.is_featured = 1 AND (p.featured_until IS NULL OR p.featured_until > NOW())) DESC, p.id DESC";
       if (limitParam && limitParam > 0) {
@@ -2618,17 +2795,41 @@ function registerPropertyRoutes(router2) {
       const lngParam = req.query.lng ? parseFloat(String(req.query.lng)) : void 0;
       const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : 10;
       const userKey = String(req.query.userId || req.query.deviceToken || req.headers["x-device-token"] || "");
-      const [properties] = await pool.query(`
-        SELECT p.*, GROUP_CONCAT(pf.facility SEPARATOR ',') as facilitiesString
-        FROM properties p
-        LEFT JOIN property_facilities pf ON p.id = pf.propertyId
-        GROUP BY p.id
-      `);
-      for (const prop of properties) {
-        prop.facilities = prop.facilitiesString ? prop.facilitiesString.split(",").filter(Boolean) : [];
-        delete prop.facilitiesString;
+      let normalized = apiCache.get("properties:recommended:candidates");
+      if (!normalized) {
+        const [properties] = await pool.query(`
+          SELECT
+            p.id,
+            p.name,
+            p.district,
+            p.address,
+            p.price,
+            p.rating,
+            p.image,
+            SUBSTRING(p.description, 1, 240) as description,
+            p.latitude,
+            p.longitude,
+            p.totalRooms,
+            p.occupiedRooms,
+            p.ownerId,
+            p.document,
+            p.is_featured,
+            p.featured_until,
+            p.verified_water_tank,
+            p.verified_wifi_speedtest,
+            GROUP_CONCAT(pf.facility SEPARATOR ',') as facilitiesString
+          FROM properties p
+          LEFT JOIN property_facilities pf ON p.id = pf.propertyId
+          GROUP BY p.id
+          LIMIT 200
+        `);
+        for (const prop of properties) {
+          prop.facilities = prop.facilitiesString ? prop.facilitiesString.split(",").filter(Boolean) : [];
+          delete prop.facilitiesString;
+        }
+        normalized = properties.map(normalizePropertySummary);
+        apiCache.set("properties:recommended:candidates", normalized, 30);
       }
-      const normalized = properties.map(normalizePropertySummary);
       const ranked = recommendationService.rankProperties(normalized, {
         userKey: userKey || void 0,
         targetLat: latParam,
@@ -2963,25 +3164,33 @@ function registerPropertyRoutes(router2) {
 // backend/routes/reviews.routes.ts
 function registerReviewRoutes(router2) {
   router2.get("/reviews", async (req, res) => {
-    const { propertyId, userId } = req.query;
-    const cacheKey = `reviews:${propertyId || "all"}:${userId || "all"}`;
+    const { propertyId, userId, ownerId } = req.query;
+    const cacheKey = `reviews:${propertyId || "all"}:${userId || "all"}:${ownerId || "all"}`;
     const cachedReviews = apiCache.get(cacheKey);
     if (cachedReviews) {
       res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
       return res.json(cachedReviews);
     }
     try {
-      let sql = "SELECT * FROM reviews WHERE 1=1";
+      let sql = "SELECT r.* FROM reviews r";
       const params = [];
+      if (ownerId) {
+        sql += " JOIN properties p ON r.propertyId = p.id";
+      }
+      sql += " WHERE 1=1";
       if (propertyId) {
-        sql += " AND propertyId = ?";
+        sql += " AND r.propertyId = ?";
         params.push(String(propertyId));
       }
       if (userId) {
-        sql += " AND userId = ?";
+        sql += " AND r.userId = ?";
         params.push(String(userId));
       }
-      sql += " ORDER BY id DESC";
+      if (ownerId) {
+        sql += " AND p.ownerId = ?";
+        params.push(String(ownerId));
+      }
+      sql += " ORDER BY r.id DESC";
       const [rows] = await pool.query(sql, params);
       apiCache.set(cacheKey, rows, 60);
       res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
@@ -3010,6 +3219,28 @@ function registerReviewRoutes(router2) {
         if (!property) {
           await connection.rollback();
           return res.status(404).json({ message: "Properti tidak ditemukan." });
+        }
+        if (authUser.role !== "admin") {
+          const [verifiedRentalRows] = await connection.query(
+            "SELECT id FROM rentals WHERE tenantId = ? AND propertyId = ? AND status IN ('active', 'completed', 'terminated') LIMIT 1",
+            [userId, propertyId]
+          );
+          if (verifiedRentalRows.length === 0) {
+            await connection.rollback();
+            return res.status(403).json({
+              message: "Anda harus memiliki riwayat sewa terverifikasi pada properti ini untuk memberikan ulasan."
+            });
+          }
+        }
+        const [existingReviews] = await connection.query(
+          "SELECT id FROM reviews WHERE propertyId = ? AND userId = ? FOR UPDATE",
+          [propertyId, userId]
+        );
+        if (existingReviews.length > 0) {
+          await connection.rollback();
+          return res.status(409).json({
+            message: "Anda sudah memberikan ulasan untuk properti ini."
+          });
         }
         const [userRows] = await connection.query("SELECT name FROM users WHERE id = ?", [userId]);
         const userName = userRows[0]?.name || authUser.email.split("@")[0] || "Anonim";
@@ -3134,6 +3365,19 @@ import bcrypt6 from "bcryptjs";
 
 // backend/routes/tracking.routes.ts
 import XLSX from "xlsx";
+function sanitizeSpreadsheetCell(val) {
+  if (typeof val === "number") {
+    return Number.isFinite(val) ? val : "";
+  }
+  if (val === null || val === void 0) {
+    return "";
+  }
+  const str = String(val);
+  if (/^[=+\-@\t\r]/.test(str.trimStart())) {
+    return `'${str}`;
+  }
+  return str;
+}
 var handleRecordVisit = async (req, res) => {
   const rawIp = req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
   const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
@@ -3196,48 +3440,6 @@ async function safeRoomCount() {
   } catch {
   }
   return safeCount("SELECT COALESCE(SUM(totalRooms), 0) as count FROM properties");
-}
-async function preloadTrackingData() {
-  try {
-    const cacheKey = "admin:stats";
-    const [
-      visitors,
-      users,
-      landlords,
-      properties,
-      rooms,
-      activeRentals,
-      pendingWithdrawals,
-      openTickets
-    ] = await Promise.all([
-      safeCount("SELECT COUNT(*) as count FROM visitor_tracking"),
-      safeCount("SELECT COUNT(*) as count FROM users"),
-      safeCount("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
-      safeCount("SELECT COUNT(*) as count FROM properties"),
-      safeRoomCount(),
-      safeCount("SELECT COUNT(*) as count FROM rentals WHERE status = 'active'"),
-      safeCount("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'"),
-      safeCount("SELECT COUNT(*) as count FROM maintenance_tickets WHERE status IN ('open', 'in_progress', 'pending')")
-    ]);
-    const statsData = {
-      visitors,
-      users,
-      landlords,
-      properties,
-      rooms,
-      activeRentals,
-      pendingWithdrawals,
-      openTickets,
-      totalVisitors: visitors,
-      totalUsers: users,
-      totalLandlords: landlords,
-      totalProperties: properties,
-      totalRooms: rooms
-    };
-    apiCache.set(cacheKey, statsData, 30);
-  } catch (err) {
-    console.warn("[AdminStats] Non-fatal tracking preload error:", err);
-  }
 }
 function registerTrackingRoutes(router2) {
   router2.post(
@@ -3407,16 +3609,26 @@ function registerTrackingRoutes(router2) {
   });
   router2.get("/reports/tracking/excel", authenticateToken, requireRole(["admin"]), async (_req, res) => {
     try {
-      const [visitorRows] = await pool.query("SELECT COUNT(*) as count FROM visitor_tracking");
-      const [userRows] = await pool.query("SELECT COUNT(*) as count FROM users");
-      const [landlordRows] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
+      const [
+        [visitorRows],
+        [userRows],
+        [landlordRows],
+        [propertyRows],
+        [roomsRows],
+        [visitors],
+        [users]
+      ] = await Promise.all([
+        pool.query("SELECT COUNT(*) as count FROM visitor_tracking"),
+        pool.query("SELECT COUNT(*) as count FROM users"),
+        pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
+        pool.query("SELECT COUNT(*) as count FROM properties"),
+        pool.query("SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties"),
+        pool.query("SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000"),
+        pool.query("SELECT id, email, name, role, phone FROM users ORDER BY id DESC LIMIT 5000")
+      ]);
       const totalLandlords = landlordRows[0].count;
-      const [propertyRows] = await pool.query("SELECT COUNT(*) as count FROM properties");
       const totalProperties = propertyRows[0].count;
-      const [roomsRows] = await pool.query("SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties");
       const totalRooms = roomsRows[0].sum || 0;
-      const [visitors] = await pool.query("SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000");
-      const [users] = await pool.query("SELECT id, email, name, role, phone FROM users ORDER BY id DESC");
       const wb = XLSX.utils.book_new();
       const summaryData = [
         ["Metrik", "Jumlah"],
@@ -3429,11 +3641,25 @@ function registerTrackingRoutes(router2) {
       const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
       XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan");
       const visitorData = [["IP Address", "User Agent", "Waktu Kunjungan"]];
-      visitors.forEach((v) => visitorData.push([v.ip_address, v.user_agent, v.visited_at ? new Date(v.visited_at).toLocaleString("id-ID") : ""]));
+      visitors.forEach(
+        (v) => visitorData.push([
+          sanitizeSpreadsheetCell(v.ip_address),
+          sanitizeSpreadsheetCell(v.user_agent),
+          sanitizeSpreadsheetCell(v.visited_at ? new Date(v.visited_at).toLocaleString("id-ID") : "")
+        ])
+      );
       const visitorSheet = XLSX.utils.aoa_to_sheet(visitorData);
       XLSX.utils.book_append_sheet(wb, visitorSheet, "Pengunjung");
       const userData = [["ID", "Email", "Nama", "Role", "Telepon"]];
-      users.forEach((u) => userData.push([u.id, u.email, u.name, u.role, u.phone]));
+      users.forEach(
+        (u) => userData.push([
+          sanitizeSpreadsheetCell(u.id),
+          sanitizeSpreadsheetCell(u.email),
+          sanitizeSpreadsheetCell(u.name),
+          sanitizeSpreadsheetCell(u.role),
+          sanitizeSpreadsheetCell(u.phone)
+        ])
+      );
       const userSheet = XLSX.utils.aoa_to_sheet(userData);
       XLSX.utils.book_append_sheet(wb, userSheet, "Pengguna");
       const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
@@ -3450,11 +3676,19 @@ function registerTrackingRoutes(router2) {
     if (!authUser) {
       return res.status(401).json({ message: "Otentikasi diperlukan." });
     }
-    const downloadToken = generateJwtToken(authUser, void 0, "60s");
+    const downloadToken = generateJwtToken(
+      {
+        id: authUser.id,
+        email: authUser.email,
+        role: authUser.role,
+        purpose: "download_report"
+      },
+      void 0,
+      "60s"
+    );
     res.json({ downloadToken, expiresInSeconds: 60 });
   });
   router2.get("/reports/landlord/excel", authenticateToken, requireRole(["admin", "landlord"]), handleLandlordExcelReport);
-  void preloadTrackingData();
 }
 var handleLandlordExcelReport = async (req, res) => {
   const authUser = req.user;
@@ -3474,32 +3708,46 @@ var handleLandlordExcelReport = async (req, res) => {
       res.status(404).json({ message: "Landlord tidak ditemukan." });
       return;
     }
-    const [properties] = await pool.query("SELECT * FROM properties WHERE ownerId = ?", [landlord.id]);
+    const [properties] = await pool.query("SELECT * FROM properties WHERE ownerId = ? LIMIT 1000", [landlord.id]);
     const [transactions] = await pool.query(
       `SELECT r.*, p.name as propertyName FROM rentals r 
        JOIN properties p ON r.propertyId = p.id 
-       WHERE p.ownerId = ? ORDER BY r.id DESC`,
+       WHERE p.ownerId = ? ORDER BY r.id DESC LIMIT 5000`,
       [landlord.id]
     );
     const wb = XLSX.utils.book_new();
     const summaryData = [
       ["Laporan Keuangan Landlord"],
-      ["Nama", landlord.name],
-      ["Email", landlord.email],
-      ["Total Pendapatan", landlord.totalRevenue || 0],
-      ["Total Penarikan", landlord.totalWithdrawn || 0],
-      ["Saldo", landlord.balance || 0],
+      ["Nama", sanitizeSpreadsheetCell(landlord.name)],
+      ["Email", sanitizeSpreadsheetCell(landlord.email)],
+      ["Total Pendapatan", Number(landlord.totalRevenue || 0)],
+      ["Total Penarikan", Number(landlord.totalWithdrawn || 0)],
+      ["Saldo", Number(landlord.balance || 0)],
       [""],
       ["Ringkasan Properti"],
       ["Nama Properti", "Lokasi", "Harga", "Total Kamar", "Kamar Tersedia"]
     ];
-    properties.forEach((p) => summaryData.push([p.name, p.district, p.price, p.totalRooms, p.totalRooms - p.occupiedRooms]));
+    properties.forEach(
+      (p) => summaryData.push([
+        sanitizeSpreadsheetCell(p.name),
+        sanitizeSpreadsheetCell(p.district),
+        Number(p.price || 0),
+        Number(p.totalRooms || 0),
+        Number(p.totalRooms || 0) - Number(p.occupiedRooms || 0)
+      ])
+    );
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan Keuangan");
     const txData = [["ID Transaksi", "Properti", "Tanggal", "Jumlah", "Status"]];
     transactions.forEach((t) => {
       const statusLabel = t.status === "active" ? "Aktif" : t.status === "pending" ? "Menunggu Pembayaran" : t.status === "cancelled" ? "Dibatalkan" : "Selesai";
-      txData.push([t.id, t.propertyName || "", t.startDate || "", t.price || 0, statusLabel]);
+      txData.push([
+        sanitizeSpreadsheetCell(t.id),
+        sanitizeSpreadsheetCell(t.propertyName || ""),
+        sanitizeSpreadsheetCell(t.startDate || ""),
+        Number(t.price || 0),
+        statusLabel
+      ]);
     });
     const txSheet = XLSX.utils.aoa_to_sheet(txData);
     XLSX.utils.book_append_sheet(wb, txSheet, "Transaksi");
@@ -3598,9 +3846,10 @@ var RentalsRepository = class {
     return rows;
   }
   async insertRentalBooking(data, conn) {
+    const startDateIso = /^\d{4}-\d{2}-\d{2}$/.test(data.startDate.trim()) ? data.startDate.trim() : null;
     const sql = `
-      INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, document, duration_months)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, start_date_iso, status, document, duration_months)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await conn.query(sql, [
       data.id,
@@ -3610,6 +3859,7 @@ var RentalsRepository = class {
       data.propertyName,
       data.price,
       data.startDate,
+      startDateIso,
       data.status,
       data.document,
       data.durationMonths
@@ -3629,7 +3879,16 @@ var RentalsRepository = class {
     );
   }
   async setRoomStatus(roomId, status, conn) {
-    await conn.query("UPDATE rooms SET status = ? WHERE id = ?", [status, roomId]);
+    await conn.query(
+      "UPDATE rooms SET status = ?, reserved_until = NULL, reserved_by_rental_id = NULL WHERE id = ?",
+      [status, roomId]
+    );
+  }
+  async clearRoomHoldByRentalId(rentalId, conn) {
+    await conn.query(
+      "UPDATE rooms SET reserved_until = NULL, reserved_by_rental_id = NULL WHERE reserved_by_rental_id = ?",
+      [rentalId]
+    );
   }
   async creditLandlordBalance(ownerId, revenue, conn) {
     await conn.query(
@@ -3664,13 +3923,19 @@ var RentalsRepository = class {
     return rows[0];
   }
   async findRoomById(roomId, propertyId, conn = this.defaultPool, forUpdate = false) {
-    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ?${forUpdate ? " FOR UPDATE" : ""}`;
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id,
+      GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+      FROM rooms WHERE id = ? AND propertyId = ?${forUpdate ? " FOR UPDATE" : ""}`;
     const [rows] = await conn.query(sql, [roomId, propertyId]);
     return rows[0];
   }
-  async findAvailableRoom(propertyId, conn, forUpdate = true) {
-    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1${forUpdate ? " FOR UPDATE" : ""}`;
-    const [rows] = await conn.query(sql, [propertyId]);
+  async findAvailableRoom(propertyId, conn, forUpdate = true, rentalId) {
+    const holdFilter = rentalId ? "(reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL OR reserved_by_rental_id = ?)" : "(reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL)";
+    const params = rentalId ? [propertyId, rentalId] : [propertyId];
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id,
+      GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+      FROM rooms WHERE propertyId = ? AND status = 'available' AND ${holdFilter} ORDER BY roomNumber ASC, id ASC LIMIT 1${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, params);
     return rows[0];
   }
   async countRoomsByPropertyId(propertyId, conn = this.defaultPool) {
@@ -3715,9 +3980,90 @@ var RentalsRepository = class {
 };
 var rentalsRepository = new RentalsRepository();
 
-// backend/routes/payment.routes.ts
+// backend/services/payment.service.ts
 import crypto4 from "crypto";
 import midtransClient from "midtrans-client";
+
+// backend/repositories/payment.repository.ts
+var PaymentRepository = class {
+  defaultPool;
+  constructor(customPool = pool) {
+    this.defaultPool = customPool;
+  }
+  async findByOrderIdForUpdate(orderId, conn) {
+    const [rows] = await conn.query(
+      "SELECT * FROM payment_transactions WHERE order_id = ? FOR UPDATE",
+      [orderId]
+    );
+    return rows[0];
+  }
+  async upsertPendingTransaction(input, conn = this.defaultPool) {
+    await conn.query(
+      `INSERT INTO payment_transactions (order_id, rental_id, tx_type, gross_amount, months, status)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         gross_amount = VALUES(gross_amount),
+         months = VALUES(months)`,
+      [
+        input.orderId,
+        input.rentalId,
+        input.txType,
+        input.grossAmount,
+        input.months,
+        input.status || "pending"
+      ]
+    );
+  }
+  async recordFinalTransactionStatus(input, conn) {
+    if (input.status === "settled") {
+      await conn.query(
+        `INSERT INTO payment_transactions (order_id, rental_id, tx_type, gross_amount, months, status, settled_at)
+         VALUES (?, ?, ?, ?, ?, 'settled', NOW())
+         ON DUPLICATE KEY UPDATE
+           status = 'settled',
+           gross_amount = VALUES(gross_amount),
+           months = VALUES(months),
+           settled_at = COALESCE(settled_at, NOW())`,
+        [input.orderId, input.rentalId, input.txType, input.grossAmount, input.months]
+      );
+    } else {
+      await conn.query(
+        `INSERT INTO payment_transactions (order_id, rental_id, tx_type, gross_amount, months, status)
+         VALUES (?, ?, ?, ?, ?, 'refund_required')
+         ON DUPLICATE KEY UPDATE
+           status = 'refund_required'`,
+        [input.orderId, input.rentalId, input.txType, input.grossAmount, input.months]
+      );
+    }
+  }
+  async markPendingInitialTransactionsSettled(rentalId, conn) {
+    await conn.query(
+      `UPDATE payment_transactions
+       SET status = 'settled', settled_at = COALESCE(settled_at, NOW())
+       WHERE rental_id = ? AND tx_type = 'initial' AND status = 'pending'`,
+      [rentalId]
+    );
+  }
+  async markTransactionCancelled(orderId, conn = this.defaultPool) {
+    await conn.query(
+      `UPDATE payment_transactions
+       SET status = 'cancelled'
+       WHERE order_id = ? AND status = 'pending'`,
+      [orderId]
+    );
+  }
+  async clearRoomHoldByRentalId(rentalId, conn = this.defaultPool) {
+    await conn.query(
+      `UPDATE rooms
+       SET reserved_until = NULL, reserved_by_rental_id = NULL
+       WHERE reserved_by_rental_id = ?`,
+      [rentalId]
+    );
+  }
+};
+var paymentRepository = new PaymentRepository();
+
+// backend/services/payment.service.ts
 function isLockContentionError(err) {
   if (!err || typeof err !== "object") return false;
   const dbErr = err;
@@ -3750,6 +4096,7 @@ async function fetchMidtransTransactionStatus(orderId, options) {
   const serverKey = options?.serverKey || process.env.MIDTRANS_SERVER_KEY || "";
   const baseUrl = isProd ? "https://api.midtrans.com" : "https://api.sandbox.midtrans.com";
   const url = `${baseUrl}/v2/${encodeURIComponent(orderId)}/status`;
+  const timeoutMs = options?.timeoutMs ?? 6e3;
   const authHeader = `Basic ${Buffer.from(`${serverKey}:`).toString("base64")}`;
   const response = await fetch(url, {
     method: "GET",
@@ -3757,11 +4104,14 @@ async function fetchMidtransTransactionStatus(orderId, options) {
       Authorization: authHeader,
       Accept: "application/json",
       "Content-Type": "application/json"
-    }
+    },
+    signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) {
     const errorBody = await response.text().catch(() => "");
-    throw new Error(`Midtrans status API error [HTTP ${response.status}]: ${errorBody || response.statusText}`);
+    throw new Error(
+      `Midtrans status API error [HTTP ${response.status}]: ${errorBody || response.statusText}`
+    );
   }
   return await response.json();
 }
@@ -3856,8 +4206,331 @@ function extractOrderRentalId(orderIdOrRentalId) {
   }
   return { rentalId: trimmed, isRenewal: false };
 }
-async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
-  const { rentalId: targetRentalId, isRenewal } = extractOrderRentalId(orderIdOrRentalId);
+function isRoomActivelyHeldByOther(room, rentalId) {
+  if (!room.reserved_by_rental_id || room.reserved_by_rental_id === rentalId) {
+    return false;
+  }
+  return Number(room.holdRemainingSeconds || 0) > 0;
+}
+async function createPaymentToken(input, repo = paymentRepository) {
+  const { authUser, propertyId, durationMonths, roomId } = input;
+  const tenantId = input.tenantId || authUser?.id;
+  if (!propertyId || !tenantId) {
+    return { statusCode: 400, body: { message: "propertyId dan tenantId wajib diisi." } };
+  }
+  if (authUser?.role !== "admin" && authUser?.id !== tenantId) {
+    return {
+      statusCode: 403,
+      body: { message: "Akses ditolak. Anda tidak dapat membuat token atas nama akun lain." }
+    };
+  }
+  const duration = durationMonths && durationMonths > 0 ? durationMonths : 1;
+  const customRentalId = input.customRentalId || input.rentalId;
+  const resolvedRentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
+  const startDate = input.startDate && typeof input.startDate === "string" && input.startDate.trim() !== "" ? input.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const startDateIso = /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? startDate : null;
+  let tenantName = "";
+  let tenantEmail = "";
+  let tenantPhone = "";
+  let propertyName = "";
+  let monthlyRent = 0;
+  let adminFee = 5e3;
+  let resolvedDuration = duration;
+  let totalAmount = 0;
+  let targetRoomId = null;
+  let connection = null;
+  let transactionStarted = false;
+  let connectionReleased = false;
+  const safeRollback = async (reason) => {
+    if (connection && transactionStarted) {
+      await connection.rollback().catch((rbErr) => {
+        console.warn(`[Payment Token] Rollback swallowed error (${reason || "unknown"}):`, rbErr);
+      });
+      transactionStarted = false;
+    }
+  };
+  try {
+    connection = await pool.getConnection();
+    await connection.query("SET SESSION innodb_lock_wait_timeout = 5;");
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [propRows] = await connection.query(
+      "SELECT id, name, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
+      [propertyId]
+    );
+    const property = propRows[0];
+    if (!property) {
+      await safeRollback("property missing");
+      return { statusCode: 404, body: { message: "Properti tidak ditemukan." } };
+    }
+    propertyName = property.name;
+    if (property.occupiedRooms >= property.totalRooms) {
+      await safeRollback("property full");
+      return { statusCode: 400, body: { message: "Kamar kos sudah penuh." } };
+    }
+    const [existingRentalPreRows] = await connection.query(
+      "SELECT roomId FROM rentals WHERE id = ?",
+      [resolvedRentalId]
+    );
+    const preOldRoomId = existingRentalPreRows[0]?.roomId || null;
+    const requestedRoomId = roomId && typeof roomId === "string" && roomId.trim() !== "" ? roomId.trim() : void 0;
+    targetRoomId = requestedRoomId || preOldRoomId;
+    let lockedTargetRoom;
+    if (targetRoomId) {
+      const roomIdsToLock = Array.from(
+        new Set([targetRoomId, preOldRoomId].filter(Boolean))
+      ).sort();
+      const [roomRows] = await connection.query(
+        `SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id,
+                GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+         FROM rooms
+         WHERE id IN (${roomIdsToLock.map(() => "?").join(",")}) AND propertyId = ?
+         ORDER BY id FOR UPDATE`,
+        [...roomIdsToLock, propertyId]
+      );
+      lockedTargetRoom = roomRows.find((r) => r.id === targetRoomId);
+      if (!lockedTargetRoom) {
+        await safeRollback("room not found on property");
+        return { statusCode: 404, body: { message: "Kamar tidak ditemukan pada properti ini." } };
+      }
+      if (lockedTargetRoom.status !== "available" || isRoomActivelyHeldByOther(lockedTargetRoom, resolvedRentalId)) {
+        await safeRollback("room unavailable");
+        return { statusCode: 409, body: { message: "Kamar yang Anda pilih sudah tidak tersedia." } };
+      }
+    } else {
+      const [discreteCountRows] = await connection.query(
+        "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
+        [propertyId]
+      );
+      const discreteCount = Number(discreteCountRows[0]?.count || 0);
+      if (discreteCount > 0) {
+        const [availableRooms] = await connection.query(
+          `SELECT id, propertyId, roomNumber, price, status, reserved_until, reserved_by_rental_id,
+                  GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+           FROM rooms
+           WHERE propertyId = ? AND status = 'available'
+             AND (reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL OR reserved_by_rental_id = ?)
+           ORDER BY roomNumber ASC, id ASC
+           LIMIT 1 FOR UPDATE`,
+          [propertyId, resolvedRentalId]
+        );
+        if (availableRooms.length === 0) {
+          await safeRollback("no available rooms");
+          return { statusCode: 409, body: { message: "Kamar yang Anda pilih sudah tidak tersedia." } };
+        }
+        lockedTargetRoom = availableRooms[0];
+        targetRoomId = lockedTargetRoom.id;
+      }
+    }
+    const [userRows] = await connection.query(
+      "SELECT id, name, email, phone FROM users WHERE id = ? FOR UPDATE",
+      [tenantId]
+    );
+    const tenant = userRows[0];
+    if (!tenant) {
+      await safeRollback("tenant missing");
+      return { statusCode: 404, body: { message: "Tenant tidak ditemukan." } };
+    }
+    tenantName = tenant.name;
+    tenantEmail = tenant.email;
+    tenantPhone = tenant.phone || "";
+    let activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE";
+    const queryParams = [tenantId];
+    if (customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "") {
+      activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? FOR UPDATE";
+      queryParams.push(customRentalId.trim());
+    }
+    const [activeRentals] = await connection.query(activeRentalsQuery, queryParams);
+    if (activeRentals.length > 0) {
+      await safeRollback("single active tenancy");
+      return {
+        statusCode: 409,
+        body: {
+          message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
+        }
+      };
+    }
+    const [existingRentalRows] = await connection.query(
+      "SELECT * FROM rentals WHERE id = ? FOR UPDATE",
+      [resolvedRentalId]
+    );
+    const existingRental = existingRentalRows[0];
+    if (existingRental && existingRental.status !== "pending") {
+      await safeRollback("rental not pending");
+      return { statusCode: 409, body: { message: "Data sewa sudah tidak dalam status pending." } };
+    }
+    const roomPriceOverride = lockedTargetRoom && typeof lockedTargetRoom.price === "number" && lockedTargetRoom.price > 0 ? Number(lockedTargetRoom.price) : null;
+    monthlyRent = lockedTargetRoom ? roomPriceOverride || Number(property.price) : Number(existingRental?.price || property.price);
+    adminFee = Number(existingRental?.admin_fee_amount ?? 5e3);
+    resolvedDuration = durationMonths && durationMonths > 0 ? durationMonths : existingRental?.duration_months ? Number(existingRental.duration_months) : 1;
+    totalAmount = monthlyRent * resolvedDuration + adminFee;
+    if (!existingRental) {
+      await connection.query(
+        `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, start_date_iso, status, admin_fee_amount, duration_months)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        [
+          resolvedRentalId,
+          tenantId,
+          propertyId,
+          targetRoomId,
+          property.name,
+          monthlyRent,
+          startDate,
+          startDateIso,
+          adminFee,
+          resolvedDuration
+        ]
+      );
+    } else {
+      const updatedStartIso = input.startDate && /^\d{4}-\d{2}-\d{2}$/.test(input.startDate.trim()) ? input.startDate.trim() : null;
+      await connection.query(
+        `UPDATE rentals
+         SET roomId = ?,
+             price = ?,
+             duration_months = ?,
+             startDate = COALESCE(?, startDate),
+             start_date_iso = COALESCE(?, start_date_iso)
+         WHERE id = ? AND status = 'pending'`,
+        [
+          targetRoomId,
+          monthlyRent,
+          resolvedDuration,
+          input.startDate || null,
+          updatedStartIso,
+          resolvedRentalId
+        ]
+      );
+    }
+    if (lockedTargetRoom) {
+      await connection.query(
+        `UPDATE rooms
+         SET reserved_until = NULL, reserved_by_rental_id = NULL
+         WHERE reserved_by_rental_id = ? AND id != ?`,
+        [resolvedRentalId, lockedTargetRoom.id]
+      );
+      await connection.query(
+        `UPDATE rooms
+         SET reserved_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE),
+             reserved_by_rental_id = ?
+         WHERE id = ?`,
+        [resolvedRentalId, lockedTargetRoom.id]
+      );
+    }
+    await connection.commit();
+    transactionStarted = false;
+  } catch (err) {
+    await safeRollback("catch");
+    if (isLockContentionError(err)) {
+      console.warn(
+        "[Payment Token] Lock wait timeout or deadlock (1205/1213):",
+        err?.message || err
+      );
+      return {
+        statusCode: 409,
+        body: {
+          message: "High contention: unable to reserve room due to concurrent requests. Please retry."
+        }
+      };
+    }
+    console.error("Create payment token transaction error:", err);
+    return {
+      statusCode: 500,
+      body: { message: "Gagal memproses transaksi pembuatan token pembayaran." }
+    };
+  } finally {
+    if (connection && !connectionReleased) {
+      connectionReleased = true;
+      try {
+        connection.release();
+      } catch (relErr) {
+        console.warn("[Payment Token] Connection release warning:", relErr);
+      }
+    }
+  }
+  const attemptOrderId = `${resolvedRentalId}-${Date.now()}`;
+  const parameter = {
+    transaction_details: {
+      order_id: attemptOrderId,
+      gross_amount: totalAmount
+    },
+    customer_details: {
+      first_name: tenantName,
+      email: tenantEmail,
+      phone: tenantPhone
+    },
+    item_details: [
+      {
+        id: propertyId,
+        price: monthlyRent,
+        quantity: resolvedDuration,
+        name: propertyName.substring(0, 50)
+      },
+      {
+        id: "ADMIN_FEE",
+        price: adminFee,
+        quantity: 1,
+        name: "Biaya Administrasi & Meterai"
+      }
+    ],
+    expiry: {
+      unit: "minutes",
+      duration: 15
+    },
+    custom_field1: resolvedRentalId
+  };
+  try {
+    await repo.upsertPendingTransaction({
+      orderId: attemptOrderId,
+      rentalId: resolvedRentalId,
+      txType: "initial",
+      grossAmount: totalAmount,
+      months: resolvedDuration
+    });
+  } catch (txErr) {
+    console.warn("[Payment Token] Could not persist payment_transactions ledger entry:", txErr);
+  }
+  const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
+  const hasMidtransConfig = isMidtransConfigured();
+  if (!hasMidtransConfig && isProduction) {
+    return {
+      statusCode: 500,
+      body: {
+        message: "Konfigurasi payment gateway Midtrans (MIDTRANS_SERVER_KEY / MIDTRANS_CLIENT_KEY) belum diatur di server produksi."
+      }
+    };
+  }
+  let transactionToken = `snap-token-${resolvedRentalId}`;
+  let redirectUrl = getSnapRedirectUrl(resolvedRentalId);
+  if (hasMidtransConfig) {
+    try {
+      configureSnapClient();
+      const transaction = await snap.createTransaction(parameter);
+      transactionToken = transaction.token;
+      redirectUrl = transaction.redirect_url;
+    } catch (snapErr) {
+      console.error("Midtrans createTransaction error:", snapErr);
+      const errMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
+      return {
+        statusCode: 502,
+        body: { message: `Gagal membuat transaksi di Midtrans: ${errMsg}` }
+      };
+    }
+  }
+  return {
+    statusCode: 200,
+    body: {
+      message: "Token pembayaran berhasil dibuat.",
+      token: transactionToken,
+      redirect_url: redirectUrl,
+      rentalId: resolvedRentalId,
+      orderId: attemptOrderId
+    }
+  };
+}
+async function settleRentalPayment(orderIdOrRentalId, paidAmount, options) {
+  const repo = options?.repo || paymentRepository;
+  const trimmedOrderId = orderIdOrRentalId.trim();
+  const { rentalId: targetRentalId, isRenewal } = extractOrderRentalId(trimmedOrderId);
   const isProductionMode = (process.env.NODE_ENV === "production" || process.env.MIDTRANS_IS_PRODUCTION === "true") && process.env.NODE_ENV !== "test" && process.env.MIDTRANS_SKIP_UPSTREAM_VERIFY !== "true";
   if (isProductionMode) {
     if (!isMidtransConfigured()) {
@@ -3868,12 +4541,12 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
       };
     }
     try {
-      const upstreamStatus = await fetchMidtransTransactionStatus(orderIdOrRentalId);
+      const upstreamStatus = await fetchMidtransTransactionStatus(trimmedOrderId);
       const isSettled = upstreamStatus.transaction_status === "settlement";
       const isAcceptedCapture = upstreamStatus.transaction_status === "capture" && upstreamStatus.fraud_status === "accept";
       if (!isSettled && !isAcceptedCapture) {
         console.warn(
-          `[Midtrans Upstream Verification] Order ${orderIdOrRentalId} rejected: status=${upstreamStatus.transaction_status}, fraud=${upstreamStatus.fraud_status}`
+          `[Midtrans Upstream Verification] Order ${trimmedOrderId} rejected: status=${upstreamStatus.transaction_status}, fraud=${upstreamStatus.fraud_status}`
         );
         return {
           success: false,
@@ -3886,7 +4559,10 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
         paidAmount = upstreamAmount;
       }
     } catch (upstreamErr) {
-      console.error(`[Midtrans Upstream Verification] Failed to query status for order ${orderIdOrRentalId}:`, upstreamErr);
+      console.error(
+        `[Midtrans Upstream Verification] Failed to query status for order ${trimmedOrderId}:`,
+        upstreamErr
+      );
       return {
         success: false,
         statusCode: 502,
@@ -3911,8 +4587,8 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
     await connection.beginTransaction();
     transactionStarted = true;
     const [earlyRentalRows] = await connection.query(
-      "SELECT id, propertyId, status FROM rentals WHERE id = ? OR id = ?",
-      [targetRentalId, orderIdOrRentalId.trim()]
+      "SELECT id, propertyId, roomId, status FROM rentals WHERE id = ? OR id = ?",
+      [targetRentalId, trimmedOrderId]
     );
     const earlyRental = earlyRentalRows[0];
     if (!earlyRental) {
@@ -3922,10 +4598,34 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
     let property;
     if (earlyRental.propertyId) {
       const [propRows] = await connection.query(
-        "SELECT id, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
+        "SELECT id, totalRooms, occupiedRooms, ownerId, price FROM properties WHERE id = ? FOR UPDATE",
         [earlyRental.propertyId]
       );
       property = propRows[0];
+    }
+    let preLockedRoom;
+    if (!isRenewal && earlyRental.status !== "active" && earlyRental.propertyId) {
+      if (earlyRental.roomId) {
+        const [roomRows] = await connection.query(
+          `SELECT id, propertyId, roomNumber, price, status, reserved_until, reserved_by_rental_id,
+                  GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+           FROM rooms WHERE id = ? FOR UPDATE`,
+          [earlyRental.roomId]
+        );
+        preLockedRoom = roomRows[0];
+      } else {
+        const [availableRooms] = await connection.query(
+          `SELECT id, propertyId, roomNumber, price, status, reserved_until, reserved_by_rental_id,
+                  GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+           FROM rooms
+           WHERE propertyId = ? AND status = 'available'
+             AND (reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL OR reserved_by_rental_id = ?)
+           ORDER BY roomNumber ASC, id ASC
+           LIMIT 1 FOR UPDATE`,
+          [earlyRental.propertyId, earlyRental.id]
+        );
+        preLockedRoom = availableRooms[0];
+      }
     }
     if (property && property.ownerId) {
       await connection.query(
@@ -3935,7 +4635,7 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
     }
     const [rentalRows] = await connection.query(
       "SELECT * FROM rentals WHERE id = ? OR id = ? FOR UPDATE",
-      [targetRentalId, orderIdOrRentalId.trim()]
+      [targetRentalId, trimmedOrderId]
     );
     const rental = rentalRows[0];
     if (!rental) {
@@ -3948,6 +4648,27 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
     const adminFee = Number(
       rental.admin_fee_amount !== void 0 && rental.admin_fee_amount !== null ? rental.admin_fee_amount : 5e3
     );
+    const existingTx = await repo.findByOrderIdForUpdate(trimmedOrderId, connection);
+    if (existingTx?.status === "settled") {
+      await connection.commit();
+      transactionStarted = false;
+      return {
+        success: true,
+        statusCode: 200,
+        message: isRenewal ? "Pembayaran perpanjangan sewa sudah diproses sebelumnya." : "Pembayaran sudah diproses sebelumnya.",
+        rental
+      };
+    }
+    if (existingTx?.status === "refund_required") {
+      await connection.commit();
+      transactionStarted = false;
+      return {
+        success: true,
+        statusCode: 200,
+        message: "Transaksi sudah tercatat memerlukan refund karena kamar penuh.",
+        rental
+      };
+    }
     if (isRenewal) {
       let renewedMonths = 1;
       if (paidAmount !== void 0 && !isNaN(paidAmount) && monthlyPrice > 0) {
@@ -3963,10 +4684,28 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
         const isPriceMatch = Math.abs(paidAmount - expectedRenewalWithAdmin) <= 1 || Math.abs(paidAmount - expectedRenewalBase) <= 1 || Math.abs(paidAmount - (monthlyPrice + adminFee)) <= 1;
         if (!isPriceMatch) {
           await safeRollback("renewal price mismatch");
-          console.error(`Midtrans renewal gross_amount mismatch: expected ${expectedRenewalWithAdmin} or ${expectedRenewalBase}, got ${paidAmount}`);
-          return { success: false, statusCode: 400, message: "Jumlah nominal pembayaran tidak sesuai dengan biaya perpanjangan sewa." };
+          console.error(
+            `Midtrans renewal gross_amount mismatch: expected ${expectedRenewalWithAdmin} or ${expectedRenewalBase}, got ${paidAmount}`
+          );
+          return {
+            success: false,
+            statusCode: 400,
+            message: "Jumlah nominal pembayaran tidak sesuai dengan biaya perpanjangan sewa."
+          };
         }
       }
+      const settledAmount2 = paidAmount !== void 0 && !isNaN(paidAmount) ? paidAmount : monthlyPrice * renewedMonths + adminFee;
+      await repo.recordFinalTransactionStatus(
+        {
+          orderId: trimmedOrderId,
+          rentalId: resolvedRentalId,
+          txType: "renewal",
+          grossAmount: settledAmount2,
+          months: renewedMonths,
+          status: "settled"
+        },
+        connection
+      );
       await connection.query(
         "UPDATE rentals SET status = 'active', duration_months = COALESCE(duration_months, 1) + ? WHERE id = ?",
         [renewedMonths, resolvedRentalId]
@@ -4003,8 +4742,14 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
       const isPriceMatch = Math.abs(paidAmount - expectedWithAdmin) <= 1 || Math.abs(paidAmount - expectedBase) <= 1 || Math.abs(paidAmount - monthlyPrice) <= 1;
       if (!isPriceMatch) {
         await safeRollback("price mismatch");
-        console.error(`Midtrans gross_amount mismatch: expected ${expectedWithAdmin} or ${expectedBase}, got ${paidAmount}`);
-        return { success: false, statusCode: 400, message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa." };
+        console.error(
+          `Midtrans gross_amount mismatch: expected ${expectedWithAdmin} or ${expectedBase}, got ${paidAmount}`
+        );
+        return {
+          success: false,
+          statusCode: 400,
+          message: "Jumlah nominal pembayaran tidak sesuai dengan harga sewa."
+        };
       }
     }
     if (rental.status !== "active") {
@@ -4020,26 +4765,80 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
           message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif."
         };
       }
-      let lockedRoom;
+      let lockedRoom = preLockedRoom;
       let targetRoomId = rental.roomId;
+      const isRoomEligible = (room) => Boolean(
+        room && room.status === "available" && !isRoomActivelyHeldByOther(room, resolvedRentalId)
+      );
       if (targetRoomId) {
-        const [roomRows] = await connection.query(
-          "SELECT id, propertyId, roomNumber, status FROM rooms WHERE id = ? FOR UPDATE",
-          [targetRoomId]
-        );
-        lockedRoom = roomRows[0];
-        if (!lockedRoom || lockedRoom.status !== "available") {
-          await safeRollback("room unavailable");
-          console.error(`Overbooking conflict detected for room ${targetRoomId}, status: ${lockedRoom?.status}`);
-          return { success: false, statusCode: 409, message: "Kamar sudah terisi atau tidak tersedia." };
+        if (!lockedRoom || lockedRoom.id !== targetRoomId) {
+          const [roomRows] = await connection.query(
+            `SELECT id, propertyId, roomNumber, price, status, reserved_until, reserved_by_rental_id,
+                    GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+             FROM rooms WHERE id = ? FOR UPDATE`,
+            [targetRoomId]
+          );
+          lockedRoom = roomRows[0];
+        }
+        if (!isRoomEligible(lockedRoom)) {
+          if (options?.isWebhook) {
+            const propBasePrice = Number(property?.price || 0);
+            const [fallbackRooms] = await connection.query(
+              `SELECT id, propertyId, roomNumber, price, status, reserved_until, reserved_by_rental_id,
+                      GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+               FROM rooms
+               WHERE propertyId = ? AND status = 'available'
+                 AND (reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL OR reserved_by_rental_id = ?)
+                 AND COALESCE(NULLIF(price, 0), ?) = ?
+               ORDER BY roomNumber ASC, id ASC
+               LIMIT 1 FOR UPDATE`,
+              [rental.propertyId, resolvedRentalId, propBasePrice, monthlyPrice]
+            );
+            if (fallbackRooms.length > 0) {
+              lockedRoom = fallbackRooms[0];
+              targetRoomId = lockedRoom.id;
+            } else {
+              const settledAmount2 = paidAmount !== void 0 && !isNaN(paidAmount) ? paidAmount : expectedWithAdmin;
+              await repo.recordFinalTransactionStatus(
+                {
+                  orderId: trimmedOrderId,
+                  rentalId: resolvedRentalId,
+                  txType: "initial",
+                  grossAmount: settledAmount2,
+                  months: durationMonths,
+                  status: "refund_required"
+                },
+                connection
+              );
+              await repo.clearRoomHoldByRentalId(resolvedRentalId, connection);
+              await connection.query(
+                "UPDATE rentals SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
+                [resolvedRentalId]
+              );
+              await connection.commit();
+              transactionStarted = false;
+              apiCache.invalidatePattern("properties");
+              apiCache.invalidatePattern("rentals");
+              return {
+                success: true,
+                statusCode: 200,
+                message: "Kamar sudah penuh pada saat pembayaran diterima; transaksi ditandai refund_required."
+              };
+            }
+          } else {
+            await safeRollback("room unavailable");
+            console.error(
+              `Overbooking conflict detected for room ${targetRoomId}, status: ${lockedRoom?.status}`
+            );
+            return {
+              success: false,
+              statusCode: 409,
+              message: "Kamar sudah terisi atau tidak tersedia."
+            };
+          }
         }
       } else {
-        const [availableRooms] = await connection.query(
-          "SELECT id, propertyId, roomNumber, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1 FOR UPDATE",
-          [rental.propertyId]
-        );
-        if (availableRooms.length > 0) {
-          lockedRoom = availableRooms[0];
+        if (lockedRoom && isRoomEligible(lockedRoom)) {
           targetRoomId = lockedRoom.id;
         } else {
           const [discreteCountRows] = await connection.query(
@@ -4047,22 +4846,57 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
             [rental.propertyId]
           );
           if (Number(discreteCountRows[0]?.count || 0) > 0) {
+            if (options?.isWebhook) {
+              const settledAmount2 = paidAmount !== void 0 && !isNaN(paidAmount) ? paidAmount : expectedWithAdmin;
+              await repo.recordFinalTransactionStatus(
+                {
+                  orderId: trimmedOrderId,
+                  rentalId: resolvedRentalId,
+                  txType: "initial",
+                  grossAmount: settledAmount2,
+                  months: durationMonths,
+                  status: "refund_required"
+                },
+                connection
+              );
+              await connection.commit();
+              transactionStarted = false;
+              return {
+                success: true,
+                statusCode: 200,
+                message: "Kamar sudah penuh pada saat pembayaran diterima; transaksi ditandai refund_required."
+              };
+            }
             await safeRollback("no discrete rooms available");
-            return { success: false, statusCode: 409, message: "Kamar sudah terisi atau tidak tersedia." };
+            return {
+              success: false,
+              statusCode: 409,
+              message: "Kamar sudah terisi atau tidak tersedia."
+            };
           }
           if (property && property.occupiedRooms >= property.totalRooms) {
             await safeRollback("property full");
-            console.error(`Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`);
-            return { success: false, statusCode: 409, message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual." };
+            console.error(
+              `Overbooking conflict detected for property ${property.id}, rental ${resolvedRentalId}`
+            );
+            return {
+              success: false,
+              statusCode: 409,
+              message: "Kamar sudah penuh, pembayaran memerlukan penanganan manual."
+            };
           }
         }
       }
       await connection.query(
-        "UPDATE rentals SET status = 'active', roomId = COALESCE(roomId, ?) WHERE id = ?",
+        "UPDATE rentals SET status = 'active', roomId = ? WHERE id = ?",
         [targetRoomId || null, resolvedRentalId]
       );
       if (lockedRoom) {
-        await connection.query("UPDATE rooms SET status = 'occupied' WHERE id = ?", [lockedRoom.id]);
+        await connection.query(
+          "UPDATE rooms SET status = 'occupied', reserved_until = NULL, reserved_by_rental_id = NULL WHERE id = ?",
+          [lockedRoom.id]
+        );
+        await repo.clearRoomHoldByRentalId(resolvedRentalId, connection);
         await syncPropertyRoomCounts(connection, rental.propertyId);
       } else {
         await connection.query(
@@ -4080,10 +4914,24 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
         );
       }
     }
+    const settledAmount = paidAmount !== void 0 && !isNaN(paidAmount) ? paidAmount : expectedWithAdmin;
+    await repo.recordFinalTransactionStatus(
+      {
+        orderId: trimmedOrderId,
+        rentalId: resolvedRentalId,
+        txType: "initial",
+        grossAmount: settledAmount,
+        months: durationMonths,
+        status: "settled"
+      },
+      connection
+    );
+    await repo.markPendingInitialTransactionsSettled(resolvedRentalId, connection);
     await connection.commit();
     transactionStarted = false;
     apiCache.invalidatePattern("properties");
     apiCache.invalidatePattern("rentals");
+    apiCache.invalidatePattern("rooms");
     apiCache.invalidatePattern("landlord:");
     apiCache.invalidatePattern("admin:");
     return {
@@ -4095,7 +4943,10 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
   } catch (err) {
     await safeRollback("catch");
     if (isLockContentionError(err)) {
-      console.warn("[Settle Payment] Lock wait timeout or deadlock (1205/1213):", err?.message || err);
+      console.warn(
+        "[Settle Payment] Lock wait timeout or deadlock (1205/1213):",
+        err?.message || err
+      );
       return {
         success: false,
         statusCode: 409,
@@ -4115,6 +4966,25 @@ async function settleRentalPayment(orderIdOrRentalId, paidAmount) {
     }
   }
 }
+async function handleMidtransWebhookCancellation(orderId, transactionStatus, repo = paymentRepository) {
+  const trimmedOrderId = orderId.trim();
+  await repo.markTransactionCancelled(trimmedOrderId);
+  if (trimmedOrderId.startsWith("RENEW-")) {
+    return `Status perpanjangan sewa dibatalkan (${transactionStatus}).`;
+  }
+  const { rentalId: targetRentalId } = extractOrderRentalId(trimmedOrderId);
+  await repo.clearRoomHoldByRentalId(targetRentalId);
+  await pool.query(
+    "UPDATE rentals SET status = 'cancelled' WHERE (id = ? OR id = ?) AND status = 'pending'",
+    [targetRentalId, trimmedOrderId]
+  );
+  apiCache.invalidatePattern("properties");
+  apiCache.invalidatePattern("rentals");
+  apiCache.invalidatePattern("rooms");
+  return `Status transaksi dibatalkan (${transactionStatus}).`;
+}
+
+// backend/routes/payment.routes.ts
 var handlePaymentNotification = async (req, res) => {
   const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
   const hasMidtransConfig = isMidtransConfigured();
@@ -4149,19 +5019,17 @@ var handlePaymentNotification = async (req, res) => {
   const isCaptureSuccess = transaction_status === "capture" && fraud_status === "accept";
   if (isSettlement || isCaptureSuccess) {
     const paidAmount = parseFloat(gross_amount);
-    const result = await settleRentalPayment(order_id, isNaN(paidAmount) ? void 0 : paidAmount);
+    const result = await settleRentalPayment(
+      order_id,
+      isNaN(paidAmount) ? void 0 : paidAmount,
+      { isWebhook: true }
+    );
     return res.status(result.statusCode || (result.success ? 200 : 400)).json({ message: result.message });
   }
   if (transaction_status === "cancel" || transaction_status === "deny" || transaction_status === "expire") {
     try {
-      if (order_id.trim().startsWith("RENEW-")) {
-        return res.json({ message: `Status perpanjangan sewa dibatalkan (${transaction_status}).` });
-      }
-      const { rentalId: targetRentalId } = extractOrderRentalId(order_id);
-      await pool.query("UPDATE rentals SET status = 'cancelled' WHERE (id = ? OR id = ?) AND status = 'pending'", [targetRentalId, order_id.trim()]);
-      apiCache.invalidatePattern("properties");
-      apiCache.invalidatePattern("rentals");
-      return res.json({ message: `Status transaksi dibatalkan (${transaction_status}).` });
+      const msg = await handleMidtransWebhookCancellation(order_id, transaction_status);
+      return res.json({ message: msg });
     } catch (err) {
       console.error("Cancel rental error:", err);
       return res.status(500).json({ message: "Gagal memperbarui status transaksi." });
@@ -4176,238 +5044,18 @@ function registerPaymentRoutes(router2) {
     mutationLimiter,
     validateBody(createPaymentTokenSchema),
     async (req, res) => {
-      const { propertyId, durationMonths, roomId } = req.body;
-      const authUser = req.user;
-      const tenantId = req.body.tenantId || authUser?.id;
-      if (!propertyId || !tenantId) {
-        return res.status(400).json({ message: "propertyId dan tenantId wajib diisi." });
-      }
-      if (authUser?.role !== "admin" && authUser?.id !== tenantId) {
-        return res.status(403).json({ message: "Akses ditolak. Anda tidak dapat membuat token atas nama akun lain." });
-      }
-      const duration = durationMonths && durationMonths > 0 ? durationMonths : 1;
-      const customRentalId = req.body.customRentalId || req.body.rentalId;
-      const resolvedRentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
-      const startDate = req.body.startDate && typeof req.body.startDate === "string" && req.body.startDate.trim() !== "" ? req.body.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-      let tenantName = "";
-      let tenantEmail = "";
-      let tenantPhone = "";
-      let propertyName = "";
-      let monthlyRent = 0;
-      let adminFee = 5e3;
-      let resolvedDuration = duration;
-      let totalAmount = 0;
-      let targetRoomId = null;
-      let connection = null;
-      let transactionStarted = false;
-      let connectionReleased = false;
-      const safeRollback = async (reason) => {
-        if (connection && transactionStarted) {
-          await connection.rollback().catch((rbErr) => {
-            console.warn(`[Payment Token] Rollback swallowed error (${reason || "unknown"}):`, rbErr);
-          });
-          transactionStarted = false;
-        }
-      };
-      try {
-        connection = await pool.getConnection();
-        await connection.query("SET SESSION innodb_lock_wait_timeout = 5;");
-        await connection.beginTransaction();
-        transactionStarted = true;
-        const [userRows] = await connection.query(
-          "SELECT id, name, email, phone FROM users WHERE id = ? FOR UPDATE",
-          [tenantId]
-        );
-        const tenant = userRows[0];
-        if (!tenant) {
-          await safeRollback("tenant missing");
-          return res.status(404).json({ message: "Tenant tidak ditemukan." });
-        }
-        tenantName = tenant.name;
-        tenantEmail = tenant.email;
-        tenantPhone = tenant.phone || "";
-        const [propRows] = await connection.query(
-          "SELECT id, name, price, totalRooms, occupiedRooms, ownerId FROM properties WHERE id = ? FOR UPDATE",
-          [propertyId]
-        );
-        const property = propRows[0];
-        if (!property) {
-          await safeRollback("property missing");
-          return res.status(404).json({ message: "Properti tidak ditemukan." });
-        }
-        propertyName = property.name;
-        if (property.occupiedRooms >= property.totalRooms) {
-          await safeRollback("property full");
-          return res.status(400).json({ message: "Kamar kos sudah penuh." });
-        }
-        let activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' FOR UPDATE";
-        const queryParams = [tenantId];
-        if (customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "") {
-          activeRentalsQuery = "SELECT id, propertyName FROM rentals WHERE tenantId = ? AND status = 'active' AND id != ? FOR UPDATE";
-          queryParams.push(customRentalId.trim());
-        }
-        const [activeRentals] = await connection.query(activeRentalsQuery, queryParams);
-        if (activeRentals.length > 0) {
-          await safeRollback("single active tenancy");
-          return res.status(409).json({
-            message: "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
-          });
-        }
-        const [existingRentalRows] = await connection.query(
-          "SELECT * FROM rentals WHERE id = ? FOR UPDATE",
-          [resolvedRentalId]
-        );
-        const existingRental = existingRentalRows[0];
-        if (existingRental && existingRental.status !== "pending") {
-          await safeRollback("rental not pending");
-          return res.status(409).json({ message: "Data sewa sudah tidak dalam status pending." });
-        }
-        const oldRoomId = existingRental?.roomId || null;
-        const requestedRoomId = roomId && typeof roomId === "string" && roomId.trim() !== "" ? roomId.trim() : void 0;
-        targetRoomId = requestedRoomId || oldRoomId;
-        let lockedTargetRoom;
-        if (targetRoomId) {
-          const roomIdsToLock = Array.from(new Set([targetRoomId, oldRoomId].filter(Boolean))).sort();
-          const [roomRows] = await connection.query(
-            `SELECT id, propertyId, roomNumber, floor, type, price, status 
-           FROM rooms 
-           WHERE id IN (${roomIdsToLock.map(() => "?").join(",")}) AND propertyId = ? 
-           ORDER BY id FOR UPDATE`,
-            [...roomIdsToLock, propertyId]
-          );
-          lockedTargetRoom = roomRows.find((r) => r.id === targetRoomId);
-          if (!lockedTargetRoom) {
-            await safeRollback("room not found on property");
-            return res.status(404).json({ message: "Kamar tidak ditemukan pada properti ini." });
-          }
-          if (lockedTargetRoom.status !== "available") {
-            await safeRollback("room unavailable");
-            return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
-          }
-        } else {
-          const [discreteCountRows] = await connection.query(
-            "SELECT COUNT(*) as count FROM rooms WHERE propertyId = ?",
-            [propertyId]
-          );
-          const discreteCount = Number(discreteCountRows[0]?.count || 0);
-          if (discreteCount > 0) {
-            const [availableRooms] = await connection.query(
-              "SELECT id, price, status FROM rooms WHERE propertyId = ? AND status = 'available' LIMIT 1 FOR UPDATE",
-              [propertyId]
-            );
-            if (availableRooms.length === 0) {
-              await safeRollback("no available rooms");
-              return res.status(409).json({ message: "Kamar yang Anda pilih sudah tidak tersedia." });
-            }
-          }
-        }
-        const roomPriceOverride = lockedTargetRoom && typeof lockedTargetRoom.price === "number" && lockedTargetRoom.price > 0 ? Number(lockedTargetRoom.price) : null;
-        monthlyRent = lockedTargetRoom ? roomPriceOverride || Number(property.price) : Number(existingRental?.price || property.price);
-        adminFee = Number(existingRental?.admin_fee_amount ?? 5e3);
-        resolvedDuration = durationMonths && durationMonths > 0 ? durationMonths : existingRental?.duration_months ? Number(existingRental.duration_months) : 1;
-        totalAmount = monthlyRent * resolvedDuration + adminFee;
-        if (!existingRental) {
-          await connection.query(
-            `INSERT INTO rentals (id, tenantId, propertyId, roomId, propertyName, price, startDate, status, admin_fee_amount, duration_months) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-            [resolvedRentalId, tenantId, propertyId, targetRoomId, property.name, monthlyRent, startDate, adminFee, resolvedDuration]
-          );
-        } else {
-          await connection.query(
-            `UPDATE rentals 
-           SET roomId = ?, 
-               price = ?, 
-               duration_months = ?, 
-               startDate = COALESCE(?, startDate) 
-           WHERE id = ? AND status = 'pending'`,
-            [targetRoomId, monthlyRent, resolvedDuration, req.body.startDate || null, resolvedRentalId]
-          );
-        }
-        await connection.commit();
-        transactionStarted = false;
-      } catch (err) {
-        await safeRollback("catch");
-        if (isLockContentionError(err)) {
-          console.warn("[Payment Token] Lock wait timeout or deadlock (1205/1213):", err?.message || err);
-          if (!res.headersSent) {
-            return res.status(409).json({
-              message: "High contention: unable to reserve room due to concurrent requests. Please retry."
-            });
-          }
-          return;
-        }
-        console.error("Create payment token transaction error:", err);
-        if (!res.headersSent) {
-          return res.status(500).json({ message: "Gagal memproses transaksi pembuatan token pembayaran." });
-        }
-        return;
-      } finally {
-        if (connection && !connectionReleased) {
-          connectionReleased = true;
-          try {
-            connection.release();
-          } catch (relErr) {
-            console.warn("[Payment Token] Connection release warning:", relErr);
-          }
-        }
-      }
-      const attemptOrderId = `${resolvedRentalId}-${Date.now()}`;
-      const parameter = {
-        transaction_details: {
-          order_id: attemptOrderId,
-          gross_amount: totalAmount
-        },
-        customer_details: {
-          first_name: tenantName,
-          email: tenantEmail,
-          phone: tenantPhone
-        },
-        item_details: [
-          {
-            id: propertyId,
-            price: monthlyRent,
-            quantity: resolvedDuration,
-            name: propertyName.substring(0, 50)
-          },
-          {
-            id: "ADMIN_FEE",
-            price: adminFee,
-            quantity: 1,
-            name: "Biaya Administrasi & Meterai"
-          }
-        ],
-        custom_field1: resolvedRentalId
-      };
-      const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
-      const hasMidtransConfig = isMidtransConfigured();
-      if (!hasMidtransConfig && isProduction) {
-        return res.status(500).json({
-          message: "Konfigurasi payment gateway Midtrans (MIDTRANS_SERVER_KEY / MIDTRANS_CLIENT_KEY) belum diatur di server produksi."
-        });
-      }
-      let transactionToken = `snap-token-${resolvedRentalId}`;
-      let redirectUrl = getSnapRedirectUrl(resolvedRentalId);
-      if (hasMidtransConfig) {
-        try {
-          configureSnapClient();
-          const transaction = await snap.createTransaction(parameter);
-          transactionToken = transaction.token;
-          redirectUrl = transaction.redirect_url;
-        } catch (snapErr) {
-          console.error("Midtrans createTransaction error:", snapErr);
-          const errMsg = snapErr instanceof Error ? snapErr.message : String(snapErr);
-          return res.status(502).json({
-            message: `Gagal membuat transaksi di Midtrans: ${errMsg}`
-          });
-        }
-      }
-      return res.json({
-        message: "Token pembayaran berhasil dibuat.",
-        token: transactionToken,
-        redirect_url: redirectUrl,
-        rentalId: resolvedRentalId,
-        orderId: attemptOrderId
+      const { propertyId, durationMonths, roomId, tenantId, customRentalId, rentalId, startDate } = req.body;
+      const result = await createPaymentToken({
+        authUser: req.user,
+        propertyId,
+        durationMonths,
+        roomId,
+        tenantId,
+        customRentalId,
+        rentalId,
+        startDate
       });
+      return res.status(result.statusCode).json(result.body);
     }
   );
   router2.post("/payment/webhook", validateBody(paymentNotificationSchema), handlePaymentNotification);
@@ -4423,7 +5071,9 @@ function registerPaymentRoutes(router2) {
       typeof rentalId === "string" && rentalId.trim() !== "" ? rentalId.trim() : rawIdentifier
     );
     try {
-      const [rows] = await pool.query("SELECT * FROM rentals WHERE id = ?", [resolvedRentalId]);
+      const [rows] = await pool.query("SELECT * FROM rentals WHERE id = ?", [
+        resolvedRentalId
+      ]);
       const rental = rows[0];
       if (!rental) {
         return res.status(404).json({ success: false, message: "Data sewa tidak ditemukan." });
@@ -4655,6 +5305,13 @@ var RentalService = class {
       );
     }
     const rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
+    const isProdBookingGuard = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test" && authUser.role !== "admin";
+    if (isProdBookingGuard && !isMidtransConfigured()) {
+      throw new RentalServiceError(
+        500,
+        "Konfigurasi payment gateway Midtrans belum diatur di server produksi."
+      );
+    }
     if (process.env.MIDTRANS_SERVER_KEY && !process.env.MIDTRANS_SERVER_KEY.includes("placeholder") && !process.env.MIDTRANS_SERVER_KEY.includes("your-server-key")) {
       try {
         const snapApi = snap;
@@ -4670,6 +5327,19 @@ var RentalService = class {
         }
       } catch (midtransErr) {
         if (midtransErr instanceof RentalServiceError) throw midtransErr;
+        if (isProdBookingGuard) {
+          const errMsg = midtransErr instanceof Error ? midtransErr.message : String(midtransErr);
+          if (errMsg.includes("404")) {
+            throw new RentalServiceError(
+              402,
+              "Pembayaran belum ditemukan atau belum diselesaikan pada Midtrans."
+            );
+          }
+          throw new RentalServiceError(
+            502,
+            "Gagal memverifikasi status transaksi pada payment gateway Midtrans."
+          );
+        }
         console.warn("Midtrans status check warning:", midtransErr);
       }
     }
@@ -4677,43 +5347,39 @@ var RentalService = class {
     try {
       await connection.query("SET SESSION innodb_lock_wait_timeout = 5;");
       await connection.beginTransaction();
-      const tenant = await this.repo.findUserById(tenantId, connection, true);
-      if (!tenant) {
-        await connection.rollback();
-        throw new RentalServiceError(404, "Pengguna tidak ditemukan.");
-      }
       const property = await this.repo.findPropertyById(propertyId, connection, true);
       if (!property) {
         await connection.rollback();
         throw new RentalServiceError(404, "Properti tidak ditemukan.");
       }
-      const existingRental = await this.repo.findExistingRentalForUpdate(rentalId, connection);
-      if (existingRental && existingRental.status === "active") {
-        await connection.commit();
-        return {
-          message: "Penyewaan kos sudah aktif!",
-          rentalId,
-          document: existingRental.document || "sertifikat_kepemilikan.pdf"
-        };
-      }
       if (property.occupiedRooms >= property.totalRooms) {
         await connection.rollback();
         throw new RentalServiceError(400, "Kamar kos sudah penuh.");
       }
+      const [existingPre] = await connection.query(
+        "SELECT roomId FROM rentals WHERE id = ?",
+        [rentalId]
+      );
+      const targetRoomId = roomId || existingPre[0]?.roomId;
       let assignedRoom;
-      const targetRoomId = roomId || existingRental?.roomId;
       if (targetRoomId) {
         assignedRoom = await this.repo.findRoomById(targetRoomId, propertyId, connection, true);
         if (!assignedRoom) {
           await connection.rollback();
           throw new RentalServiceError(404, "Kamar tidak ditemukan pada properti ini.");
         }
-        if (assignedRoom.status !== "available") {
+        const heldByOther = Boolean(assignedRoom.reserved_by_rental_id) && assignedRoom.reserved_by_rental_id !== rentalId && Number(assignedRoom.holdRemainingSeconds || 0) > 0;
+        if (assignedRoom.status !== "available" || heldByOther) {
           await connection.rollback();
           throw new RentalServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
         }
       } else {
-        const availableRoom = await this.repo.findAvailableRoom(propertyId, connection, true);
+        const availableRoom = await this.repo.findAvailableRoom(
+          propertyId,
+          connection,
+          true,
+          rentalId
+        );
         if (availableRoom) {
           assignedRoom = availableRoom;
         } else {
@@ -4723,6 +5389,20 @@ var RentalService = class {
             throw new RentalServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
           }
         }
+      }
+      const tenant = await this.repo.findUserById(tenantId, connection, true);
+      if (!tenant) {
+        await connection.rollback();
+        throw new RentalServiceError(404, "Pengguna tidak ditemukan.");
+      }
+      const existingRental = await this.repo.findExistingRentalForUpdate(rentalId, connection);
+      if (existingRental && existingRental.status === "active") {
+        await connection.commit();
+        return {
+          message: "Penyewaan kos sudah aktif!",
+          rentalId,
+          document: existingRental.document || "sertifikat_kepemilikan.pdf"
+        };
       }
       const activeRentals = await this.repo.findActiveRentalsByTenantId(tenantId, connection, true);
       const isCurrentRentalActive = activeRentals.some((r) => r.id === rentalId);
@@ -4746,7 +5426,7 @@ var RentalService = class {
         );
       }
       const duration = Number(durationMonths) || 1;
-      const effectivePrice = assignedRoom && typeof assignedRoom.price === "number" && assignedRoom.price > 0 ? Number(assignedRoom.price) : Number(price || property.price || 0);
+      const effectivePrice = assignedRoom && assignedRoom.price !== null && assignedRoom.price !== void 0 && Number(assignedRoom.price) > 0 ? Number(assignedRoom.price) : Number(property.price || 0);
       const addedRevenue = effectivePrice * duration;
       const startDateStr = input.startDate && typeof input.startDate === "string" && input.startDate.trim() !== "" ? input.startDate.trim() : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
       const resolvedPropertyName = propertyName || property.name || "Kos KOSMO";
@@ -4915,10 +5595,12 @@ var RentalService = class {
           "Hanya pesanan sewa yang menunggu pembayaran (pending) yang dapat dibatalkan."
         );
       }
+      await this.repo.clearRoomHoldByRentalId(resolvedRentalId, connection);
       await this.repo.updateRentalStatus(resolvedRentalId, "cancelled", connection);
       await connection.commit();
       apiCache.invalidatePattern("properties");
       apiCache.invalidatePattern("rentals");
+      apiCache.invalidatePattern("rooms");
       apiCache.invalidatePattern("landlord:");
       apiCache.invalidatePattern("admin:");
       return {
@@ -5039,8 +5721,23 @@ var RentalService = class {
           name: "Biaya Administrasi & Layanan"
         }
       ],
-      custom_field1: resolvedRentalId
+      custom_field1: resolvedRentalId,
+      expiry: {
+        unit: "minutes",
+        duration: 15
+      }
     };
+    try {
+      await paymentRepository.upsertPendingTransaction({
+        orderId: attemptOrderId,
+        rentalId: resolvedRentalId,
+        txType: "renewal",
+        grossAmount: totalGrossAmount,
+        months: durationMonths
+      });
+    } catch (txErr) {
+      console.warn("[Renewal Token] Could not persist payment_transactions ledger entry:", txErr);
+    }
     const isProduction = (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== "test";
     const hasMidtransConfig = isMidtransConfigured();
     if (!hasMidtransConfig && isProduction) {
@@ -5181,7 +5878,7 @@ function registerLandlordRoutes(router2) {
         ),
         pool.query(
           `SELECT 
-             COALESCE(DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m'), DATE_FORMAT(r.contract_signed_at, '%Y-%m')) as month,
+             COALESCE(DATE_FORMAT(r.start_date_iso, '%Y-%m'), DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m'), DATE_FORMAT(r.contract_signed_at, '%Y-%m')) as month,
              COALESCE(SUM(r.price * COALESCE(r.duration_months, 1)), 0) as revenue,
              COUNT(r.id) as transactions
            FROM rentals r
@@ -5400,6 +6097,21 @@ function registerLandlordRoutes(router2) {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      const [earlyRows] = await connection.query(
+        "SELECT id, userId FROM withdrawals WHERE id = ?",
+        [id]
+      );
+      const earlyWithdrawal = earlyRows[0];
+      if (!earlyWithdrawal) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+      }
+      if (earlyWithdrawal.userId) {
+        await connection.query(
+          "SELECT id, balance, totalWithdrawn FROM users WHERE id = ? FOR UPDATE",
+          [earlyWithdrawal.userId]
+        );
+      }
       const [rows] = await connection.query("SELECT * FROM withdrawals WHERE id = ? FOR UPDATE", [id]);
       const withdrawal = rows[0];
       if (!withdrawal) {
@@ -5459,6 +6171,15 @@ function registerLandlordRoutes(router2) {
       const connection = await pool.getConnection();
       try {
         await connection.beginTransaction();
+        const [earlyRows] = await connection.query(
+          "SELECT id, userId FROM withdrawals WHERE id = ?",
+          [id]
+        );
+        const earlyWithdrawal = earlyRows[0];
+        if (!earlyWithdrawal) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+        }
         const [adminRows] = await connection.query(
           "SELECT password FROM users WHERE id = ?",
           [authUser?.id]
@@ -5468,6 +6189,12 @@ function registerLandlordRoutes(router2) {
         if (!admin || !admin.password || !isMatch) {
           await connection.rollback();
           return res.status(401).json({ message: "Password administrator salah." });
+        }
+        if (earlyWithdrawal.userId) {
+          await connection.query(
+            "SELECT id, balance, totalWithdrawn FROM users WHERE id = ? FOR UPDATE",
+            [earlyWithdrawal.userId]
+          );
         }
         const [rows] = await connection.query(
           "SELECT * FROM withdrawals WHERE id = ? FOR UPDATE",
@@ -5722,14 +6449,32 @@ var ContractsRepository = class {
     return rows[0];
   }
   async findRoomById(roomId, propertyId, conn = this.defaultPool, forUpdate = false) {
-    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ?${forUpdate ? " FOR UPDATE" : ""}`;
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id,
+      GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+      FROM rooms WHERE id = ? AND propertyId = ?${forUpdate ? " FOR UPDATE" : ""}`;
     const [rows] = await conn.query(sql, [roomId, propertyId]);
     return rows[0];
   }
-  async findAvailableRoom(propertyId, conn, forUpdate = true) {
-    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1${forUpdate ? " FOR UPDATE" : ""}`;
-    const [rows] = await conn.query(sql, [propertyId]);
+  async findAvailableRoom(propertyId, conn, forUpdate = true, rentalId) {
+    const holdFilter = rentalId ? "(reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL OR reserved_by_rental_id = ?)" : "(reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL)";
+    const params = rentalId ? [propertyId, rentalId] : [propertyId];
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id,
+      GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+      FROM rooms WHERE propertyId = ? AND status = 'available' AND ${holdFilter} ORDER BY roomNumber ASC, id ASC LIMIT 1${forUpdate ? " FOR UPDATE" : ""}`;
+    const [rows] = await conn.query(sql, params);
     return rows[0];
+  }
+  async reserveRoomHold(roomId, rentalId, conn) {
+    await conn.query(
+      "UPDATE rooms SET reserved_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE), reserved_by_rental_id = ? WHERE id = ?",
+      [rentalId, roomId]
+    );
+  }
+  async releaseRoomHold(rentalId, conn = this.defaultPool) {
+    await conn.query(
+      "UPDATE rooms SET reserved_until = NULL, reserved_by_rental_id = NULL WHERE reserved_by_rental_id = ?",
+      [rentalId]
+    );
   }
   async countRoomsByPropertyId(propertyId, conn = this.defaultPool) {
     const [rows] = await conn.query(
@@ -5981,6 +6726,44 @@ var ContractService = class {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
+      const property = await this.repo.findPropertyById(propertyId, connection, true);
+      if (!property) {
+        await connection.rollback();
+        throw new ContractServiceError(404, "Properti tidak ditemukan.");
+      }
+      if (property.occupiedRooms >= property.totalRooms) {
+        await connection.rollback();
+        throw new ContractServiceError(400, "Kamar kos sudah penuh.");
+      }
+      if (roomId && typeof roomId === "string" && roomId.trim() !== "") {
+        selectedRoom = await this.repo.findRoomById(roomId.trim(), propertyId, connection, true);
+        if (!selectedRoom) {
+          await connection.rollback();
+          throw new ContractServiceError(404, "Kamar tidak ditemukan pada properti ini.");
+        }
+        const heldByOther = Boolean(selectedRoom.reserved_by_rental_id) && selectedRoom.reserved_by_rental_id !== rentalId && Number(selectedRoom.holdRemainingSeconds || 0) > 0;
+        if (selectedRoom.status !== "available" || heldByOther) {
+          await connection.rollback();
+          throw new ContractServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
+        }
+      } else {
+        const availableRoom = await this.repo.findAvailableRoom(
+          propertyId,
+          connection,
+          true,
+          rentalId
+        );
+        if (availableRoom) {
+          selectedRoom = availableRoom;
+        } else {
+          const discreteCount = await this.repo.countRoomsByPropertyId(propertyId, connection);
+          if (discreteCount > 0) {
+            await connection.rollback();
+            throw new ContractServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
+          }
+        }
+      }
       const tenant = await this.repo.findUserById(authUser.id, connection, true);
       if (!tenant) {
         await connection.rollback();
@@ -6006,44 +6789,13 @@ var ContractService = class {
           "Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru."
         );
       }
-      const property = await this.repo.findPropertyById(propertyId, connection, true);
-      if (!property) {
-        await connection.rollback();
-        throw new ContractServiceError(404, "Properti tidak ditemukan.");
-      }
-      if (property.occupiedRooms >= property.totalRooms) {
-        await connection.rollback();
-        throw new ContractServiceError(400, "Kamar kos sudah penuh.");
-      }
-      if (roomId && typeof roomId === "string" && roomId.trim() !== "") {
-        selectedRoom = await this.repo.findRoomById(roomId.trim(), propertyId, connection, true);
-        if (!selectedRoom) {
-          await connection.rollback();
-          throw new ContractServiceError(404, "Kamar tidak ditemukan pada properti ini.");
-        }
-        if (selectedRoom.status !== "available") {
-          await connection.rollback();
-          throw new ContractServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
-        }
-      } else {
-        const availableRoom = await this.repo.findAvailableRoom(propertyId, connection, true);
-        if (availableRoom) {
-          selectedRoom = availableRoom;
-        } else {
-          const discreteCount = await this.repo.countRoomsByPropertyId(propertyId, connection);
-          if (discreteCount > 0) {
-            await connection.rollback();
-            throw new ContractServiceError(409, "Kamar yang Anda pilih sudah tidak tersedia.");
-          }
-        }
-      }
       const landlord = property.ownerId ? await this.repo.findUserById(property.ownerId, connection) : void 0;
       signedAtDate = /* @__PURE__ */ new Date();
       signedAtIso = signedAtDate.toISOString();
       rentalPrice = selectedRoom && typeof selectedRoom.price === "number" && selectedRoom.price > 0 ? Number(selectedRoom.price) : Number(property.price) || 0;
       totalAmount = rentalPrice * duration + adminFee;
       const startDateStr = startDate || signedAtIso.split("T")[0];
-      rentalId = customRentalId && typeof customRentalId === "string" && customRentalId.trim() !== "" ? customRentalId.trim() : generateId("rent");
+      const startDateIso = /^\d{4}-\d{2}-\d{2}$/.test(startDateStr.trim()) ? startDateStr.trim() : null;
       contractData = {
         rentalId,
         roomId: selectedRoom ? selectedRoom.id : void 0,
@@ -6089,6 +6841,7 @@ var ContractService = class {
           propertyName,
           price,
           startDate,
+          start_date_iso,
           status,
           signer_ip,
           signer_user_agent,
@@ -6096,7 +6849,7 @@ var ContractService = class {
           tenant_signature_data,
           admin_fee_amount,
           duration_months
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
         [
           rentalId,
           authUser.id,
@@ -6105,6 +6858,7 @@ var ContractService = class {
           property.name,
           rentalPrice,
           startDateStr,
+          startDateIso,
           signerIp,
           signerUserAgent,
           tenantNikPassport || tenant.identity_number || "-",
@@ -6113,6 +6867,9 @@ var ContractService = class {
           duration
         ]
       );
+      if (selectedRoom) {
+        await this.repo.reserveRoomHold(selectedRoom.id, rentalId, connection);
+      }
       await connection.commit();
     } catch (err) {
       await connection.rollback();
@@ -6128,6 +6885,7 @@ var ContractService = class {
       contractHash = uploadResult.contractHash;
     } catch (phaseBErr) {
       try {
+        await this.repo.releaseRoomHold(rentalId);
         await pool.query("DELETE FROM rentals WHERE id = ? AND status = 'pending'", [rentalId]);
       } catch (cleanupErr) {
         console.error(`[ContractService] Failed to clean up pending rental ${rentalId} after Phase B failure:`, cleanupErr);
@@ -6146,6 +6904,7 @@ var ContractService = class {
       );
     } catch (phaseCErr) {
       try {
+        await this.repo.releaseRoomHold(rentalId);
         await pool.query("DELETE FROM rentals WHERE id = ? AND status = 'pending'", [rentalId]);
       } catch (cleanupErr) {
         console.error(`[ContractService] Failed to clean up pending rental ${rentalId} after Phase C failure:`, cleanupErr);
@@ -6388,7 +7147,7 @@ function registerRoomRoutes(router2) {
       }
       const basePropertyPrice = Number(propRows[0].price || 0);
       let sql = `
-        SELECT id, propertyId, roomNumber, floor, type, price, status, createdAt, updatedAt
+        SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id, createdAt, updatedAt
         FROM rooms
         WHERE propertyId = ?
       `;
@@ -6396,6 +7155,9 @@ function registerRoomRoutes(router2) {
       if (statusQuery !== "all") {
         sql += " AND status = ?";
         params.push(statusQuery);
+        if (statusQuery === "available") {
+          sql += " AND (reserved_until IS NULL OR reserved_until <= NOW())";
+        }
       }
       sql += " ORDER BY floor ASC, CAST(roomNumber AS UNSIGNED) ASC, roomNumber ASC";
       const [[roomRows], [photoRows]] = await Promise.all([
@@ -7914,6 +8676,58 @@ function setupProcessSafety(force = false) {
   return true;
 }
 
+// backend/config/env.ts
+import { z as z2 } from "zod";
+var serverEnvSchema = z2.object({
+  NODE_ENV: z2.string().optional().default("development"),
+  PORT: z2.string().regex(/^\d+$/, "PORT must be numeric").optional().default("5000"),
+  DB_HOST: z2.string().optional().default("localhost"),
+  DB_PORT: z2.string().regex(/^\d+$/, "DB_PORT must be numeric").optional(),
+  DB_USER: z2.string().optional().default("root"),
+  DB_NAME: z2.string().optional().default("kosmo_db"),
+  JWT_SECRET: z2.string().optional(),
+  MIDTRANS_SERVER_KEY: z2.string().optional(),
+  MIDTRANS_CLIENT_KEY: z2.string().optional(),
+  MIDTRANS_IS_PRODUCTION: z2.string().optional()
+});
+function validateServerEnv(env = process.env, options) {
+  const warnings = [];
+  const errors = [];
+  const parsed = serverEnvSchema.safeParse(env);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      errors.push(`${issue.path.join(".")}: ${issue.message}`);
+    }
+  }
+  const isProduction = (env.NODE_ENV === "production" || Boolean(env.VERCEL)) && env.NODE_ENV !== "test";
+  if (isProduction) {
+    const jwtSecret = (env.JWT_SECRET || "").trim();
+    if (!jwtSecret || jwtSecret.length < 16) {
+      errors.push("JWT_SECRET must be set (>= 16 characters) in production.");
+    }
+    const dbHost = (env.DB_HOST || "").trim();
+    if (!dbHost || dbHost === "localhost" || dbHost === "127.0.0.1") {
+      warnings.push("DB_HOST points to localhost in production mode.");
+    }
+  }
+  if (env.MIDTRANS_IS_PRODUCTION === "true" && (env.MIDTRANS_SERVER_KEY || "").startsWith("SB-Mid-")) {
+    warnings.push("MIDTRANS_IS_PRODUCTION=true while using sandbox SB-Mid- server key.");
+  }
+  if (options?.throwOnError && errors.length > 0) {
+    throw new Error(`[Env Validation] ${errors.join(" | ")}`);
+  }
+  if (warnings.length > 0) {
+    for (const w of warnings) {
+      console.warn(`[Env Warning] ${w}`);
+    }
+  }
+  return {
+    valid: errors.length === 0,
+    warnings,
+    errors
+  };
+}
+
 // backend/server.ts
 import path4 from "path";
 import fs2 from "fs";
@@ -7962,7 +8776,8 @@ function isOriginAllowed(origin) {
   try {
     const parsed = new URL(origin);
     const hostname = parsed.hostname.toLowerCase();
-    if (hostname === "kosmobali.my.id" || hostname.endsWith(".kosmobali.my.id") || hostname === "juragankost.net" || hostname.endsWith(".juragankost.net") || hostname.endsWith(".vercel.app")) {
+    const isProjectVercelDomain = /^kosmo(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname) || /^juragankost(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname);
+    if (hostname === "kosmobali.my.id" || hostname.endsWith(".kosmobali.my.id") || hostname === "juragankost.net" || hostname.endsWith(".juragankost.net") || isProjectVercelDomain) {
       return true;
     }
   } catch {
@@ -7980,7 +8795,7 @@ var corsOptions = {
   },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "X-Request-Id"],
-  exposedHeaders: ["Content-Disposition", "X-Request-Id", "X-Contract-Hash"],
+  exposedHeaders: ["Content-Disposition", "X-Request-Id", "X-Contract-Hash", "X-Total-Count"],
   credentials: true,
   maxAge: 86400
 };
@@ -7993,7 +8808,6 @@ app.use(
         scriptSrc: [
           "'self'",
           "'unsafe-inline'",
-          "'unsafe-eval'",
           "https://app.midtrans.com",
           "https://app.sandbox.midtrans.com",
           "https://api.midtrans.com"
@@ -8048,7 +8862,29 @@ app.use(
 app.use(cors(corsOptions));
 app.use(express2.json({ limit: "1mb" }));
 app.use(express2.urlencoded({ extended: true, limit: "1mb" }));
-app.use(morgan("dev"));
+if (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) {
+  app.use((req, res, next) => {
+    const startNs = process.hrtime.bigint();
+    res.on("finish", () => {
+      const latencyMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+      console.log(
+        JSON.stringify({
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          level: res.statusCode >= 500 ? "error" : "info",
+          requestId: req.requestId || req.id || null,
+          method: req.method,
+          path: req.originalUrl || req.url,
+          status: res.statusCode,
+          latencyMs: Number(latencyMs.toFixed(2)),
+          contentLength: res.getHeader("content-length") || null
+        })
+      );
+    });
+    next();
+  });
+} else {
+  app.use(morgan("dev"));
+}
 app.use("/uploads", express2.static(uploadsDir));
 async function dbReadinessMiddleware(req, res, next, dbReadyFn = ensureDbReady) {
   if (req.path.startsWith("/api") && req.path !== "/api/health") {
@@ -8070,6 +8906,7 @@ app.use("/api", notFoundHandler);
 app.use(errorHandler);
 var isDirectRun = Boolean(process.argv[1] && /server(\.ts|\.js)?$/i.test(process.argv[1]));
 if (!process.env.VERCEL && process.env.NO_LISTEN !== "true" && (isDirectRun || process.env.NODE_ENV !== "test")) {
+  validateServerEnv();
   assertMidtransProductionConfig();
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);

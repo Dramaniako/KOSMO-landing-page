@@ -196,7 +196,60 @@ export class ContractService {
     try {
       await connection.beginTransaction();
 
-      // Guard 1: Tenant row lock & single active tenancy check
+      // =========================================================================
+      // Canonical Lock Order: properties -> rooms -> users -> rentals
+      // =========================================================================
+      rentalId =
+        customRentalId && typeof customRentalId === 'string' && customRentalId.trim() !== ''
+          ? customRentalId.trim()
+          : generateId('rent');
+
+      // 1. Property availability row lock
+      const property = await this.repo.findPropertyById(propertyId, connection, true);
+      if (!property) {
+        await connection.rollback();
+        throw new ContractServiceError(404, 'Properti tidak ditemukan.');
+      }
+
+      if (property.occupiedRooms >= property.totalRooms) {
+        await connection.rollback();
+        throw new ContractServiceError(400, 'Kamar kos sudah penuh.');
+      }
+
+      // 2. Discrete room selection & row lock
+      if (roomId && typeof roomId === 'string' && roomId.trim() !== '') {
+        selectedRoom = await this.repo.findRoomById(roomId.trim(), propertyId, connection, true);
+        if (!selectedRoom) {
+          await connection.rollback();
+          throw new ContractServiceError(404, 'Kamar tidak ditemukan pada properti ini.');
+        }
+        const heldByOther =
+          Boolean(selectedRoom.reserved_by_rental_id) &&
+          selectedRoom.reserved_by_rental_id !== rentalId &&
+          Number(selectedRoom.holdRemainingSeconds || 0) > 0;
+        if (selectedRoom.status !== 'available' || heldByOther) {
+          await connection.rollback();
+          throw new ContractServiceError(409, 'Kamar yang Anda pilih sudah tidak tersedia.');
+        }
+      } else {
+        const availableRoom = await this.repo.findAvailableRoom(
+          propertyId,
+          connection,
+          true,
+          rentalId
+        );
+        if (availableRoom) {
+          selectedRoom = availableRoom;
+        } else {
+          const discreteCount = await this.repo.countRoomsByPropertyId(propertyId, connection);
+          if (discreteCount > 0) {
+            await connection.rollback();
+            throw new ContractServiceError(409, 'Kamar yang Anda pilih sudah tidak tersedia.');
+          }
+        }
+      }
+
+      // 3. Tenant row lock & KYC check
       const tenant = await this.repo.findUserById(authUser.id, connection, true);
       if (!tenant) {
         await connection.rollback();
@@ -216,6 +269,7 @@ export class ContractService {
         );
       }
 
+      // 4. Rentals active tenancy check & pending reservation insert
       const activeRentals = await this.repo.findActiveRentalsByTenantId(authUser.id, connection, true);
       if (activeRentals.length > 0) {
         await connection.rollback();
@@ -223,42 +277,6 @@ export class ContractService {
           409,
           'Single Active Tenancy Violation: Anda masih memiliki sewa kos yang aktif. Selesaikan atau batalkan sewa berjalan sebelum memesan hunian baru.'
         );
-      }
-
-      // Guard 2: Property availability row lock
-      const property = await this.repo.findPropertyById(propertyId, connection, true);
-      if (!property) {
-        await connection.rollback();
-        throw new ContractServiceError(404, 'Properti tidak ditemukan.');
-      }
-
-      if (property.occupiedRooms >= property.totalRooms) {
-        await connection.rollback();
-        throw new ContractServiceError(400, 'Kamar kos sudah penuh.');
-      }
-
-      // Guard 3: Discrete room selection & row lock
-      if (roomId && typeof roomId === 'string' && roomId.trim() !== '') {
-        selectedRoom = await this.repo.findRoomById(roomId.trim(), propertyId, connection, true);
-        if (!selectedRoom) {
-          await connection.rollback();
-          throw new ContractServiceError(404, 'Kamar tidak ditemukan pada properti ini.');
-        }
-        if (selectedRoom.status !== 'available') {
-          await connection.rollback();
-          throw new ContractServiceError(409, 'Kamar yang Anda pilih sudah tidak tersedia.');
-        }
-      } else {
-        const availableRoom = await this.repo.findAvailableRoom(propertyId, connection, true);
-        if (availableRoom) {
-          selectedRoom = availableRoom;
-        } else {
-          const discreteCount = await this.repo.countRoomsByPropertyId(propertyId, connection);
-          if (discreteCount > 0) {
-            await connection.rollback();
-            throw new ContractServiceError(409, 'Kamar yang Anda pilih sudah tidak tersedia.');
-          }
-        }
       }
 
       const landlord = property.ownerId
@@ -273,10 +291,9 @@ export class ContractService {
           : Number(property.price) || 0;
       totalAmount = rentalPrice * duration + adminFee;
       const startDateStr = startDate || signedAtIso.split('T')[0];
-      rentalId =
-        customRentalId && typeof customRentalId === 'string' && customRentalId.trim() !== ''
-          ? customRentalId.trim()
-          : generateId('rent');
+      const startDateIso = /^\d{4}-\d{2}-\d{2}$/.test(startDateStr.trim())
+        ? startDateStr.trim()
+        : null;
 
       contractData = {
         rentalId,
@@ -325,6 +342,7 @@ export class ContractService {
           propertyName,
           price,
           startDate,
+          start_date_iso,
           status,
           signer_ip,
           signer_user_agent,
@@ -332,7 +350,7 @@ export class ContractService {
           tenant_signature_data,
           admin_fee_amount,
           duration_months
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
         [
           rentalId,
           authUser.id,
@@ -341,6 +359,7 @@ export class ContractService {
           property.name,
           rentalPrice,
           startDateStr,
+          startDateIso,
           signerIp,
           signerUserAgent,
           tenantNikPassport || tenant.identity_number || '-',
@@ -349,6 +368,10 @@ export class ContractService {
           duration
         ]
       );
+
+      if (selectedRoom) {
+        await this.repo.reserveRoomHold(selectedRoom.id, rentalId, connection);
+      }
 
       // Commit Phase A: releases all row locks (users, properties, rooms, rentals)
       await connection.commit();
@@ -372,8 +395,9 @@ export class ContractService {
         uploadResult.cloudinaryUrl || `/uploads/contract_${sanitizeRentalId(rentalId)}.pdf`;
       contractHash = uploadResult.contractHash;
     } catch (phaseBErr) {
-      // Compensating action: clean up pending rental if PDF generation crashes fatally
+      // Compensating action: release room hold & clean up pending rental if PDF generation crashes fatally
       try {
+        await this.repo.releaseRoomHold(rentalId);
         await pool.query("DELETE FROM rentals WHERE id = ? AND status = 'pending'", [rentalId]);
       } catch (cleanupErr) {
         console.error(`[ContractService] Failed to clean up pending rental ${rentalId} after Phase B failure:`, cleanupErr);
@@ -396,6 +420,7 @@ export class ContractService {
       );
     } catch (phaseCErr) {
       try {
+        await this.repo.releaseRoomHold(rentalId);
         await pool.query("DELETE FROM rentals WHERE id = ? AND status = 'pending'", [rentalId]);
       } catch (cleanupErr) {
         console.error(`[ContractService] Failed to clean up pending rental ${rentalId} after Phase C failure:`, cleanupErr);

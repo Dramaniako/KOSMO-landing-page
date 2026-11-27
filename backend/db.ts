@@ -5,6 +5,15 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 
+/**
+ * Strips whitespace and matching surrounding single/double quotes from .env values.
+ */
+export function parseEnvValue(raw: string): string {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^(['"])(.*)\1$/);
+  return match ? match[2] : trimmed;
+}
+
 // Load .env locally if it exists
 try {
   const possibleEnvPaths = [
@@ -17,9 +26,12 @@ try {
       envContent.split(/\r?\n/).forEach((line: string) => {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) return;
-        const [key, ...valParts] = trimmed.split('=');
-        if (key && valParts.length > 0 && !process.env[key.trim()]) {
-          process.env[key.trim()] = valParts.join('=').trim();
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx <= 0) return;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const rawVal = trimmed.slice(eqIdx + 1);
+        if (key && !process.env[key]) {
+          process.env[key] = parseEnvValue(rawVal);
         }
       });
     }
@@ -128,24 +140,32 @@ export async function ensureDbReady(): Promise<void> {
 
 export const ensureDbInitialized = ensureDbReady;
 
+export const SCHEMA_MIGRATION_VERSION = 2;
+
 export async function ensureIndexes(executor: QueryExecutor = pool): Promise<void> {
   if (process.env.VERCEL) return;
   const indexStatements = [
     "ALTER TABLE properties ADD INDEX idx_properties_district_price (district, price)",
     "ALTER TABLE properties ADD INDEX idx_properties_owner (ownerId)",
     "ALTER TABLE properties ADD INDEX idx_properties_featured (is_featured)",
+    "ALTER TABLE properties ADD INDEX idx_properties_featured_until_id (is_featured, featured_until, id)",
+    "ALTER TABLE properties ADD INDEX idx_properties_district_badges_price (district, verified_water_tank, verified_wifi_speedtest, price)",
     // ⚡ Bolt Performance Optimization:
     // Added index on property_facilities.propertyId to optimize the GROUP_CONCAT join query in GET /api/properties.
     // Why: property_facilities is frequently joined by propertyId, causing slow full table scans as the table grows.
     // Impact: Significantly reduces query execution time (O(n) -> O(log n)) when filtering or fetching properties with facilities.
     "ALTER TABLE property_facilities ADD INDEX idx_property_facilities_property (propertyId)",
+    "ALTER TABLE property_facilities ADD INDEX idx_pf_facility_property (facility, propertyId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_tenant_status (tenantId, status)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_property_status (propertyId, status)",
+    "ALTER TABLE rentals ADD INDEX idx_rentals_prop_status_start (propertyId, status, start_date_iso)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_room (roomId)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_contract_hash (contract_hash)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_signed_at (contract_signed_at)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_terminated_at (terminated_at)",
     "ALTER TABLE rooms ADD INDEX idx_rooms_property_status (propertyId, status)",
+    "ALTER TABLE rooms ADD INDEX idx_rooms_prop_status_reserved (propertyId, status, reserved_until)",
+    "ALTER TABLE rooms ADD INDEX idx_rooms_prop_floor (propertyId, floor)",
     "ALTER TABLE rooms ADD INDEX idx_rooms_status (status)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_property (propertyId, orderIndex)",
     "ALTER TABLE property_photos ADD INDEX idx_photos_room (roomId, orderIndex)",
@@ -156,14 +176,19 @@ export async function ensureIndexes(executor: QueryExecutor = pool): Promise<voi
     "ALTER TABLE visitor_tracking ADD INDEX idx_visitor_tracking_ip_time (ip_address, visited_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_date (userId, date)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_status (userId, status)",
+    "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_user_created (userId, created_at)",
     "ALTER TABLE withdrawals ADD INDEX idx_withdrawals_status (status)",
     "ALTER TABLE users ADD INDEX idx_users_role (role)",
     "ALTER TABLE rentals ADD INDEX idx_rentals_status (status)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_property (propertyId)",
     "ALTER TABLE reviews ADD INDEX idx_reviews_user (userId)",
+    "ALTER TABLE reviews ADD INDEX idx_reviews_prop_user (propertyId, userId)",
     "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_tenant (tenantId)",
     "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_property (propertyId)",
-    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_status (status)"
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_status (status)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_prop_status_created (propertyId, status, createdAt)",
+    "ALTER TABLE maintenance_tickets ADD INDEX idx_tickets_tenant_status_created (tenantId, status, createdAt)",
+    "ALTER TABLE payment_transactions ADD INDEX idx_payment_tx_rental_status (rental_id, status)"
   ];
 
   await Promise.allSettled(
@@ -208,6 +233,25 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         date_of_birth VARCHAR(30) DEFAULT '',
         gender VARCHAR(20) DEFAULT '',
         INDEX idx_users_role (role)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INT PRIMARY KEY,
+        applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `),
+    executor.query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        order_id VARCHAR(100) PRIMARY KEY,
+        rental_id VARCHAR(50) NOT NULL,
+        tx_type ENUM('initial', 'renewal') NOT NULL DEFAULT 'initial',
+        gross_amount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        months INT NOT NULL DEFAULT 1,
+        status ENUM('pending', 'settled', 'cancelled', 'refund_required') NOT NULL DEFAULT 'pending',
+        settled_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_payment_tx_rental_status (rental_id, status)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `),
     executor.query(`
@@ -263,8 +307,10 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         referenceId VARCHAR(100) DEFAULT '',
         rejectionReason TEXT,
         processedAt VARCHAR(50) DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_withdrawals_user_date (userId, date),
         INDEX idx_withdrawals_user_status (userId, status),
+        INDEX idx_withdrawals_user_created (userId, created_at),
         INDEX idx_withdrawals_status (status),
         FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -282,10 +328,14 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         type VARCHAR(50) NOT NULL DEFAULT 'Standard',
         price INT NULL,
         status ENUM('available', 'occupied', 'maintenance') NOT NULL DEFAULT 'available',
+        reserved_until DATETIME NULL,
+        reserved_by_rental_id VARCHAR(50) NULL,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_property_room_number (propertyId, roomNumber),
         INDEX idx_rooms_property_status (propertyId, status),
+        INDEX idx_rooms_prop_status_reserved (propertyId, status, reserved_until),
+        INDEX idx_rooms_prop_floor (propertyId, floor),
         INDEX idx_rooms_status (status),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -323,6 +373,7 @@ export async function createTables(executor: QueryExecutor = pool): Promise<void
         roomId VARCHAR(50),
         price INT NOT NULL,
         startDate VARCHAR(50) NOT NULL,
+        start_date_iso DATE NULL,
         status ENUM('pending','active','completed','terminated','cancelled') DEFAULT 'pending',
         document VARCHAR(255) DEFAULT 'kontrak_sewa.pdf',
         contract_url VARCHAR(500),
@@ -620,10 +671,14 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
         type VARCHAR(50) NOT NULL DEFAULT 'Standard',
         price INT NULL,
         status ENUM('available', 'occupied', 'maintenance') NOT NULL DEFAULT 'available',
+        reserved_until DATETIME NULL,
+        reserved_by_rental_id VARCHAR(50) NULL,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_property_room_number (propertyId, roomNumber),
         INDEX idx_rooms_property_status (propertyId, status),
+        INDEX idx_rooms_prop_status_reserved (propertyId, status, reserved_until),
+        INDEX idx_rooms_prop_floor (propertyId, floor),
         INDEX idx_rooms_status (status),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -647,6 +702,25 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
         INDEX idx_photos_prop_room (propertyId, roomId, orderIndex),
         FOREIGN KEY (propertyId) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INT PRIMARY KEY,
+        applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        order_id VARCHAR(100) PRIMARY KEY,
+        rental_id VARCHAR(50) NOT NULL,
+        tx_type ENUM('initial', 'renewal') NOT NULL DEFAULT 'initial',
+        gross_amount DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+        months INT NOT NULL DEFAULT 1,
+        status ENUM('pending', 'settled', 'cancelled', 'refund_required') NOT NULL DEFAULT 'pending',
+        settled_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_payment_tx_rental_status (rental_id, status)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
     await executor.query(`
@@ -706,7 +780,13 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS accountHolder VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referenceId VARCHAR(100) DEFAULT ''",
     "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS rejectionReason TEXT",
-    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''"
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processedAt VARCHAR(50) DEFAULT ''",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+  ];
+
+  const roomsQueries = [
+    "ALTER TABLE rooms ADD COLUMN IF NOT EXISTS reserved_until DATETIME NULL",
+    "ALTER TABLE rooms ADD COLUMN IF NOT EXISTS reserved_by_rental_id VARCHAR(50) NULL"
   ];
 
   const rentalsQueries = [
@@ -721,7 +801,9 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS admin_fee_amount DECIMAL(10,2) DEFAULT 5000.00",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS duration_months INT DEFAULT 1",
     "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS roomId VARCHAR(50)",
-    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS terminated_at DATETIME NULL"
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS terminated_at DATETIME NULL",
+    "ALTER TABLE rentals ADD COLUMN IF NOT EXISTS start_date_iso DATE NULL",
+    "UPDATE rentals SET start_date_iso = STR_TO_DATE(startDate, '%Y-%m-%d') WHERE start_date_iso IS NULL AND startDate REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'"
   ];
 
   const photosQueries = [
@@ -734,6 +816,7 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
     runTableQueries(usersQueries),
     runTableQueries(visitorTrackingQueries),
     runTableQueries(withdrawalsQueries),
+    runTableQueries(roomsQueries),
     runTableQueries(rentalsQueries),
     runTableQueries(photosQueries)
   ]);
@@ -743,6 +826,14 @@ export async function applyMigrations(executor: QueryExecutor = pool): Promise<v
     await backfillDiscreteRooms(executor);
   } catch (err) {
     console.warn('Initial backfillDiscreteRooms skipped or deferred:', err);
+  }
+  try {
+    await executor.query(
+      'INSERT INTO schema_migrations (version) VALUES (?) ON DUPLICATE KEY UPDATE applied_at = CURRENT_TIMESTAMP',
+      [SCHEMA_MIGRATION_VERSION]
+    );
+  } catch {
+    // Non-fatal if schema_migrations insert is mocked or restricted
   }
 }
 
@@ -903,15 +994,28 @@ export async function initDb(): Promise<void> {
         'rentals',
         'rooms',
         'property_photos',
-        'maintenance_tickets'
+        'maintenance_tickets',
+        'payment_transactions',
+        'schema_migrations'
       ];
       
       const missingTables = requiredTables.filter(t => !existingTables.includes(t));
       
       if (missingTables.length === 0) {
-        await applyMigrations(pool);
+        let currentVersion = 0;
+        try {
+          const [verRows] = await pool.query<RowDataPacket[]>(
+            'SELECT MAX(version) AS currentVersion FROM schema_migrations'
+          );
+          currentVersion = Number(verRows[0]?.currentVersion || 0);
+        } catch {
+          currentVersion = 0;
+        }
+        if (currentVersion < SCHEMA_MIGRATION_VERSION) {
+          await applyMigrations(pool);
+        }
         isInitialized = true;
-        console.log("MySQL Database Kosmo tables already initialized and migrations applied.");
+        console.log("MySQL Database Kosmo tables already initialized and migrations up to date.");
         return;
       }
       

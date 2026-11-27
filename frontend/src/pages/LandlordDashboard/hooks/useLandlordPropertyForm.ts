@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { User, Property, FacilityFilterState } from '../../../types/index';
 import { PropertyFormState } from '../types';
+import { uploadPropertyCoverImage } from '../../../utils/uploadImage';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -96,21 +97,19 @@ export function useLandlordPropertyForm(
     };
   }, [showPropModal, propertyForm.latitude, propertyForm.longitude]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>): void => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploadingImage(true);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setPropertyForm((prev) => ({ ...prev, image: reader.result as string }));
+    try {
+      const uploadedUrl = await uploadPropertyCoverImage(file, API_BASE);
+      setPropertyForm((prev) => ({ ...prev, image: uploadedUrl }));
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Gagal mengunggah gambar sampul.');
+    } finally {
       setUploadingImage(false);
-    };
-    reader.onerror = () => {
-      alert("Gagal membaca berkas gambar.");
-      setUploadingImage(false);
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   const resetPropertyForm = (): void => {

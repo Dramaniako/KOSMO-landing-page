@@ -33,12 +33,28 @@ interface AdminUpdateUserBody {
 }
 
 export function registerUserRoutes(router: Router): void {
-  // Admin Route: Get all users
-  const handleGetUsers = async (_req: Request, res: Response) => {
+  // Admin Route: Get all users (with limit/page/offset pagination & X-Total-Count)
+  const handleGetUsers = async (req: Request, res: Response) => {
     try {
-      const [rows] = await pool.query<UserRow[]>(
-        'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT 50'
-      );
+      const rawLimit = req.query.limit ? parseInt(String(req.query.limit), 10) : 50;
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 50;
+      const rawPage = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+      const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+      const rawOffset = req.query.offset
+        ? parseInt(String(req.query.offset), 10)
+        : (page - 1) * limit;
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+
+      const [[rows], [countRows]] = await Promise.all([
+        pool.query<UserRow[]>(
+          'SELECT id, email, name, role, phone, paymentMethod, balance, totalRevenue, totalWithdrawn FROM users ORDER BY id DESC LIMIT ? OFFSET ?',
+          [limit, offset]
+        ),
+        pool.query<RowDataPacket[]>('SELECT COUNT(*) as total FROM users')
+      ]);
+
+      const totalCount = Number(countRows[0]?.total || rows.length);
+      res.setHeader('X-Total-Count', String(totalCount));
       res.json(rows);
     } catch (err: unknown) {
       console.error("Get users error:", err);

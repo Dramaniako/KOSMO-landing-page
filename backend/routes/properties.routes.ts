@@ -48,6 +48,7 @@ export function registerPropertyRoutes(router: Router): void {
       minPrice,
       maxPrice,
       facility,
+      facilities: facilitiesQuery,
       ownerId,
       owner,
       is_featured,
@@ -55,6 +56,7 @@ export function registerPropertyRoutes(router: Router): void {
       verified_water_tank,
       verified_wifi_speedtest
     } = req.query;
+    const rawFacilityParam = facility ?? facilitiesQuery;
     const targetOwner = ownerId || owner;
     const effectiveMin = priceMin !== undefined ? priceMin : minPrice;
     const effectiveMax = priceMax !== undefined ? priceMax : maxPrice;
@@ -70,14 +72,27 @@ export function registerPropertyRoutes(router: Router): void {
       ? (pageParam - 1) * limitParam
       : 0;
 
-    const rawFacilities = facility
-      ? Array.isArray(facility)
-        ? facility.flatMap(f => String(f).split(','))
-        : typeof facility === 'string'
-        ? facility.split(',')
+    const rawFacilities = rawFacilityParam
+      ? Array.isArray(rawFacilityParam)
+        ? rawFacilityParam.flatMap(f => String(f).split(','))
+        : typeof rawFacilityParam === 'string'
+        ? rawFacilityParam.split(',')
         : []
       : [];
     const uniqueFacilitiesList = Array.from(new Set(rawFacilities.map(f => f.trim().toLowerCase()).filter(Boolean)));
+    const expandedFacilityVariants = Array.from(
+      new Set(
+        uniqueFacilitiesList.flatMap((f) => [
+          f,
+          f.charAt(0).toUpperCase() + f.slice(1),
+          f.toUpperCase(),
+          f
+            .split(/\s+/)
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ')
+        ])
+      )
+    );
     const sortedFacilityKey = uniqueFacilitiesList.slice().sort().join(',');
     const featuredKey = wantsFeatured ? 'featured' : 'all';
     const badgeKey = `${wantsWaterTank ? 'wt1' : 'wt0'}-${wantsWifiSpeedtest ? 'wf1' : 'wf0'}`;
@@ -126,15 +141,15 @@ export function registerPropertyRoutes(router: Router): void {
       }
 
       if (uniqueFacilitiesList.length > 0) {
-        const placeholders = uniqueFacilitiesList.map(() => '?').join(', ');
+        const placeholders = expandedFacilityVariants.map(() => '?').join(', ');
         sql += ` AND p.id IN (
           SELECT pf_sub.propertyId
           FROM property_facilities pf_sub
-          WHERE LOWER(pf_sub.facility) IN (${placeholders})
+          WHERE pf_sub.facility IN (${placeholders})
           GROUP BY pf_sub.propertyId
           HAVING COUNT(DISTINCT LOWER(pf_sub.facility)) = ?
         )`;
-        params.push(...uniqueFacilitiesList, uniqueFacilitiesList.length);
+        params.push(...expandedFacilityVariants, uniqueFacilitiesList.length);
       }
 
       sql += ' GROUP BY p.id ORDER BY (p.is_featured = 1 AND (p.featured_until IS NULL OR p.featured_until > NOW())) DESC, p.id DESC';
@@ -169,19 +184,43 @@ export function registerPropertyRoutes(router: Router): void {
       const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : 10;
       const userKey = String(req.query.userId || req.query.deviceToken || req.headers['x-device-token'] || '');
 
-      const [properties] = await pool.query<(PropertyRow & { facilitiesString?: string })[]>(`
-        SELECT p.*, GROUP_CONCAT(pf.facility SEPARATOR ',') as facilitiesString
-        FROM properties p
-        LEFT JOIN property_facilities pf ON p.id = pf.propertyId
-        GROUP BY p.id
-      `);
+      let normalized = apiCache.get<PropertyRow[]>('properties:recommended:candidates');
+      if (!normalized) {
+        const [properties] = await pool.query<(PropertyRow & { facilitiesString?: string })[]>(`
+          SELECT
+            p.id,
+            p.name,
+            p.district,
+            p.address,
+            p.price,
+            p.rating,
+            p.image,
+            SUBSTRING(p.description, 1, 240) as description,
+            p.latitude,
+            p.longitude,
+            p.totalRooms,
+            p.occupiedRooms,
+            p.ownerId,
+            p.document,
+            p.is_featured,
+            p.featured_until,
+            p.verified_water_tank,
+            p.verified_wifi_speedtest,
+            GROUP_CONCAT(pf.facility SEPARATOR ',') as facilitiesString
+          FROM properties p
+          LEFT JOIN property_facilities pf ON p.id = pf.propertyId
+          GROUP BY p.id
+          LIMIT 200
+        `);
 
-      for (const prop of properties) {
-        prop.facilities = prop.facilitiesString ? prop.facilitiesString.split(',').filter(Boolean) : [];
-        delete prop.facilitiesString;
+        for (const prop of properties) {
+          prop.facilities = prop.facilitiesString ? prop.facilitiesString.split(',').filter(Boolean) : [];
+          delete prop.facilitiesString;
+        }
+
+        normalized = properties.map(normalizePropertySummary);
+        apiCache.set('properties:recommended:candidates', normalized, 30);
       }
-
-      const normalized = properties.map(normalizePropertySummary);
       const ranked = recommendationService.rankProperties(normalized, {
         userKey: userKey || undefined,
         targetLat: latParam,

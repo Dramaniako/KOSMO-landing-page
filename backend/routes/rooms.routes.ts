@@ -110,7 +110,7 @@ export function registerRoomRoutes(router: Router): void {
       const basePropertyPrice = Number(propRows[0].price || 0);
 
       let sql = `
-        SELECT id, propertyId, roomNumber, floor, type, price, status, createdAt, updatedAt
+        SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id, createdAt, updatedAt
         FROM rooms
         WHERE propertyId = ?
       `;
@@ -119,6 +119,9 @@ export function registerRoomRoutes(router: Router): void {
       if (statusQuery !== 'all') {
         sql += ' AND status = ?';
         params.push(statusQuery);
+        if (statusQuery === 'available') {
+          sql += ' AND (reserved_until IS NULL OR reserved_until <= NOW())';
+        }
       }
       sql += ' ORDER BY floor ASC, CAST(roomNumber AS UNSIGNED) ASC, roomNumber ASC';
 

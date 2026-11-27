@@ -180,7 +180,7 @@ export function registerLandlordRoutes(router: Router): void {
         ),
         pool.query<MonthlyRevenueAgg[]>(
           `SELECT 
-             COALESCE(DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m'), DATE_FORMAT(r.contract_signed_at, '%Y-%m')) as month,
+             COALESCE(DATE_FORMAT(r.start_date_iso, '%Y-%m'), DATE_FORMAT(STR_TO_DATE(r.startDate, '%Y-%m-%d'), '%Y-%m'), DATE_FORMAT(r.contract_signed_at, '%Y-%m')) as month,
              COALESCE(SUM(r.price * COALESCE(r.duration_months, 1)), 0) as revenue,
              COUNT(r.id) as transactions
            FROM rentals r
@@ -434,6 +434,24 @@ export function registerLandlordRoutes(router: Router): void {
     try {
       await connection.beginTransaction();
 
+      // Pre-read userId (non-locking) so we enforce canonical lock order: users -> withdrawals
+      const [earlyRows] = await connection.query<WithdrawalRow[]>(
+        'SELECT id, userId FROM withdrawals WHERE id = ?',
+        [id]
+      );
+      const earlyWithdrawal = earlyRows[0];
+      if (!earlyWithdrawal) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+      }
+
+      if (earlyWithdrawal.userId) {
+        await connection.query<UserRow[]>(
+          'SELECT id, balance, totalWithdrawn FROM users WHERE id = ? FOR UPDATE',
+          [earlyWithdrawal.userId]
+        );
+      }
+
       const [rows] = await connection.query<WithdrawalRow[]>('SELECT * FROM withdrawals WHERE id = ? FOR UPDATE', [id]);
       const withdrawal = rows[0];
       if (!withdrawal) {
@@ -509,7 +527,17 @@ export function registerLandlordRoutes(router: Router): void {
       try {
         await connection.beginTransaction();
 
-        // 1. Re-verify authenticated administrator password via bcrypt
+        // 1. Pre-read userId (non-locking) then acquire canonical lock order: users -> withdrawals
+        const [earlyRows] = await connection.query<WithdrawalRow[]>(
+          'SELECT id, userId FROM withdrawals WHERE id = ?',
+          [id]
+        );
+        const earlyWithdrawal = earlyRows[0];
+        if (!earlyWithdrawal) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Permintaan penarikan tidak ditemukan." });
+        }
+
         const [adminRows] = await connection.query<UserRow[]>(
           'SELECT password FROM users WHERE id = ?',
           [authUser?.id]
@@ -519,6 +547,13 @@ export function registerLandlordRoutes(router: Router): void {
         if (!admin || !admin.password || !isMatch) {
           await connection.rollback();
           return res.status(401).json({ message: "Password administrator salah." });
+        }
+
+        if (earlyWithdrawal.userId) {
+          await connection.query<UserRow[]>(
+            'SELECT id, balance, totalWithdrawn FROM users WHERE id = ? FOR UPDATE',
+            [earlyWithdrawal.userId]
+          );
         }
 
         // 2. Fetch withdrawal record with pessimistic row lock

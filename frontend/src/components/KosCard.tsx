@@ -12,6 +12,17 @@ export interface Props {
   currencyPreference?: CurrencyPreference;
 }
 
+export function optimizeCloudinaryThumbnail(url: string): string {
+  if (!url || !url.includes('res.cloudinary.com') || !url.includes('/image/upload/')) {
+    return url;
+  }
+  const [, suffix] = url.split('/image/upload/');
+  if (!suffix || suffix.includes('w_') || suffix.includes('c_fill')) {
+    return url;
+  }
+  return url.replace('/image/upload/', '/image/upload/c_fill,w_400,h_300,f_webp,q_80/');
+}
+
 // ⚡ Bolt Performance Optimization:
 // Wrapped KosCard in React.memo to prevent unnecessary re-renders.
 // Why: Parent components (like LandingPage) re-render frequently during typing in search filters.
@@ -26,9 +37,10 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
   const totalRooms = Number(property.totalRooms) || 0;
   const occupiedRooms = Number(property.occupiedRooms) || 0;
   const facilities = Array.isArray(property.facilities) ? property.facilities : [];
-  const image = property.image && property.image.trim() !== ''
+  const rawImage = property.image && property.image.trim() !== ''
     ? property.image
     : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80';
+  const image = optimizeCloudinaryThumbnail(rawImage);
 
   const isFull = totalRooms > 0 && occupiedRooms >= totalRooms;
   const availableRooms = Math.max(0, totalRooms - occupiedRooms);

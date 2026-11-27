@@ -49,9 +49,9 @@ export class ContractsRepository {
     conn: PoolConnection | Pool = this.defaultPool,
     forUpdate = false
   ): Promise<RoomRow | undefined> {
-    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE id = ? AND propertyId = ?${
-      forUpdate ? ' FOR UPDATE' : ''
-    }`;
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id,
+      GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+      FROM rooms WHERE id = ? AND propertyId = ?${forUpdate ? ' FOR UPDATE' : ''}`;
     const [rows] = await conn.query<RoomRow[]>(sql, [roomId, propertyId]);
     return rows[0];
   }
@@ -59,13 +59,34 @@ export class ContractsRepository {
   async findAvailableRoom(
     propertyId: string,
     conn: PoolConnection,
-    forUpdate = true
+    forUpdate = true,
+    rentalId?: string
   ): Promise<RoomRow | undefined> {
-    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status FROM rooms WHERE propertyId = ? AND status = 'available' ORDER BY roomNumber ASC, id ASC LIMIT 1${
+    const holdFilter = rentalId
+      ? '(reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL OR reserved_by_rental_id = ?)'
+      : '(reserved_until IS NULL OR reserved_until <= NOW() OR reserved_by_rental_id IS NULL)';
+    const params = rentalId ? [propertyId, rentalId] : [propertyId];
+    const sql = `SELECT id, propertyId, roomNumber, floor, type, price, status, reserved_until, reserved_by_rental_id,
+      GREATEST(0, COALESCE(TIMESTAMPDIFF(SECOND, NOW(), reserved_until), 0)) AS holdRemainingSeconds
+      FROM rooms WHERE propertyId = ? AND status = 'available' AND ${holdFilter} ORDER BY roomNumber ASC, id ASC LIMIT 1${
       forUpdate ? ' FOR UPDATE' : ''
     }`;
-    const [rows] = await conn.query<RoomRow[]>(sql, [propertyId]);
+    const [rows] = await conn.query<RoomRow[]>(sql, params);
     return rows[0];
+  }
+
+  async reserveRoomHold(roomId: string, rentalId: string, conn: PoolConnection): Promise<void> {
+    await conn.query(
+      'UPDATE rooms SET reserved_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE), reserved_by_rental_id = ? WHERE id = ?',
+      [rentalId, roomId]
+    );
+  }
+
+  async releaseRoomHold(rentalId: string, conn: PoolConnection | Pool = this.defaultPool): Promise<void> {
+    await conn.query(
+      'UPDATE rooms SET reserved_until = NULL, reserved_by_rental_id = NULL WHERE reserved_by_rental_id = ?',
+      [rentalId]
+    );
   }
 
   async countRoomsByPropertyId(

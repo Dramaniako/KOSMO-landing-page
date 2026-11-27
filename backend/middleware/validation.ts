@@ -149,6 +149,7 @@ export const propertySchema = z.object({
   address: z.string().min(1, 'Alamat wajib diisi'),
   price: z.number().positive('Harga harus lebih besar dari 0'),
   totalRooms: z.number().int().positive('Total kamar harus lebih besar dari 0'),
+  image: z.string().max(750_000, 'Ukuran gambar sampul terlalu besar. Gunakan unggah foto maksimal 5MB.').optional(),
   ownerId: z.string().min(1, 'ownerId wajib diisi').optional()
 }).passthrough();
 
@@ -363,7 +364,7 @@ export const propertyUpdateSchema = z.object({
     .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().int().positive('Total kamar harus lebih besar dari 0').optional()),
   occupiedRooms: z
     .preprocess((val) => (val !== undefined && val !== null && val !== '' ? Number(val) : undefined), z.number().int().min(0).optional()),
-  image: z.string().optional(),
+  image: z.string().max(750_000, 'Ukuran gambar sampul terlalu besar. Gunakan unggah foto maksimal 5MB.').optional(),
   ownerId: z.string().trim().min(1).optional(),
   verified_water_tank: z.boolean().optional(),
   verified_wifi_speedtest: z.boolean().optional()

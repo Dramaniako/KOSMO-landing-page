@@ -22,8 +22,8 @@ interface ReviewRow extends RowDataPacket {
 
 export function registerReviewRoutes(router: Router): void {
   router.get('/reviews', async (req: Request, res: Response) => {
-    const { propertyId, userId } = req.query;
-    const cacheKey = `reviews:${propertyId || 'all'}:${userId || 'all'}`;
+    const { propertyId, userId, ownerId } = req.query;
+    const cacheKey = `reviews:${propertyId || 'all'}:${userId || 'all'}:${ownerId || 'all'}`;
 
     const cachedReviews = apiCache.get<ReviewRow[]>(cacheKey);
     if (cachedReviews) {
@@ -32,18 +32,27 @@ export function registerReviewRoutes(router: Router): void {
     }
 
     try {
-      let sql = 'SELECT * FROM reviews WHERE 1=1';
+      let sql = 'SELECT r.* FROM reviews r';
       const params: string[] = [];
 
+      if (ownerId) {
+        sql += ' JOIN properties p ON r.propertyId = p.id';
+      }
+      sql += ' WHERE 1=1';
+
       if (propertyId) {
-        sql += ' AND propertyId = ?';
+        sql += ' AND r.propertyId = ?';
         params.push(String(propertyId));
       }
       if (userId) {
-        sql += ' AND userId = ?';
+        sql += ' AND r.userId = ?';
         params.push(String(userId));
       }
-      sql += ' ORDER BY id DESC';
+      if (ownerId) {
+        sql += ' AND p.ownerId = ?';
+        params.push(String(ownerId));
+      }
+      sql += ' ORDER BY r.id DESC';
 
       const [rows] = await pool.query<ReviewRow[]>(sql, params);
       apiCache.set(cacheKey, rows, 60);
@@ -77,6 +86,32 @@ export function registerReviewRoutes(router: Router): void {
         if (!property) {
           await connection.rollback();
           return res.status(404).json({ message: "Properti tidak ditemukan." });
+        }
+
+        // Verified tenancy guard: non-admin reviewers must have an active, completed, or terminated rental
+        if (authUser.role !== 'admin') {
+          const [verifiedRentalRows] = await connection.query<RowDataPacket[]>(
+            "SELECT id FROM rentals WHERE tenantId = ? AND propertyId = ? AND status IN ('active', 'completed', 'terminated') LIMIT 1",
+            [userId, propertyId]
+          );
+          if (verifiedRentalRows.length === 0) {
+            await connection.rollback();
+            return res.status(403).json({
+              message: "Anda harus memiliki riwayat sewa terverifikasi pada properti ini untuk memberikan ulasan."
+            });
+          }
+        }
+
+        // Duplicate review guard per user & property
+        const [existingReviews] = await connection.query<RowDataPacket[]>(
+          'SELECT id FROM reviews WHERE propertyId = ? AND userId = ? FOR UPDATE',
+          [propertyId, userId]
+        );
+        if (existingReviews.length > 0) {
+          await connection.rollback();
+          return res.status(409).json({
+            message: "Anda sudah memberikan ulasan untuk properti ini."
+          });
         }
 
         // Fetch user name from database or fallback to user email

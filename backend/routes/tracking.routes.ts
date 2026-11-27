@@ -46,6 +46,20 @@ interface RentalRow extends RowDataPacket {
   status: 'active' | 'terminated' | 'pending' | 'cancelled';
 }
 
+export function sanitizeSpreadsheetCell(val: unknown): string | number {
+  if (typeof val === 'number') {
+    return Number.isFinite(val) ? val : '';
+  }
+  if (val === null || val === undefined) {
+    return '';
+  }
+  const str = String(val);
+  if (/^[=+\-@\t\r]/.test(str.trimStart())) {
+    return `'${str}`;
+  }
+  return str;
+}
+
 export const handleRecordVisit = async (req: Request, res: Response): Promise<Response | void> => {
   const rawIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
   const firstIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
@@ -379,17 +393,27 @@ export function registerTrackingRoutes(router: Router): void {
 
   router.get('/reports/tracking/excel', authenticateToken, requireRole(['admin']), async (_req: Request, res: Response) => {
     try {
-      const [visitorRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking');
-      const [userRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users');
-      const [landlordRows] = await pool.query<CountRow[]>("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'");
-      const totalLandlords = landlordRows[0].count;
-      const [propertyRows] = await pool.query<CountRow[]>('SELECT COUNT(*) as count FROM properties');
-      const totalProperties = propertyRows[0].count;
-      const [roomsRows] = await pool.query<SumRow[]>('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties');
-      const totalRooms = roomsRows[0].sum || 0;
+      const [
+        [visitorRows],
+        [userRows],
+        [landlordRows],
+        [propertyRows],
+        [roomsRows],
+        [visitors],
+        [users]
+      ] = await Promise.all([
+        pool.query<CountRow[]>('SELECT COUNT(*) as count FROM visitor_tracking'),
+        pool.query<CountRow[]>('SELECT COUNT(*) as count FROM users'),
+        pool.query<CountRow[]>("SELECT COUNT(*) as count FROM users WHERE role = 'landlord'"),
+        pool.query<CountRow[]>('SELECT COUNT(*) as count FROM properties'),
+        pool.query<SumRow[]>('SELECT COALESCE(SUM(totalRooms), 0) as sum FROM properties'),
+        pool.query<VisitorTrackingRow[]>('SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000'),
+        pool.query<UserRow[]>('SELECT id, email, name, role, phone FROM users ORDER BY id DESC LIMIT 5000')
+      ]);
 
-      const [visitors] = await pool.query<VisitorTrackingRow[]>('SELECT ip_address, user_agent, visited_at FROM visitor_tracking ORDER BY visited_at DESC LIMIT 1000');
-      const [users] = await pool.query<UserRow[]>('SELECT id, email, name, role, phone FROM users ORDER BY id DESC');
+      const totalLandlords = landlordRows[0].count;
+      const totalProperties = propertyRows[0].count;
+      const totalRooms = roomsRows[0].sum || 0;
 
       const wb = XLSX.utils.book_new();
 
@@ -405,15 +429,29 @@ export function registerTrackingRoutes(router: Router): void {
       const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
       XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan');
 
-      // Visitor details sheet
+      // Visitor details sheet (formula-injection sanitized)
       const visitorData: (string | number)[][] = [['IP Address', 'User Agent', 'Waktu Kunjungan']];
-      visitors.forEach(v => visitorData.push([v.ip_address, v.user_agent, v.visited_at ? new Date(v.visited_at).toLocaleString('id-ID') : '']));
+      visitors.forEach((v) =>
+        visitorData.push([
+          sanitizeSpreadsheetCell(v.ip_address),
+          sanitizeSpreadsheetCell(v.user_agent),
+          sanitizeSpreadsheetCell(v.visited_at ? new Date(v.visited_at).toLocaleString('id-ID') : '')
+        ])
+      );
       const visitorSheet = XLSX.utils.aoa_to_sheet(visitorData);
       XLSX.utils.book_append_sheet(wb, visitorSheet, 'Pengunjung');
 
-      // Users sheet
+      // Users sheet (formula-injection sanitized)
       const userData: (string | number)[][] = [['ID', 'Email', 'Nama', 'Role', 'Telepon']];
-      users.forEach(u => userData.push([u.id, u.email, u.name, u.role, u.phone]));
+      users.forEach((u) =>
+        userData.push([
+          sanitizeSpreadsheetCell(u.id),
+          sanitizeSpreadsheetCell(u.email),
+          sanitizeSpreadsheetCell(u.name),
+          sanitizeSpreadsheetCell(u.role),
+          sanitizeSpreadsheetCell(u.phone)
+        ])
+      );
       const userSheet = XLSX.utils.aoa_to_sheet(userData);
       XLSX.utils.book_append_sheet(wb, userSheet, 'Pengguna');
 
@@ -427,20 +465,26 @@ export function registerTrackingRoutes(router: Router): void {
     }
   });
 
-  // Support short-lived download token generation (valid 60 seconds)
+  // Support short-lived scoped download token generation (valid 60 seconds)
   router.post('/reports/download-token', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
     const authUser = req.user;
     if (!authUser) {
       return res.status(401).json({ message: 'Otentikasi diperlukan.' });
     }
-    const downloadToken = generateJwtToken(authUser, undefined, '60s');
+    const downloadToken = generateJwtToken(
+      {
+        id: authUser.id,
+        email: authUser.email,
+        role: authUser.role,
+        purpose: 'download_report'
+      },
+      undefined,
+      '60s'
+    );
     res.json({ downloadToken, expiresInSeconds: 60 });
   });
 
   router.get('/reports/landlord/excel', authenticateToken, requireRole(['admin', 'landlord']), handleLandlordExcelReport);
-
-  // Prewarm admin stats cache asynchronously on router registration
-  void preloadTrackingData();
 }
 
 export const handleLandlordExcelReport = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -466,34 +510,42 @@ export const handleLandlordExcelReport = async (req: AuthenticatedRequest, res: 
       return;
     }
 
-    const [properties] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ?', [landlord.id]);
+    const [properties] = await pool.query<PropertyRow[]>('SELECT * FROM properties WHERE ownerId = ? LIMIT 1000', [landlord.id]);
     const [transactions] = await pool.query<RentalRow[]>(
       `SELECT r.*, p.name as propertyName FROM rentals r 
        JOIN properties p ON r.propertyId = p.id 
-       WHERE p.ownerId = ? ORDER BY r.id DESC`, [landlord.id]
+       WHERE p.ownerId = ? ORDER BY r.id DESC LIMIT 5000`, [landlord.id]
     );
 
     const wb = XLSX.utils.book_new();
 
-    // Financial Summary sheet
+    // Financial Summary sheet (formula-injection sanitized)
     const summaryData: (string | number)[][] = [
       ['Laporan Keuangan Landlord'],
-      ['Nama', landlord.name],
-      ['Email', landlord.email],
-      ['Total Pendapatan', landlord.totalRevenue || 0],
-      ['Total Penarikan', landlord.totalWithdrawn || 0],
-      ['Saldo', landlord.balance || 0],
+      ['Nama', sanitizeSpreadsheetCell(landlord.name)],
+      ['Email', sanitizeSpreadsheetCell(landlord.email)],
+      ['Total Pendapatan', Number(landlord.totalRevenue || 0)],
+      ['Total Penarikan', Number(landlord.totalWithdrawn || 0)],
+      ['Saldo', Number(landlord.balance || 0)],
       [''],
       ['Ringkasan Properti'],
       ['Nama Properti', 'Lokasi', 'Harga', 'Total Kamar', 'Kamar Tersedia']
     ];
-    properties.forEach(p => summaryData.push([p.name, p.district, p.price, p.totalRooms, p.totalRooms - p.occupiedRooms]));
+    properties.forEach((p) =>
+      summaryData.push([
+        sanitizeSpreadsheetCell(p.name),
+        sanitizeSpreadsheetCell(p.district),
+        Number(p.price || 0),
+        Number(p.totalRooms || 0),
+        Number(p.totalRooms || 0) - Number(p.occupiedRooms || 0)
+      ])
+    );
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Ringkasan Keuangan');
 
-    // Transactions sheet
+    // Transactions sheet (formula-injection sanitized)
     const txData: (string | number)[][] = [['ID Transaksi', 'Properti', 'Tanggal', 'Jumlah', 'Status']];
-    transactions.forEach(t => {
+    transactions.forEach((t) => {
       const statusLabel =
         t.status === 'active'
           ? 'Aktif'
@@ -502,7 +554,13 @@ export const handleLandlordExcelReport = async (req: AuthenticatedRequest, res: 
             : t.status === 'cancelled'
               ? 'Dibatalkan'
               : 'Selesai';
-      txData.push([t.id, t.propertyName || '', t.startDate || '', t.price || 0, statusLabel]);
+      txData.push([
+        sanitizeSpreadsheetCell(t.id),
+        sanitizeSpreadsheetCell(t.propertyName || ''),
+        sanitizeSpreadsheetCell(t.startDate || ''),
+        Number(t.price || 0),
+        statusLabel
+      ]);
     });
     const txSheet = XLSX.utils.aoa_to_sheet(txData);
     XLSX.utils.book_append_sheet(wb, txSheet, 'Transaksi');

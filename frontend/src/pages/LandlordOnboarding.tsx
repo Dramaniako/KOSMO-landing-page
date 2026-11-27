@@ -22,6 +22,7 @@ import KosmoLogo from '../components/KosmoLogo';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import { useTranslation } from '../context/LanguageContext';
 import { formatRupiah } from '../utils/format';
+import { uploadPropertyCoverImage } from '../utils/uploadImage';
 import {
   User,
   Property,
@@ -250,23 +251,26 @@ export default function LandlordOnboarding() {
     );
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>): void => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setStep3Error('');
     setUploadingImage(true);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setPropImage(String(reader.result || ''));
-      setUploadingImage(false);
-    };
-    reader.onerror = () => {
+    try {
+      const uploadedUrl = await uploadPropertyCoverImage(file, API_BASE);
+      setPropImage(uploadedUrl);
+    } catch (err: unknown) {
       setStep3Error(
-        language === 'en' ? 'Failed to read image file.' : 'Gagal membaca berkas gambar.'
+        err instanceof Error
+          ? err.message
+          : language === 'en'
+            ? 'Failed to upload image file.'
+            : 'Gagal mengunggah berkas gambar.'
       );
+    } finally {
       setUploadingImage(false);
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   const handleStep2Submit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {

@@ -102,13 +102,15 @@ test('Express router endpoints registration', async (t) => {
     assert.equal(isOriginAllowed('http://127.0.0.1:5173'), true);
     assert.equal(isOriginAllowed('http://localhost:5173/'), true);
 
-    // Default production domain and subdomains
+    // Default production domain and project-scoped Vercel preview subdomains
     assert.equal(isOriginAllowed('https://kosmobali.my.id'), true);
     assert.equal(isOriginAllowed('https://www.kosmobali.my.id'), true);
     assert.equal(isOriginAllowed('http://kosmobali.my.id'), true);
-    assert.equal(isOriginAllowed('https://preview-123.vercel.app'), true);
+    assert.equal(isOriginAllowed('https://kosmo-preview-123.vercel.app'), true);
+    assert.equal(isOriginAllowed('https://juragankost-staging.vercel.app'), true);
 
-    // Untrusted / malicious origins
+    // Untrusted / malicious origins (including unrelated Vercel apps)
+    assert.equal(isOriginAllowed('https://evil-attacker.vercel.app'), false);
     assert.equal(isOriginAllowed('http://attacker.com'), false);
     assert.equal(isOriginAllowed('https://evil-phishing-site.org'), false);
     assert.equal(isOriginAllowed('http://localhost.evil.com'), false);

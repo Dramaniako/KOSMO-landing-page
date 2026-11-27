@@ -4,20 +4,36 @@ import type { SignOptions } from 'jsonwebtoken';
 import type { UserRole } from '../types/index';
 import { randomBytes } from 'crypto';
 
+export type TokenPurpose = 'session' | 'download_report';
+
 export interface JWTPayload {
   id: string;
   email: string;
   role: UserRole;
+  purpose?: TokenPurpose;
 }
 
 let defaultSecret: string | null = null;
+
+export function resetJwtSecretCache(): void {
+  defaultSecret = null;
+}
 
 export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (secret && secret.trim() !== '') {
     return secret;
   }
+  const isStrictProduction =
+    (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) &&
+    process.env.NODE_ENV !== 'test';
+
   if (!defaultSecret) {
+    if (isStrictProduction && !process.env.JWT_FALLBACK_SECRET) {
+      throw new Error(
+        '[Auth Security] JWT_SECRET environment variable is required in production.'
+      );
+    }
     if (process.env.NODE_ENV === 'production') {
       console.warn('⚠️ [Auth Warning] JWT_SECRET environment variable is missing in production. Using random fallback secret. Sessions will not persist across server restarts.');
       defaultSecret = process.env.JWT_FALLBACK_SECRET || randomBytes(32).toString('hex');
@@ -50,11 +66,11 @@ export function verifyJwtToken(
   if (!decoded || typeof decoded !== 'object') {
     throw new Error('Invalid token payload');
   }
-  const { id, email, role } = decoded as Partial<JWTPayload>;
+  const { id, email, role, purpose } = decoded as Partial<JWTPayload>;
   if (!id || !email || !role) {
     throw new Error('Malformed token claims');
   }
-  return { id, email, role };
+  return purpose ? { id, email, role, purpose } : { id, email, role };
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -117,6 +133,22 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
 
   try {
     const user = verifyJwtToken(token);
+    if (user.purpose === 'download_report') {
+      const methodAllowed = !req.method || req.method.toUpperCase() === 'GET';
+      const pathStr = req.path || req.originalUrl || '';
+      const pathAllowed =
+        !pathStr || pathStr.includes('/reports/') || pathStr.includes('/contract');
+      if (!methodAllowed || !pathAllowed) {
+        res.status(403).json({
+          status: 'fail',
+          statusCode: 403,
+          code: 'AUTH_TOKEN_SCOPE_INVALID',
+          message: 'Download token hanya berlaku untuk mengunduh laporan/kontrak.',
+          error: 'Download token hanya berlaku untuk mengunduh laporan/kontrak.'
+        });
+        return;
+      }
+    }
     (req as AuthenticatedRequest).user = user;
     next();
   } catch (err: unknown) {

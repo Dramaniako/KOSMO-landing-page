@@ -14,6 +14,7 @@ import type { UserRow } from '../routes/auth.routes';
 import { isUserProfileComplete } from '../types/index';
 import { generateId } from '../utils/id';
 import { snap, isMidtransConfigured, configureSnapClient, getSnapRedirectUrl } from '../routes/payment.routes';
+import { paymentRepository } from '../repositories/payment.repository';
 
 export interface PaymentSchedule {
   nextPaymentDate: string;
@@ -291,6 +292,18 @@ export class RentalService {
         ? customRentalId.trim()
         : generateId('rent');
 
+    const isProdBookingGuard =
+      (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) &&
+      process.env.NODE_ENV !== 'test' &&
+      authUser.role !== 'admin';
+
+    if (isProdBookingGuard && !isMidtransConfigured()) {
+      throw new RentalServiceError(
+        500,
+        'Konfigurasi payment gateway Midtrans belum diatur di server produksi.'
+      );
+    }
+
     if (
       process.env.MIDTRANS_SERVER_KEY &&
       !process.env.MIDTRANS_SERVER_KEY.includes('placeholder') &&
@@ -321,6 +334,19 @@ export class RentalService {
         }
       } catch (midtransErr) {
         if (midtransErr instanceof RentalServiceError) throw midtransErr;
+        if (isProdBookingGuard) {
+          const errMsg = midtransErr instanceof Error ? midtransErr.message : String(midtransErr);
+          if (errMsg.includes('404')) {
+            throw new RentalServiceError(
+              402,
+              'Pembayaran belum ditemukan atau belum diselesaikan pada Midtrans.'
+            );
+          }
+          throw new RentalServiceError(
+            502,
+            'Gagal memverifikasi status transaksi pada payment gateway Midtrans.'
+          );
+        }
         console.warn('Midtrans status check warning:', midtransErr);
       }
     }
@@ -330,16 +356,61 @@ export class RentalService {
       await connection.query('SET SESSION innodb_lock_wait_timeout = 5;');
       await connection.beginTransaction();
 
-      const tenant = await this.repo.findUserById(tenantId, connection, true);
-      if (!tenant) {
-        await connection.rollback();
-        throw new RentalServiceError(404, 'Pengguna tidak ditemukan.');
-      }
-
+      // Canonical Lock Order: properties -> rooms -> users -> rentals
       const property = await this.repo.findPropertyById(propertyId, connection, true);
       if (!property) {
         await connection.rollback();
         throw new RentalServiceError(404, 'Properti tidak ditemukan.');
+      }
+
+      if (property.occupiedRooms >= property.totalRooms) {
+        await connection.rollback();
+        throw new RentalServiceError(400, 'Kamar kos sudah penuh.');
+      }
+
+      const [existingPre] = await connection.query<RentalRow[]>(
+        'SELECT roomId FROM rentals WHERE id = ?',
+        [rentalId]
+      );
+      const targetRoomId = roomId || existingPre[0]?.roomId;
+
+      let assignedRoom: RoomRow | undefined;
+      if (targetRoomId) {
+        assignedRoom = await this.repo.findRoomById(targetRoomId, propertyId, connection, true);
+        if (!assignedRoom) {
+          await connection.rollback();
+          throw new RentalServiceError(404, 'Kamar tidak ditemukan pada properti ini.');
+        }
+        const heldByOther =
+          Boolean(assignedRoom.reserved_by_rental_id) &&
+          assignedRoom.reserved_by_rental_id !== rentalId &&
+          Number(assignedRoom.holdRemainingSeconds || 0) > 0;
+        if (assignedRoom.status !== 'available' || heldByOther) {
+          await connection.rollback();
+          throw new RentalServiceError(409, 'Kamar yang Anda pilih sudah tidak tersedia.');
+        }
+      } else {
+        const availableRoom = await this.repo.findAvailableRoom(
+          propertyId,
+          connection,
+          true,
+          rentalId
+        );
+        if (availableRoom) {
+          assignedRoom = availableRoom;
+        } else {
+          const discreteCount = await this.repo.countRoomsByPropertyId(propertyId, connection);
+          if (discreteCount > 0) {
+            await connection.rollback();
+            throw new RentalServiceError(409, 'Kamar yang Anda pilih sudah tidak tersedia.');
+          }
+        }
+      }
+
+      const tenant = await this.repo.findUserById(tenantId, connection, true);
+      if (!tenant) {
+        await connection.rollback();
+        throw new RentalServiceError(404, 'Pengguna tidak ditemukan.');
       }
 
       const existingRental = await this.repo.findExistingRentalForUpdate(rentalId, connection);
@@ -350,36 +421,6 @@ export class RentalService {
           rentalId,
           document: existingRental.document || 'sertifikat_kepemilikan.pdf'
         };
-      }
-
-      if (property.occupiedRooms >= property.totalRooms) {
-        await connection.rollback();
-        throw new RentalServiceError(400, 'Kamar kos sudah penuh.');
-      }
-
-      let assignedRoom: RoomRow | undefined;
-      const targetRoomId = roomId || existingRental?.roomId;
-      if (targetRoomId) {
-        assignedRoom = await this.repo.findRoomById(targetRoomId, propertyId, connection, true);
-        if (!assignedRoom) {
-          await connection.rollback();
-          throw new RentalServiceError(404, 'Kamar tidak ditemukan pada properti ini.');
-        }
-        if (assignedRoom.status !== 'available') {
-          await connection.rollback();
-          throw new RentalServiceError(409, 'Kamar yang Anda pilih sudah tidak tersedia.');
-        }
-      } else {
-        const availableRoom = await this.repo.findAvailableRoom(propertyId, connection, true);
-        if (availableRoom) {
-          assignedRoom = availableRoom;
-        } else {
-          const discreteCount = await this.repo.countRoomsByPropertyId(propertyId, connection);
-          if (discreteCount > 0) {
-            await connection.rollback();
-            throw new RentalServiceError(409, 'Kamar yang Anda pilih sudah tidak tersedia.');
-          }
-        }
       }
 
       const activeRentals = await this.repo.findActiveRentalsByTenantId(tenantId, connection, true);
@@ -406,10 +447,14 @@ export class RentalService {
       }
 
       const duration = Number(durationMonths) || 1;
+      // Compute effectivePrice strictly from authoritative DB room/property price (ignore client-supplied price)
       const effectivePrice =
-        assignedRoom && typeof assignedRoom.price === 'number' && assignedRoom.price > 0
+        assignedRoom &&
+        assignedRoom.price !== null &&
+        assignedRoom.price !== undefined &&
+        Number(assignedRoom.price) > 0
           ? Number(assignedRoom.price)
-          : Number(price || property.price || 0);
+          : Number(property.price || 0);
 
       const addedRevenue = effectivePrice * duration;
       const startDateStr =
@@ -612,11 +657,13 @@ export class RentalService {
         );
       }
 
+      await this.repo.clearRoomHoldByRentalId(resolvedRentalId, connection);
       await this.repo.updateRentalStatus(resolvedRentalId, 'cancelled', connection);
       await connection.commit();
 
       apiCache.invalidatePattern('properties');
       apiCache.invalidatePattern('rentals');
+      apiCache.invalidatePattern('rooms');
       apiCache.invalidatePattern('landlord:');
       apiCache.invalidatePattern('admin:');
 
@@ -770,8 +817,24 @@ export class RentalService {
           name: 'Biaya Administrasi & Layanan'
         }
       ],
-      custom_field1: resolvedRentalId
+      custom_field1: resolvedRentalId,
+      expiry: {
+        unit: 'minutes',
+        duration: 15
+      }
     };
+
+    try {
+      await paymentRepository.upsertPendingTransaction({
+        orderId: attemptOrderId,
+        rentalId: resolvedRentalId,
+        txType: 'renewal',
+        grossAmount: totalGrossAmount,
+        months: durationMonths
+      });
+    } catch (txErr) {
+      console.warn('[Renewal Token] Could not persist payment_transactions ledger entry:', txErr);
+    }
 
     const isProduction = (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) && process.env.NODE_ENV !== 'test';
     const hasMidtransConfig = isMidtransConfigured();
