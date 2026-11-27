@@ -57,6 +57,7 @@ import {
   settleRentalPayment
 } from './routes/payment.routes';
 import { registerTicketRoutes } from './routes/tickets.routes';
+import { registerSeoRoutes } from './routes/seo.routes';
 
 export {
   authLimiter,
@@ -89,5 +90,6 @@ registerContractRoutes(router);
 registerRentalRoutes(router);
 registerPaymentRoutes(router);
 registerTicketRoutes(router);
+registerSeoRoutes(router);
 
 export default router;

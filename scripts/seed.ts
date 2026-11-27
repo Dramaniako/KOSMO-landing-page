@@ -435,6 +435,7 @@ export async function seedDatabase(): Promise<void> {
     await connection.query('DELETE FROM maintenance_tickets');
     await connection.query('DELETE FROM property_photos');
     await connection.query('DELETE FROM rooms');
+    await connection.query('DELETE FROM payment_transactions');
     await connection.query('DELETE FROM rentals');
     await connection.query('DELETE FROM withdrawals');
     await connection.query('DELETE FROM reviews');

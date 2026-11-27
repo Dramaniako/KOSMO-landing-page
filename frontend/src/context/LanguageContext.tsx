@@ -290,7 +290,23 @@ const translations: Record<Language, Translations> = {
     'onboarding.bannerTitle': 'Lengkapi Pengaturan Mitra Landlord Anda',
     'onboarding.bannerDesc': 'Siapkan rekening pencairan dana dan daftarkan unit kos pertama Anda melalui panduan onboarding terstruktur.',
     'onboarding.bannerCta': 'Buka Panduan Onboarding',
-    'onboarding.sidebarLink': 'Panduan Onboarding'
+    'onboarding.sidebarLink': 'Panduan Onboarding',
+
+    // SEO Area Directory & FAQ
+    'seo.areaBadge': 'Eksplorasi Wilayah Populer',
+    'seo.areaTitle': 'Cari Kos All-Inclusive Berdasarkan Area di Bali',
+    'seo.areaSubtitle': 'Pilih lokasi strategis dekat kampus Universitas Udayana, pusat bisnis, pantai, dan hub digital nomad di Bali.',
+    'seo.areaChipPrefix': 'Kos di',
+    'seo.faqBadge': 'Pertanyaan Umum (FAQ)',
+    'seo.faqTitle': 'Informasi Sewa Kos & Co-Living di Bali',
+    'seo.faq1Q': 'Apa saja yang sudah termasuk dalam harga sewa all-inclusive KOSMO?',
+    'seo.faq1A': 'Satu harga bulanan di KOSMO sudah termasuk sewa kamar furnished, WiFi fiber cepat, air bersih PDAM, layanan kebersihan area umum, dan keamanan CCTV 24 jam tanpa biaya tambahan tersembunyi.',
+    'seo.faq2Q': 'Apakah kecepatan WiFi dan ketersediaan air bersih terjamin?',
+    'seo.faq2A': 'Ya. Properti mitra KOSMO menjalani verifikasi lapangan untuk tandon air cadangan 24/7 serta uji kecepatan WiFi (speedtest terverifikasi minimal 50-100 Mbps) demi kelancaran kerja remote.',
+    'seo.faq3Q': 'Apakah penyewa mendapatkan kontrak sewa resmi dan pembayaran aman?',
+    'seo.faq3A': 'Setiap pemesanan dilengkapi kontrak sewa digital (e-Contract) bermeterai dengan hash SHA-256 sesuai KUHPerdata Pasal 1320 & UU ITE serta pembayaran terproteksi melalui Midtrans.',
+    'seo.faq4Q': 'Area mana saja yang tersedia untuk sewa kos bulanan di Bali?',
+    'seo.faq4A': 'KOSMO menyediakan pilihan kos dan coliving di Jimbaran (dekat Kampus Unud), Canggu, Seminyak, Ubud, Uluwatu, Kuta, Sanur, Denpasar, Badung, Gianyar, hingga Tabanan.'
   },
   en: {
     // Navigation & Common
@@ -575,7 +591,23 @@ const translations: Record<Language, Translations> = {
     'onboarding.bannerTitle': 'Complete Your Landlord Partner Setup',
     'onboarding.bannerDesc': 'Configure your payout bank account and list your first kos property with our guided onboarding wizard.',
     'onboarding.bannerCta': 'Start Onboarding Guide',
-    'onboarding.sidebarLink': 'Onboarding Guide'
+    'onboarding.sidebarLink': 'Onboarding Guide',
+
+    // SEO Area Directory & FAQ
+    'seo.areaBadge': 'Explore Popular Districts',
+    'seo.areaTitle': 'Browse All-Inclusive Kos by Location in Bali',
+    'seo.areaSubtitle': 'Pick strategic neighborhoods near Udayana University, beaches, business hubs, and digital nomad communities across Bali.',
+    'seo.areaChipPrefix': 'Kos in',
+    'seo.faqBadge': 'Frequently Asked Questions',
+    'seo.faqTitle': 'Bali Monthly Kos & Co-Living Guide',
+    'seo.faq1Q': 'What is included in KOSMO all-inclusive monthly rent?',
+    'seo.faq1A': 'One transparent monthly fee covers a furnished room, high-speed fiber WiFi, clean municipal water, regular common-area housekeeping, and 24/7 CCTV security with zero hidden charges.',
+    'seo.faq2Q': 'Are WiFi speeds and 24/7 water supply verified?',
+    'seo.faq2A': 'Yes. KOSMO partner properties undergo on-site field verification for backup water tanks and verified WiFi speedtests (50-100+ Mbps) tailored for remote workers and students.',
+    'seo.faq3Q': 'Do tenants receive a legal lease agreement and secure payment?',
+    'seo.faq3A': 'Every booking includes a tamper-evident SHA-256 digital rental agreement compliant with Indonesian UU ITE & Civil Code Article 1320, plus verified Midtrans checkout.',
+    'seo.faq4Q': 'Which areas in Bali are available on KOSMO?',
+    'seo.faq4A': 'KOSMO lists curated kos and co-living spaces across Jimbaran (near Udayana University), Canggu, Seminyak, Ubud, Uluwatu, Kuta, Sanur, Denpasar, Badung, Gianyar, and Tabanan.'
   }
 };
 

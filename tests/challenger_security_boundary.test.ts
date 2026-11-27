@@ -7,7 +7,7 @@ import http from 'http';
 import type { AddressInfo } from 'net';
 import crypto from 'crypto';
 const { default: app } = await import('../backend/server');
-import { validateDatabaseConfig, initDb, seedDatabase } from '../backend/db';
+import { validateDatabaseConfig, initDb, seedDatabase, pool } from '../backend/db';
 import {
   isCloudinaryConfigured,
   uploadImageStream,
@@ -30,9 +30,32 @@ test('Adversarial Security Boundary & Penetration Suite (Issues #05, #08)', asyn
   let server: http.Server;
   let baseUrl: string;
 
+  const boundaryRentalIds = [
+    'rent-prod-boundary-fail-1',
+    'rent-prod-boundary-fail-2',
+    'rent-unit-mock-999'
+  ];
+
+  async function cleanupBoundaryFixtures(): Promise<void> {
+    const placeholders = boundaryRentalIds.map(() => '?').join(', ');
+    await pool.execute(
+      `UPDATE rooms SET status = 'available', reserved_by_rental_id = NULL, reserved_until = NULL WHERE reserved_by_rental_id IN (${placeholders})`,
+      boundaryRentalIds
+    );
+    await pool.execute(
+      `DELETE FROM payment_transactions WHERE rental_id IN (${placeholders})`,
+      boundaryRentalIds
+    );
+    await pool.execute(
+      `DELETE FROM rentals WHERE id IN (${placeholders})`,
+      boundaryRentalIds
+    );
+  }
+
   // Initialize DB tables and seed records for endpoint testing
   await initDb();
   await seedDatabase();
+  await cleanupBoundaryFixtures();
 
   // Spin up ephemeral test server
   await new Promise<void>((resolve) => {
@@ -44,9 +67,10 @@ test('Adversarial Security Boundary & Penetration Suite (Issues #05, #08)', asyn
     });
   });
 
-  t.after(() => {
+  t.after(async () => {
     setEnv('NO_LISTEN', 'true');
     setEnv('NODE_ENV', 'test');
+    await cleanupBoundaryFixtures();
     if (server) {
       server.close();
     }

@@ -4,6 +4,7 @@ import { Property } from '../types/index';
 import { formatRupiah, formatUSD } from '../utils/format';
 import { useTranslation } from '../context/LanguageContext';
 import { useCurrency, CurrencyPreference } from '../context/CurrencyContext';
+import { buildPropertySeoPath } from '../../../shared/seo';
 
 export interface Props {
   property: Property;
@@ -113,7 +114,17 @@ const KosCard = memo(function KosCard({ property, onOpenDetail, renderFacilityIc
       <div className="p-4 sm:p-5 flex flex-col flex-grow justify-between gap-3 property-body">
         <div>
           <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base sm:text-lg line-clamp-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors property-title">
-            {property.name || 'Properti KOSMO'}
+            <a
+              href={buildPropertySeoPath(property)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenDetail(property);
+              }}
+              className="hover:underline focus:outline-none"
+            >
+              {property.name || 'Properti KOSMO'}
+            </a>
           </h3>
 
           <div className="flex items-center gap-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 property-location">

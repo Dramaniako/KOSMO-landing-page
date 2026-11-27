@@ -324,6 +324,7 @@ export function registerPropertyRoutes(router: Router): void {
 
         await connection.commit();
         apiCache.invalidatePattern('properties');
+        apiCache.invalidatePattern('seo:');
         apiCache.invalidatePattern('landlord:');
         apiCache.invalidatePattern('admin:');
         res.status(201).json({ message: "Properti berhasil ditambahkan!", id: propId, propertyId: propId });
@@ -427,6 +428,7 @@ export function registerPropertyRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('seo:');
       apiCache.invalidatePattern('landlord:');
       apiCache.invalidatePattern('admin:');
       res.json({ message: "Properti berhasil diperbarui!" });
@@ -490,6 +492,7 @@ export function registerPropertyRoutes(router: Router): void {
       await connection.query('DELETE FROM properties WHERE id = ?', [id]);
       await connection.commit();
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('seo:');
       res.json({ message: "Properti berhasil dihapus!" });
     } catch (err) {
       await connection.rollback();
@@ -544,6 +547,7 @@ export function registerPropertyRoutes(router: Router): void {
 
       await connection.commit();
       apiCache.invalidatePattern('properties');
+      apiCache.invalidatePattern('seo:');
 
       return res.json({
         success: true,

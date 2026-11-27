@@ -11,6 +11,7 @@ export const serverEnvSchema = z.object({
   DB_USER: z.string().optional().default('root'),
   DB_NAME: z.string().optional().default('kosmo_db'),
   JWT_SECRET: z.string().optional(),
+  SITE_URL: z.string().optional(),
   MIDTRANS_SERVER_KEY: z.string().optional(),
   MIDTRANS_CLIENT_KEY: z.string().optional(),
   MIDTRANS_IS_PRODUCTION: z.string().optional()

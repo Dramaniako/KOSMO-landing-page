@@ -18,7 +18,7 @@ export function useScrollClickwrap(showContract: boolean) {
       const timer = setTimeout(() => {
         if (termsContainerRef.current) {
           const el = termsContainerRef.current;
-          if (el.scrollHeight <= el.clientHeight + 15) {
+          if (el.clientHeight > 0 && el.scrollHeight <= el.clientHeight + 15) {
             setHasScrolledToBottom(true);
           }
         }

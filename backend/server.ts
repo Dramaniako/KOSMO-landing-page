@@ -14,6 +14,10 @@ import { notFoundHandler } from './middleware/notFoundHandler';
 import { setupProcessSafety } from './utils/processSafety';
 import { assertMidtransProductionConfig } from './routes/payment.routes';
 import { validateServerEnv } from './config/env';
+import { isOriginAllowed } from './utils/cors';
+import { handleRobotsTxt, handleSitemapXml } from './routes/seo.routes';
+
+export { isOriginAllowed };
 
 // Initialize defensive process-level safety net
 setupProcessSafety();
@@ -46,65 +50,7 @@ const PORT: number = parseInt(process.env.PORT || '5000', 10);
 // Performance & Compression Middleware (Mounted first)
 app.use(compression());
 
-// Security: Whitelist-based CORS Origin Validation
-export function isOriginAllowed(origin: string | undefined): boolean {
-  // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
-  if (!origin) return true;
-
-  const envAllowed = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
-    : [];
-
-  const defaultAllowed = [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://localhost:5000',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:5000',
-    'https://kosmobali.my.id',
-    'https://www.kosmobali.my.id',
-    'http://kosmobali.my.id',
-    'http://www.kosmobali.my.id',
-    'https://juragankost.net',
-    'https://www.juragankost.net',
-    'http://juragankost.net',
-    'http://www.juragankost.net'
-  ];
-
-  const allowedOrigins = [...defaultAllowed, ...envAllowed];
-  const normalizedOrigin = origin.toLowerCase().replace(/\/$/, '');
-
-  const isExactMatch = allowedOrigins.some((allowed: string) => {
-    const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, '');
-    return normalizedAllowed === normalizedOrigin;
-  });
-
-  if (isExactMatch) return true;
-
-  // Support project-scoped Vercel deployments and custom domain subdomains
-  try {
-    const parsed = new URL(origin);
-    const hostname = parsed.hostname.toLowerCase();
-    const isProjectVercelDomain =
-      /^kosmo(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname) ||
-      /^juragankost(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname);
-    if (
-      hostname === 'kosmobali.my.id' ||
-      hostname.endsWith('.kosmobali.my.id') ||
-      hostname === 'juragankost.net' ||
-      hostname.endsWith('.juragankost.net') ||
-      isProjectVercelDomain
-    ) {
-      return true;
-    }
-  } catch {
-    // Invalid URL format
-  }
-
-  return false;
-}
-
+// Security: Whitelist-based CORS Origin Validation (implemented in ./utils/cors.ts)
 export const corsOptions: CorsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     if (isOriginAllowed(origin)) {
@@ -222,7 +168,13 @@ export async function dbReadinessMiddleware(
   next: NextFunction,
   dbReadyFn: () => Promise<void> = ensureDbReady
 ): Promise<Response | void> {
-  if (req.path.startsWith('/api') && req.path !== '/api/health') {
+  if (
+    req.path.startsWith('/api') &&
+    req.path !== '/api/health' &&
+    req.path !== '/api/robots.txt' &&
+    req.path !== '/api/sitemap.xml' &&
+    !req.path.startsWith('/api/seo/')
+  ) {
     try {
       await dbReadyFn();
     } catch (error: unknown) {
@@ -237,6 +189,10 @@ export async function dbReadinessMiddleware(
 }
 
 app.use((req: Request, res: Response, next: NextFunction) => dbReadinessMiddleware(req, res, next));
+
+// Root-level SEO endpoints (mirrored by vercel.json rewrites in production)
+app.get('/robots.txt', handleRobotsTxt);
+app.get('/sitemap.xml', handleSitemapXml);
 
 // Mount API router
 app.use('/api', router);

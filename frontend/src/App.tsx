@@ -5,6 +5,7 @@ import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { CurrencyProvider } from './context/CurrencyContext';
 import { ErrorProvider } from './context/ErrorContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import SeoHead from './components/SeoHead';
 
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -34,6 +35,15 @@ function RouteLoadingFallback() {
 function AppErrorBoundary({ children }: { children: React.ReactNode }) {
   const { language } = useLanguage();
   return <ErrorBoundary locale={language}>{children}</ErrorBoundary>;
+}
+
+function NoIndexWrapper({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <>
+      <SeoHead title={title} noindex={true} />
+      {children}
+    </>
+  );
 }
 
 function RootRoute() {
@@ -68,37 +78,55 @@ export default function App() {
               <Suspense fallback={<RouteLoadingFallback />}>
                 <Routes>
                   <Route path="/" element={<RootRoute />} />
-                  <Route path="/login" element={<Login />} />
+                  <Route path="/kos/:propertyId" element={<LandingPage />} />
+                  <Route path="/kos/:propertyId/:slug" element={<LandingPage />} />
+                  <Route path="/area/:districtSlug" element={<LandingPage />} />
+                  <Route
+                    path="/login"
+                    element={
+                      <NoIndexWrapper title="Masuk Akun | KOSMO Bali">
+                        <Login />
+                      </NoIndexWrapper>
+                    }
+                  />
                   <Route
                     path="/admin"
                     element={
-                      <ProtectedRoute allowedRoles={['admin']}>
-                        <AdminDashboard />
-                      </ProtectedRoute>
+                      <NoIndexWrapper title="Admin Dashboard | KOSMO Bali">
+                        <ProtectedRoute allowedRoles={['admin']}>
+                          <AdminDashboard />
+                        </ProtectedRoute>
+                      </NoIndexWrapper>
                     }
                   />
                   <Route
                     path="/landlord"
                     element={
-                      <ProtectedRoute allowedRoles={['landlord']}>
-                        <LandlordDashboard />
-                      </ProtectedRoute>
+                      <NoIndexWrapper title="Landlord Dashboard | KOSMO Bali">
+                        <ProtectedRoute allowedRoles={['landlord']}>
+                          <LandlordDashboard />
+                        </ProtectedRoute>
+                      </NoIndexWrapper>
                     }
                   />
                   <Route
                     path="/landlord/onboarding"
                     element={
-                      <ProtectedRoute allowedRoles={['landlord']}>
-                        <LandlordOnboarding />
-                      </ProtectedRoute>
+                      <NoIndexWrapper title="Landlord Onboarding | KOSMO Bali">
+                        <ProtectedRoute allowedRoles={['landlord']}>
+                          <LandlordOnboarding />
+                        </ProtectedRoute>
+                      </NoIndexWrapper>
                     }
                   />
                   <Route
                     path="/tenant"
                     element={
-                      <ProtectedRoute allowedRoles={['tenant']}>
-                        <TenantDashboard />
-                      </ProtectedRoute>
+                      <NoIndexWrapper title="Tenant Dashboard | KOSMO Bali">
+                        <ProtectedRoute allowedRoles={['tenant']}>
+                          <TenantDashboard />
+                        </ProtectedRoute>
+                      </NoIndexWrapper>
                     }
                   />
                   {/* Fallback to landing page */}

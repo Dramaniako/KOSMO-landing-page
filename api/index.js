@@ -2931,6 +2931,7 @@ function registerPropertyRoutes(router2) {
         }
         await connection.commit();
         apiCache.invalidatePattern("properties");
+        apiCache.invalidatePattern("seo:");
         apiCache.invalidatePattern("landlord:");
         apiCache.invalidatePattern("admin:");
         res.status(201).json({ message: "Properti berhasil ditambahkan!", id: propId, propertyId: propId });
@@ -3029,6 +3030,7 @@ function registerPropertyRoutes(router2) {
       }
       await connection.commit();
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("seo:");
       apiCache.invalidatePattern("landlord:");
       apiCache.invalidatePattern("admin:");
       res.json({ message: "Properti berhasil diperbarui!" });
@@ -3082,6 +3084,7 @@ function registerPropertyRoutes(router2) {
       await connection.query("DELETE FROM properties WHERE id = ?", [id]);
       await connection.commit();
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("seo:");
       res.json({ message: "Properti berhasil dihapus!" });
     } catch (err) {
       await connection.rollback();
@@ -3128,6 +3131,7 @@ function registerPropertyRoutes(router2) {
       );
       await connection.commit();
       apiCache.invalidatePattern("properties");
+      apiCache.invalidatePattern("seo:");
       return res.json({
         success: true,
         message: willBeFeatured ? "Status featured properti berhasil diaktifkan." : "Status featured properti dinonaktifkan.",
@@ -8466,6 +8470,457 @@ function registerTicketRoutes(router2) {
   );
 }
 
+// backend/utils/cors.ts
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  const envAllowed = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) : [];
+  const defaultAllowed = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5000",
+    "https://kosmobali.my.id",
+    "https://www.kosmobali.my.id",
+    "http://kosmobali.my.id",
+    "http://www.kosmobali.my.id",
+    "https://juragankost.net",
+    "https://www.juragankost.net",
+    "http://juragankost.net",
+    "http://www.juragankost.net"
+  ];
+  const allowedOrigins = [...defaultAllowed, ...envAllowed];
+  const normalizedOrigin = origin.toLowerCase().replace(/\/$/, "");
+  const isExactMatch = allowedOrigins.some((allowed) => {
+    const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, "");
+    return normalizedAllowed === normalizedOrigin;
+  });
+  if (isExactMatch) return true;
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    const isProjectVercelDomain = /^kosmo(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname) || /^juragankost(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname);
+    if (hostname === "kosmobali.my.id" || hostname.endsWith(".kosmobali.my.id") || hostname === "juragankost.net" || hostname.endsWith(".juragankost.net") || isProjectVercelDomain) {
+      return true;
+    }
+  } catch {
+  }
+  return false;
+}
+
+// shared/seo.ts
+var DEFAULT_SITE_URL = "https://kosmobali.my.id";
+var BALI_SEO_DISTRICTS = [
+  "Canggu",
+  "Seminyak",
+  "Ubud",
+  "Jimbaran",
+  "Uluwatu",
+  "Kuta",
+  "Sanur",
+  "Denpasar",
+  "Badung",
+  "Gianyar",
+  "Tabanan"
+];
+function slugifySeo(input) {
+  const cleaned = (input || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return cleaned || "kos-bali";
+}
+function buildPropertySeoPath(property) {
+  const slug = slugifySeo(property.name || "kos-bali");
+  return `/kos/${encodeURIComponent(property.id)}/${slug}`;
+}
+function buildDistrictSeoPath(district) {
+  return `/area/${slugifySeo(district)}`;
+}
+function resolveDistrictFromSlug(slug) {
+  if (!slug || typeof slug !== "string") return null;
+  const target = slugifySeo(slug);
+  const match = BALI_SEO_DISTRICTS.find((d) => slugifySeo(d) === target);
+  return match || null;
+}
+function escapeXml(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+function escapeHtml(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// backend/routes/seo.routes.ts
+function resolveCanonicalSiteUrl(req) {
+  const configured = process.env.SITE_URL?.trim();
+  if (configured && /^https?:\/\//i.test(configured)) {
+    return configured.replace(/\/+$/, "");
+  }
+  const rawProto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const protoStr = Array.isArray(rawProto) ? rawProto[0] : String(rawProto);
+  const proto = protoStr.split(",")[0].trim().toLowerCase() === "http" ? "http" : "https";
+  const rawHost = req.headers["x-forwarded-host"] || req.headers.host;
+  const hostStr = Array.isArray(rawHost) ? rawHost[0] : String(rawHost || "");
+  const cleanHost = hostStr.split(",")[0].trim();
+  if (cleanHost && /^[a-z0-9.-]+(?::\d+)?$/i.test(cleanHost)) {
+    const candidate = `${proto}://${cleanHost}`;
+    const hostname = cleanHost.split(":")[0].toLowerCase();
+    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
+    const isProd = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+    if (isOriginAllowed(candidate) && !(isProd && isLocalHost)) {
+      return candidate.replace(/\/+$/, "");
+    }
+  }
+  return DEFAULT_SITE_URL;
+}
+function formatIdrPlain(amount) {
+  return `Rp ${Math.max(0, Math.round(amount)).toLocaleString("id-ID")}`;
+}
+function resolvePublicImage(image) {
+  if (!image || image.trim() === "" || image.startsWith("data:")) {
+    return DEFAULT_PROPERTY_IMAGE;
+  }
+  return image.trim();
+}
+var handleRobotsTxt = (req, res) => {
+  const siteUrl = resolveCanonicalSiteUrl(req);
+  const body = [
+    "# https://www.robotstxt.org/robotstxt.html",
+    "User-agent: *",
+    "Allow: /",
+    "Allow: /kos/",
+    "Allow: /area/",
+    "Allow: /api/sitemap.xml",
+    "Allow: /api/seo/",
+    "",
+    "Disallow: /admin",
+    "Disallow: /landlord",
+    "Disallow: /tenant",
+    "Disallow: /api/",
+    "",
+    `Sitemap: ${siteUrl}/sitemap.xml`
+  ].join("\n");
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400");
+  res.status(200).send(`${body}
+`);
+};
+var handleSitemapXml = async (req, res) => {
+  const siteUrl = resolveCanonicalSiteUrl(req);
+  const cacheKey = `seo:sitemap:${siteUrl}`;
+  const cachedXml = apiCache.get(cacheKey);
+  if (cachedXml) {
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+    res.status(200).send(cachedXml);
+    return;
+  }
+  let properties = [];
+  try {
+    await ensureDbReady();
+    const [rows] = await pool.query(
+      "SELECT id, name, district FROM properties ORDER BY is_featured DESC, id DESC LIMIT 1000"
+    );
+    properties = rows;
+  } catch (err) {
+    console.warn("[SEO Sitemap] Fallback to static URLs because DB query failed:", err);
+  }
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const entries = [
+    { loc: `${siteUrl}/`, changefreq: "daily", priority: "1.0" }
+  ];
+  for (const district of BALI_SEO_DISTRICTS) {
+    entries.push({
+      loc: `${siteUrl}${buildDistrictSeoPath(district)}`,
+      changefreq: "daily",
+      priority: "0.9"
+    });
+  }
+  for (const prop of properties) {
+    entries.push({
+      loc: `${siteUrl}${buildPropertySeoPath({ id: prop.id, name: prop.name })}`,
+      changefreq: "weekly",
+      priority: "0.8"
+    });
+  }
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...entries.map(
+      (entry) => `  <url>
+    <loc>${escapeXml(entry.loc)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>`
+    ),
+    "</urlset>"
+  ].join("\n");
+  if (properties.length > 0) {
+    apiCache.set(cacheKey, xml, 300);
+  }
+  res.setHeader("Content-Type", "application/xml; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+  res.status(200).send(xml);
+};
+var handleSeoPrerender = async (req, res) => {
+  const siteUrl = resolveCanonicalSiteUrl(req);
+  const propertyId = typeof req.query.propertyId === "string" ? req.query.propertyId.trim() : "";
+  const districtSlug = typeof req.query.district === "string" ? req.query.district.trim() : "";
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=1800");
+  if (propertyId) {
+    try {
+      await ensureDbReady();
+      const [propRows] = await pool.query(
+        `SELECT id, name, district, address, price, rating, image, description, latitude, longitude, totalRooms, occupiedRooms
+         FROM properties WHERE id = ? LIMIT 1`,
+        [propertyId]
+      );
+      const prop = propRows[0];
+      if (!prop) {
+        res.status(404).send(`<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Properti Tidak Ditemukan | KOSMO Bali</title>
+  </head>
+  <body>
+    <h1>Properti Kos Tidak Ditemukan</h1>
+    <p><a href="${escapeHtml(siteUrl)}/">Kembali ke Beranda KOSMO Bali</a></p>
+  </body>
+</html>`);
+        return;
+      }
+      const [[facilityRows], [reviewRows]] = await Promise.all([
+        pool.query("SELECT facility FROM property_facilities WHERE propertyId = ?", [prop.id]),
+        pool.query(
+          "SELECT userName, rating, comment, date FROM reviews WHERE propertyId = ? ORDER BY id DESC LIMIT 10",
+          [prop.id]
+        )
+      ]);
+      const facilities = facilityRows.map((f) => f.facility);
+      const priceNum = Number(prop.price) || 0;
+      const totalRooms = Number(prop.totalRooms) || 0;
+      const occupiedRooms = Number(prop.occupiedRooms) || 0;
+      const availableRooms = Math.max(0, totalRooms - occupiedRooms);
+      const ratingNum = Number(prop.rating) || 0;
+      const canonicalUrl2 = `${siteUrl}${buildPropertySeoPath({ id: prop.id, name: prop.name })}`;
+      const districtPath = buildDistrictSeoPath(prop.district);
+      const image = resolvePublicImage(prop.image);
+      const title2 = `${prop.name} \u2014 Kos All-Inclusive di ${prop.district}, Bali | KOSMO`;
+      const rawDesc = prop.description && prop.description.trim().length > 20 ? prop.description.trim() : `Sewa ${prop.name} di ${prop.district}, Bali mulai ${formatIdrPlain(priceNum)}/bulan all-inclusive (listrik, air, WiFi cepat, keamanan) dengan kontrak digital resmi.`;
+      const description2 = rawDesc.slice(0, 158);
+      const jsonLd2 = {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "LodgingBusiness",
+            name: prop.name,
+            description: description2,
+            url: canonicalUrl2,
+            image,
+            address: {
+              "@type": "PostalAddress",
+              streetAddress: prop.address,
+              addressLocality: prop.district,
+              addressRegion: "Bali",
+              addressCountry: "ID"
+            },
+            ...prop.latitude && prop.longitude ? {
+              geo: {
+                "@type": "GeoCoordinates",
+                latitude: Number(prop.latitude),
+                longitude: Number(prop.longitude)
+              }
+            } : {},
+            amenityFeature: facilities.map((fac) => ({
+              "@type": "LocationFeatureSpecification",
+              name: fac,
+              value: true
+            })),
+            makesOffer: {
+              "@type": "Offer",
+              priceCurrency: "IDR",
+              price: priceNum,
+              availability: availableRooms > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+              url: canonicalUrl2
+            },
+            ...ratingNum > 0 ? {
+              aggregateRating: {
+                "@type": "AggregateRating",
+                ratingValue: ratingNum,
+                bestRating: 5,
+                reviewCount: Math.max(1, reviewRows.length)
+              }
+            } : {}
+          },
+          {
+            "@type": "BreadcrumbList",
+            itemListElement: [
+              { "@type": "ListItem", position: 1, name: "KOSMO Bali", item: `${siteUrl}/` },
+              {
+                "@type": "ListItem",
+                position: 2,
+                name: `Kos di ${prop.district}`,
+                item: `${siteUrl}${districtPath}`
+              },
+              { "@type": "ListItem", position: 3, name: prop.name, item: canonicalUrl2 }
+            ]
+          }
+        ]
+      };
+      const serializedLd2 = JSON.stringify(jsonLd2).replace(/</g, "\\u003c");
+      res.status(200).send(`<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(title2)}</title>
+    <meta name="description" content="${escapeHtml(description2)}" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="${escapeHtml(canonicalUrl2)}" />
+    <meta property="og:site_name" content="KOSMO Bali Co-Living" />
+    <meta property="og:title" content="${escapeHtml(title2)}" />
+    <meta property="og:description" content="${escapeHtml(description2)}" />
+    <meta property="og:type" content="place" />
+    <meta property="og:url" content="${escapeHtml(canonicalUrl2)}" />
+    <meta property="og:image" content="${escapeHtml(image)}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapeHtml(title2)}" />
+    <meta name="twitter:description" content="${escapeHtml(description2)}" />
+    <script type="application/ld+json">${serializedLd2}</script>
+  </head>
+  <body>
+    <main>
+      <nav aria-label="Breadcrumb">
+        <a href="${escapeHtml(siteUrl)}/">KOSMO Bali</a> &gt;
+        <a href="${escapeHtml(siteUrl)}${escapeHtml(districtPath)}">Kos di ${escapeHtml(prop.district)}</a> &gt;
+        <span>${escapeHtml(prop.name)}</span>
+      </nav>
+      <h1>${escapeHtml(prop.name)} \u2014 ${escapeHtml(prop.district)}, Bali</h1>
+      <p><strong>Harga All-Inclusive:</strong> ${escapeHtml(formatIdrPlain(priceNum))} / bulan (${availableRooms} kamar tersedia dari ${totalRooms})</p>
+      <p><strong>Alamat:</strong> ${escapeHtml(prop.address)}</p>
+      <p>${escapeHtml(rawDesc)}</p>
+      <h2>Fasilitas Termasuk</h2>
+      <ul>${facilities.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>
+      ${reviewRows.length > 0 ? `<h2>Ulasan Penghuni</h2><ul>${reviewRows.map(
+        (r) => `<li><strong>${escapeHtml(r.userName)}</strong> (${r.rating}/5): ${escapeHtml(r.comment)}</li>`
+      ).join("")}</ul>` : ""}
+    </main>
+  </body>
+</html>`);
+      return;
+    } catch (err) {
+      console.warn("[SEO Prerender] Failed property prerender, falling back to listing view:", err);
+    }
+  }
+  const matchedDistrict = resolveDistrictFromSlug(districtSlug);
+  let listRows = [];
+  try {
+    await ensureDbReady();
+    if (matchedDistrict) {
+      const [rows] = await pool.query(
+        `SELECT id, name, district, address, price, rating, image, description, totalRooms, occupiedRooms
+         FROM properties WHERE district = ? ORDER BY is_featured DESC, id DESC LIMIT 30`,
+        [matchedDistrict]
+      );
+      listRows = rows;
+    } else {
+      const [rows] = await pool.query(
+        `SELECT id, name, district, address, price, rating, image, description, totalRooms, occupiedRooms
+         FROM properties ORDER BY is_featured DESC, id DESC LIMIT 30`
+      );
+      listRows = rows;
+    }
+  } catch (err) {
+    console.warn("[SEO Prerender] DB list query fallback:", err);
+  }
+  const canonicalUrl = matchedDistrict ? `${siteUrl}${buildDistrictSeoPath(matchedDistrict)}` : `${siteUrl}/`;
+  const title = matchedDistrict ? `Sewa Kos & Co-Living di ${matchedDistrict}, Bali All-Inclusive | KOSMO` : "KOSMO Bali \u2014 Sewa Kos & Co-Living Bulanan All-Inclusive di Bali";
+  const description = matchedDistrict ? `Temukan kos eksklusif & coliving bulanan all-inclusive di ${matchedDistrict}, Bali. Harga transparan termasuk listrik, air PDAM, WiFi cepat, kontrak digital resmi UU ITE.` : "Platform sewa kos & co-living bulanan all-inclusive terbaik di Bali (Jimbaran, Canggu, Seminyak, Ubud, Denpasar) dengan kontrak digital resmi dan pembayaran instan.";
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        name: "KOSMO Bali",
+        url: `${siteUrl}/`,
+        potentialAction: {
+          "@type": "SearchAction",
+          target: `${siteUrl}/area/{search_term_string}`,
+          "query-input": "required name=search_term_string"
+        }
+      },
+      {
+        "@type": "CollectionPage",
+        name: title,
+        description,
+        url: canonicalUrl
+      },
+      {
+        "@type": "ItemList",
+        itemListElement: listRows.map((p, index) => ({
+          "@type": "ListItem",
+          position: index + 1,
+          url: `${siteUrl}${buildPropertySeoPath({ id: p.id, name: p.name })}`,
+          name: p.name
+        }))
+      }
+    ]
+  };
+  const serializedLd = JSON.stringify(jsonLd).replace(/</g, "\\u003c");
+  res.status(200).send(`<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(title)}</title>
+    <meta name="description" content="${escapeHtml(description)}" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="geo.region" content="ID-BA" />
+    <meta name="geo.placename" content="Bali, Indonesia" />
+    <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />
+    <meta property="og:site_name" content="KOSMO Bali Co-Living" />
+    <meta property="og:title" content="${escapeHtml(title)}" />
+    <meta property="og:description" content="${escapeHtml(description)}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="${escapeHtml(canonicalUrl)}" />
+    <meta property="og:image" content="${escapeHtml(DEFAULT_PROPERTY_IMAGE)}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapeHtml(title)}" />
+    <meta name="twitter:description" content="${escapeHtml(description)}" />
+    <script type="application/ld+json">${serializedLd}</script>
+  </head>
+  <body>
+    <main>
+      <h1>${escapeHtml(title)}</h1>
+      <p>${escapeHtml(description)}</p>
+      <section>
+        <h2>Daftar Kos & Co-Living Pilihan</h2>
+        <ul>
+          ${listRows.map(
+    (p) => `<li><a href="${escapeHtml(siteUrl)}${escapeHtml(buildPropertySeoPath({ id: p.id, name: p.name }))}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.district)} (${escapeHtml(formatIdrPlain(Number(p.price) || 0))}/bulan)</a></li>`
+  ).join("\n          ")}
+        </ul>
+      </section>
+      <section>
+        <h2>Area Populer di Bali</h2>
+        <ul>
+          ${BALI_SEO_DISTRICTS.map(
+    (d) => `<li><a href="${escapeHtml(siteUrl)}/area/${escapeHtml(slugifySeo(d))}">Kos di ${escapeHtml(d)}</a></li>`
+  ).join("\n          ")}
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>`);
+};
+function registerSeoRoutes(router2) {
+  router2.get("/robots.txt", handleRobotsTxt);
+  router2.get("/sitemap.xml", handleSitemapXml);
+  router2.get("/seo/prerender", handleSeoPrerender);
+}
+
 // backend/router.ts
 var router = express.Router();
 registerSystemRoutes(router);
@@ -8481,6 +8936,7 @@ registerContractRoutes(router);
 registerRentalRoutes(router);
 registerPaymentRoutes(router);
 registerTicketRoutes(router);
+registerSeoRoutes(router);
 var router_default = router;
 
 // backend/middleware/requestId.ts
@@ -8686,6 +9142,7 @@ var serverEnvSchema = z2.object({
   DB_USER: z2.string().optional().default("root"),
   DB_NAME: z2.string().optional().default("kosmo_db"),
   JWT_SECRET: z2.string().optional(),
+  SITE_URL: z2.string().optional(),
   MIDTRANS_SERVER_KEY: z2.string().optional(),
   MIDTRANS_CLIENT_KEY: z2.string().optional(),
   MIDTRANS_IS_PRODUCTION: z2.string().optional()
@@ -8747,43 +9204,6 @@ var app = express2();
 app.set("trust proxy", 1);
 var PORT = parseInt(process.env.PORT || "5000", 10);
 app.use(compression());
-function isOriginAllowed(origin) {
-  if (!origin) return true;
-  const envAllowed = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) : [];
-  const defaultAllowed = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://localhost:5000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5000",
-    "https://kosmobali.my.id",
-    "https://www.kosmobali.my.id",
-    "http://kosmobali.my.id",
-    "http://www.kosmobali.my.id",
-    "https://juragankost.net",
-    "https://www.juragankost.net",
-    "http://juragankost.net",
-    "http://www.juragankost.net"
-  ];
-  const allowedOrigins = [...defaultAllowed, ...envAllowed];
-  const normalizedOrigin = origin.toLowerCase().replace(/\/$/, "");
-  const isExactMatch = allowedOrigins.some((allowed) => {
-    const normalizedAllowed = allowed.toLowerCase().replace(/\/$/, "");
-    return normalizedAllowed === normalizedOrigin;
-  });
-  if (isExactMatch) return true;
-  try {
-    const parsed = new URL(origin);
-    const hostname = parsed.hostname.toLowerCase();
-    const isProjectVercelDomain = /^kosmo(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname) || /^juragankost(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname);
-    if (hostname === "kosmobali.my.id" || hostname.endsWith(".kosmobali.my.id") || hostname === "juragankost.net" || hostname.endsWith(".juragankost.net") || isProjectVercelDomain) {
-      return true;
-    }
-  } catch {
-  }
-  return false;
-}
 var corsOptions = {
   origin: (origin, callback) => {
     if (isOriginAllowed(origin)) {
@@ -8887,7 +9307,7 @@ if (process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL)) {
 }
 app.use("/uploads", express2.static(uploadsDir));
 async function dbReadinessMiddleware(req, res, next, dbReadyFn = ensureDbReady) {
-  if (req.path.startsWith("/api") && req.path !== "/api/health") {
+  if (req.path.startsWith("/api") && req.path !== "/api/health" && req.path !== "/api/robots.txt" && req.path !== "/api/sitemap.xml" && !req.path.startsWith("/api/seo/")) {
     try {
       await dbReadyFn();
     } catch (error) {
@@ -8901,6 +9321,8 @@ async function dbReadinessMiddleware(req, res, next, dbReadyFn = ensureDbReady) 
   next();
 }
 app.use((req, res, next) => dbReadinessMiddleware(req, res, next));
+app.get("/robots.txt", handleRobotsTxt);
+app.get("/sitemap.xml", handleSitemapXml);
 app.use("/api", router_default);
 app.use("/api", notFoundHandler);
 app.use(errorHandler);

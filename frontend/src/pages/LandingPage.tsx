@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Wifi, Tv, Wind, Shield, Droplet, Check, ShieldCheck, Heart,
-  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal, RotateCcw, Building
+  Zap, Sparkles, Car, Star, MapPin, Search, SlidersHorizontal, RotateCcw, Building, HelpCircle, ChevronDown
 } from 'lucide-react';
 import { Property, Review, User, FacilityFilterState, ContractSignPayload, SignedContractData } from '../types/index';
 import KosCard from '../components/KosCard';
@@ -11,8 +11,15 @@ import SearchFilterBar from '../components/SearchFilterBar';
 import BookingModal from '../components/BookingModal';
 import ThemeLanguageToggle from '../components/ThemeLanguageToggle';
 import KosmoLogo from '../components/KosmoLogo';
+import SeoHead, { buildLandingJsonLd, resolveFrontendSiteUrl } from '../components/SeoHead';
 import { useTranslation } from '../context/LanguageContext';
 import { loadSnapSdk } from '../utils/snapLoader';
+import {
+  BALI_SEO_DISTRICTS,
+  buildDistrictSeoPath,
+  buildPropertySeoPath,
+  resolveDistrictFromSlug
+} from '../../../shared/seo';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || '/api';
 
@@ -27,7 +34,14 @@ const RENTAL_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const { t } = useTranslation();
+  const { propertyId: routePropertyId, districtSlug: routeDistrictSlug } = useParams<{
+    propertyId?: string;
+    slug?: string;
+    districtSlug?: string;
+  }>();
+  const { t, language } = useTranslation();
+  const initialRouteDistrict = resolveDistrictFromSlug(routeDistrictSlug) || 'Semua';
+
   const [properties, setProperties] = useState<Property[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -44,7 +58,7 @@ export default function LandingPage() {
 
 
   // Filter States
-  const [district, setDistrict] = useState<string>('Semua');
+  const [district, setDistrict] = useState<string>(initialRouteDistrict);
   const [priceMin, setPriceMin] = useState<number>(0);
   const [priceMax, setPriceMax] = useState<number>(10000000);
   const [facilities, setFacilities] = useState<FacilityFilterState>({
@@ -114,11 +128,20 @@ export default function LandingPage() {
   };
 
   useEffect(() => {
-    fetchProperties();
+    const matchedDistrict = resolveDistrictFromSlug(routeDistrictSlug);
+    if (matchedDistrict) {
+      setDistrict(matchedDistrict);
+      fetchProperties(`?district=${encodeURIComponent(matchedDistrict)}`);
+    } else {
+      if (routeDistrictSlug) {
+        setDistrict('Semua');
+      }
+      fetchProperties();
+    }
     fetchReviews();
     // Track visitor
     fetch(`${API_BASE}/tracking/visit`, { method: 'POST' }).catch(() => { });
-  }, []);
+  }, [routeDistrictSlug, fetchProperties]);
 
   useEffect(() => {
     if (!showMap || !selectedProperty) return;
@@ -309,19 +332,34 @@ export default function LandingPage() {
     }
   }, [currentUser, t]);
 
-  // Auto-open property detail modal when arriving via shareable deep link (/?property=<id>)
+  // Auto-open property detail modal when arriving via /?property=<id> or /kos/:propertyId/:slug
   useEffect(() => {
-    if (typeof window === 'undefined' || properties.length === 0) return;
+    if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const propertyParam = params.get('property');
-    if (!propertyParam || deepLinkOpenedRef.current === propertyParam) return;
+    const targetId = (routePropertyId || params.get('property') || '').trim();
+    if (!targetId || deepLinkOpenedRef.current === targetId) return;
 
-    const matched = properties.find((p) => String(p.id) === propertyParam.trim());
+    const matched = properties.find((p) => String(p.id) === targetId);
     if (matched) {
-      deepLinkOpenedRef.current = propertyParam;
+      deepLinkOpenedRef.current = targetId;
       handleOpenDetail(matched);
+      return;
     }
-  }, [properties, handleOpenDetail]);
+
+    if (!loading && routePropertyId) {
+      deepLinkOpenedRef.current = targetId;
+      fetch(`${API_BASE}/properties/${encodeURIComponent(targetId)}`)
+        .then((res) => (res.ok ? (res.json() as Promise<Property>) : null))
+        .then((prop) => {
+          if (prop && prop.id) {
+            handleOpenDetail(prop);
+          }
+        })
+        .catch(() => {
+          // Non-fatal fallback
+        });
+    }
+  }, [properties, loading, routePropertyId, handleOpenDetail]);
 
   const handleSignContractSubmit = async (payload: ContractSignPayload): Promise<boolean> => {
     if (!currentUser) {
@@ -540,8 +578,73 @@ export default function LandingPage() {
     }
   };
 
+  const seoFaqs = useMemo(
+    () => [
+      { question: t('seo.faq1Q'), answer: t('seo.faq1A') },
+      { question: t('seo.faq2Q'), answer: t('seo.faq2A') },
+      { question: t('seo.faq3Q'), answer: t('seo.faq3A') },
+      { question: t('seo.faq4Q'), answer: t('seo.faq4A') }
+    ],
+    [t]
+  );
+
+  const seoTitle = useMemo(() => {
+    if (selectedProperty) {
+      return `${selectedProperty.name} — Kos All-Inclusive di ${selectedProperty.district}, Bali | KOSMO`;
+    }
+    if (district && district !== 'Semua') {
+      return `Sewa Kos & Co-Living di ${district}, Bali All-Inclusive | KOSMO`;
+    }
+    return language === 'en'
+      ? 'KOSMO Bali — All-Inclusive Monthly Kos & Co-Living in Bali'
+      : 'KOSMO Bali — Sewa Kos & Co-Living Bulanan All-Inclusive di Bali';
+  }, [selectedProperty, district, language]);
+
+  const seoDescription = useMemo(() => {
+    if (selectedProperty) {
+      const cleanDesc = selectedProperty.description?.trim();
+      if (cleanDesc && cleanDesc.length > 20) return cleanDesc.slice(0, 158);
+      return `Sewa ${selectedProperty.name} di ${selectedProperty.district}, Bali all-inclusive (listrik, air, WiFi cepat, keamanan 24 jam) dengan kontrak digital resmi.`;
+    }
+    if (district && district !== 'Semua') {
+      return `Temukan kos eksklusif & coliving bulanan all-inclusive di ${district}, Bali. Harga transparan termasuk listrik, air PDAM, WiFi cepat, dan kontrak digital UU ITE.`;
+    }
+    return 'Platform sewa kos & co-living bulanan all-inclusive terbaik di Bali (Jimbaran, Canggu, Seminyak, Ubud, Denpasar) dengan kontrak digital resmi dan pembayaran instan.';
+  }, [selectedProperty, district]);
+
+  const seoCanonicalPath = useMemo(() => {
+    if (selectedProperty) {
+      return buildPropertySeoPath(selectedProperty);
+    }
+    if (district && district !== 'Semua') {
+      return buildDistrictSeoPath(district);
+    }
+    return '/';
+  }, [selectedProperty, district]);
+
+  const seoJsonLd = useMemo(
+    () =>
+      buildLandingJsonLd({
+        siteUrl: resolveFrontendSiteUrl(),
+        properties,
+        selectedProperty,
+        activeDistrict: district,
+        faqs: seoFaqs
+      }),
+    [properties, selectedProperty, district, seoFaqs]
+  );
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 landing-page transition-colors duration-200">
+      <SeoHead
+        title={seoTitle}
+        description={seoDescription}
+        canonicalPath={seoCanonicalPath}
+        image={selectedProperty?.image}
+        type={selectedProperty ? 'place' : 'website'}
+        lang={language}
+        jsonLd={seoJsonLd}
+      />
       {/* Header Navigation */}
       <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 site-header transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -801,6 +904,97 @@ export default function LandingPage() {
           >
             {t('landing.partnerCta')} &rarr;
           </button>
+        </div>
+      </section>
+
+      {/* Hyperlocal Bali District Directory (SEO Internal Linking) */}
+      <section
+        id="bali-areas"
+        data-testid="seo-area-directory"
+        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-14"
+      >
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-8 shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-6">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold mb-2 border border-blue-100 dark:border-blue-900/50">
+                <MapPin size={13} />
+                <span>{t('seo.areaBadge')}</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">
+                {t('seo.areaTitle')}
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+                {t('seo.areaSubtitle')}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2.5">
+            {BALI_SEO_DISTRICTS.map((areaName) => {
+              const isSelectedArea = district.toLowerCase() === areaName.toLowerCase();
+              const areaPath = buildDistrictSeoPath(areaName);
+              return (
+                <a
+                  key={areaName}
+                  href={areaPath}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setDistrict(areaName);
+                    executeSearch(areaName);
+                    navigate(areaPath);
+                    document.getElementById('properties')?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold border transition-colors ${
+                    isSelectedArea
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200/80 dark:border-slate-700 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400'
+                  }`}
+                >
+                  <MapPin size={13} />
+                  <span>
+                    {t('seo.areaChipPrefix')} {areaName}
+                  </span>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* SEO FAQ Accordion Section */}
+      <section
+        id="faq"
+        data-testid="seo-faq-section"
+        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16"
+      >
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold mb-3 border border-slate-200/80 dark:border-slate-700">
+            <HelpCircle size={13} />
+            <span>{t('seo.faqBadge')}</span>
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight">
+            {t('seo.faqTitle')}
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {seoFaqs.map((faq, idx) => (
+            <details
+              key={idx}
+              className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm"
+            >
+              <summary className="flex items-center justify-between gap-3 cursor-pointer list-none font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100">
+                <span>{faq.question}</span>
+                <ChevronDown
+                  size={18}
+                  className="text-slate-400 shrink-0 transition-transform duration-200 group-open:rotate-180"
+                />
+              </summary>
+              <p className="mt-3 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                {faq.answer}
+              </p>
+            </details>
+          ))}
         </div>
       </section>
 
